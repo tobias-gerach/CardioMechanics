@@ -15,6 +15,11 @@ Coverage:
   `NewmarkBeta` solver and Rayleigh damping instead of the benchmark's `Static`
   solver, at `mpirun -np 4`; compares the final deformed geometry. Isolates the
   time integrator from the coupled EM chain. Marked `mpi slow`.
+- **CardioMechanics damping sweep** — the same ellipsoid with Rayleigh damping
+  and active tension removed and a step endocardial pressure, run under
+  `GeneralizedAlpha` at six values of `RhoInf` at `mpirun -np 4`; checks that
+  high-frequency content in the cavity volume trace falls monotonically as
+  `RhoInf` drops while the low-frequency response is unchanged. Marked `mpi slow`.
 - **BidomainMatrixGenerator** — assembles the EM01 mono-domain matrices (serial)
   and compares structural/numeric invariants (dims, nnz, Frobenius norm, sums)
   of the stiffness/mass matrices and material vector, read directly from the

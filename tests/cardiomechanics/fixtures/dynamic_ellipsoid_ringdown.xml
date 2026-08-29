@@ -1,0 +1,108 @@
+<settings>High-frequency ringdown fixture: benchmark 2015 Problem 3 geometry, step endocardial pressure, no damping, GeneralizedAlpha. RhoInf is swept by the test, which substitutes the value below.</settings>
+
+<General>
+    <LogFile>Results/dynamic.log</LogFile>
+</General>
+
+<Mesh>
+    <Type>T10</Type>
+    <Format>Tetgen</Format>
+    <Sorting>PCA</Sorting>
+
+    <Tetgen>
+        <Unit>1e-3</Unit>
+        <Nodes>./tetgen/ellipsoid.node</Nodes>
+        <Elements>./tetgen/ellipsoid.ele</Elements>
+        <Surfaces>./tetgen/ellipsoid.sur</Surfaces>
+        <Bases>./tetgen/ellipsoid.bases</Bases>
+        <DetermineNeighbors>true</DetermineNeighbors>
+        <EnforceOrthonormalBases>true</EnforceOrthonormalBases>
+    </Tetgen>
+
+    <Surfaces>
+        <!-- Endo -->
+        <Surface_1><Type>T3</Type></Surface_1>
+        <!-- Epi -->
+        <Surface_2><Type>T3</Type></Surface_2>
+        <!-- Base -->
+        <Surface_3><Type>T3</Type></Surface_3>
+    </Surfaces>
+</Mesh>
+
+<Materials>
+    <!-- No Damping block: the only dissipation here is numerical. -->
+    <Mat_30>
+        <IgnoreCorruptElements>false</IgnoreCorruptElements>
+        <Type>Guccione</Type>
+        <Density>1082</Density>
+        <Guccione>
+            <C>2000.0</C>
+            <bf>8.</bf>
+            <bt>2.</bt>
+            <bfs>4.</bfs>
+            <K>1e6</K>
+        </Guccione>
+        <!-- No TensionModel: passive ringdown, no superimposed contraction. -->
+    </Mat_30>
+</Materials>
+
+<Export>
+    <Format>VTK</Format>
+    <Prefix>Results/dynamic</Prefix>
+    <!-- The measured signal is the cavity volume, which ApplyPressureFromFunction
+         writes every time step; nothing reads the VTUs. -->
+    <TimeStep>0.02</TimeStep>
+</Export>
+
+<Solver>
+    <NonZeros>2000</NonZeros>
+    <DomainDecomposition>false</DomainDecomposition>
+    <Precision>1e-8</Precision>
+    <Verbose>true</Verbose>
+    <LU>true</LU>
+
+    <Type>GeneralizedAlpha</Type>
+    <GeneralizedAlpha>
+        <RhoInf>1.0</RhoInf>
+    </GeneralizedAlpha>
+
+    <Formulation>TotalLagrangian</Formulation>
+
+    <StartTime>0</StartTime>
+    <StopTime>0.02</StopTime>
+    <!-- MinTimeStep pinned to TimeStep: a sweep only means something if every member
+         integrates the same problem with the same step, so a Newton failure has to
+         abort the run rather than silently sub-step. -->
+    <TimeStep>1e-4</TimeStep>
+    <MinTimeStep>1e-4</MinTimeStep>
+
+    <Plugins>
+        <ApplyPressureFromFunction>true</ApplyPressureFromFunction>
+    </Plugins>
+</Solver>
+
+<Plugins>
+    <ApplyPressureFromFunction>
+        <ExportFile>Results/Pressure.dat</ExportFile>
+        <Groups>
+            <Step>
+                <!-- 200 Pa switched on at t = 0 and held: a step load excites the
+                     whole spectrum at once, the unresolved modes included. -->
+                <Surfaces>1</Surfaces>
+                <Intervals>
+                    <Interval_1>
+                        <!-- Pressure is Offset + Amplitude * f(t), so Amplitude = 0
+                             holds it exactly constant, independent of the time at which
+                             the solver samples it. See test_damping.py for why that
+                             matters to a RhoInf sweep. -->
+                        <Type>Linear</Type>
+                        <StartTime>0.0</StartTime>
+                        <StopTime>0.02</StopTime>
+                        <Offset>-200</Offset>
+                        <Amplitude>0</Amplitude>
+                    </Interval_1>
+                </Intervals>
+            </Step>
+        </Groups>
+    </ApplyPressureFromFunction>
+</Plugins>
