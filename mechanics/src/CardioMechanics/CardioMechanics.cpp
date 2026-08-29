@@ -19,6 +19,7 @@
 #include "CardioMechanics.h"
 #include "CBSolver.h"
 #include "CBSolverNewmarkBeta.h"
+#include "CBSolverGeneralizedAlpha.h"
 #include "CBSolverEquilibrium.h"
 #include "CBSolverActiveStressEstimator.h"
 
@@ -178,6 +179,8 @@ void CardioMechanics::InitSolver()
         solver_ = new CBSolverEquilibrium();
     else if(solverType == "NewmarkBeta")
         solver_ = new CBSolverNewmarkBeta();
+    else if(solverType == "GeneralizedAlpha")
+        solver_ = new CBSolverGeneralizedAlpha();
     else if(solverType == "ActiveStressEstimator")
         solver_ = new CBSolverActiveStressEstimator();
     

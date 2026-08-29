@@ -52,6 +52,7 @@ set(SRCS
     src/CBSolver/CBTiming.cpp
     src/CBSolver/CBSolverEquilibrium.cpp
     src/CBSolver/CBSolverNewmarkBeta.cpp
+    src/CBSolver/CBSolverGeneralizedAlpha.cpp
     src/CBSolver/CBSolverActiveStressEstimator.cpp
     src/CBSolverPlugins/CBApplyPressure.cpp
     src/CBSolverPlugins/CBApplyPressureFromFunction.cpp

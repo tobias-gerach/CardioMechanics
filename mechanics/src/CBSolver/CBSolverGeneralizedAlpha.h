@@ -1,0 +1,116 @@
+/*
+ * File: CBSolverGeneralizedAlpha.h
+ *
+ * Institute of Biomedical Engineering, 
+ * Karlsruhe Institute of Technology (KIT)
+ * https://www.ibt.kit.edu
+ * 
+ * Repository: https://github.com/KIT-IBT/CardioMechanics
+ *
+ * License: GPL-3.0 (See accompanying file LICENSE or visit https://www.gnu.org/licenses/gpl-3.0.html)
+ *
+ */
+
+
+#ifndef CB_SOLVER_PETSC_GENERALIZED_ALPHA
+#define CB_SOLVER_PETSC_GENERALIZED_ALPHA
+
+#include "CBSolver.h"
+#include "CBStatus.h"
+#include <cstdio>
+
+
+/// Chung-Hulbert generalized-alpha time integration. The whole residual is evaluated at the
+/// intermediate time level t_n+1-alphaF and the intermediate configuration d_n+1-alphaF, while
+/// the inertia term is evaluated at t_n+1-alphaM. The four coefficients are derived from the
+/// spectral radius at infinite frequency so that second-order accuracy and unconditional
+/// stability cannot be broken by user input.
+class CBSolverGeneralizedAlpha : public CBSolver {
+public:
+    CBSolverGeneralizedAlpha() : CBSolver(), isInitDampingParametersDone_(false), isInitMassMatrixDone_(false) {}
+    
+    ~CBSolverGeneralizedAlpha() {}
+    
+    TFloat GetKineticEnergy() override {return kineticEnergy_;}
+    
+    TFloat GetDampingEnergyDissipation() override {return dampingEnergyDissipation_;}
+    
+    void Init(ParameterMap *_parameter, CBModel *_model) override;
+    void DeInit() override;
+    
+    std::string GetType() override {return "Generalized Alpha Solver";  }
+    
+    void SetZeroVelocityAndAcceleration() override;
+    void SetZeroDisplacement() override;
+    friend PetscErrorCode CBSolverGeneralizedAlphaSNESHelperFunctionForces(SNES snes, Vec x, Vec f, void *solver);
+    friend PetscErrorCode CBSolverGeneralizedAlphaSNESHelperFunctionForcesJacobian(SNES snes, Vec x, Mat jacobian,
+                                                                                   Mat preconditionerMatrix,
+                                                                                   void *_solver);
+    void SetVelocity(std::vector<Vector3<TFloat>> vel) override;
+    void SetAcceleration(std::vector<Vector3<TFloat>> acc) override;
+    void ExportSNESMatrix(TFloat time) override;
+    
+protected:
+    CBStatus SolverStep(PetscScalar time, bool forceJacobianAndDampingRecalculation = false) override;
+    CBStatus CalcNodalForcesJacobian(Vec displacement, Mat jacobian) override;
+    CBStatus CalcDampingMatrix();
+    
+    bool        useConsistentMassMatrix_;
+    Vec         velocity_;
+    Vec         acceleration_;
+    Vec         displacement_;
+    Vec         absDisplacement_;
+    Vec         residuum_;
+    Vec         tmpDisplacement_;
+    Vec         tmpVelocity_;
+    Vec         tmpVector_;
+    Vec         initialGuess_;
+    PetscScalar kineticEnergy_;
+    PetscScalar dampingEnergyDissipation_ = 0;
+    PetscScalar alphaM_;
+    PetscScalar alphaF_;
+    PetscScalar beta_;
+    PetscScalar gamma_;
+    PetscScalar globalRayleighAlpha_;
+    PetscScalar globalRayleighBeta_;
+    
+private:
+    using CBSolver::CalcNodalForces;
+    CBStatus CalcNodalForces(Vec displacement, Vec forces);
+    void InitVectors() override;
+    void InitMatrices() override;
+    void InitMassMatrix();
+    void InitMassMatrixLumped();
+    void InitMassMatrixConsistent();
+    void InitParameters() override;
+    void InitGeneralizedAlphaParameter();
+    void InitDampingMatrix();
+    void InitDampingParameter();
+    void InitPETScSolver() override;
+    void Export(PetscScalar time) override;
+    
+    /// Time level t_n+1-alphaF at which the residual is evaluated. Clamped to the start time so
+    /// that the preparation phase never asks the load history for a time before it is defined.
+    PetscScalar IntermediateTime(PetscScalar time);
+    
+    typedef CBSolver   Base;
+    
+    SNES        snes_;
+    int         snesStep_ = 0;
+    KSP         ksp_;
+    PC          pc_;
+    
+    Mat         massMatrix_;
+    Mat         dampingMatrix_;
+    
+    PetscScalar prevTime_ = INFINITY;
+    
+    bool        isInitDampingParametersDone_;
+    bool        isInitMassMatrixDone_;
+    bool        updateJacobian_ = true;
+    std::string solverType_ = "mumps";
+    
+    PetscInt    snesIts_ = 0;
+}; // class CBSolverGeneralizedAlpha
+
+#endif // ifndef CB_SOLVER_PETSC_GENERALIZED_ALPHA

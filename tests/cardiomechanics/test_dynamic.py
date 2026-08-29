@@ -2,7 +2,7 @@
 
 Benchmark 2015 Problem 3 — a T10 truncated-ellipsoid ventricle inflated by a
 linear endocardial pressure ramp while contracting under a linear active tension
-ramp — integrated with NewmarkBeta instead of the benchmark's Static solver, with
+ramp — integrated with a dynamic solver instead of the benchmark's Static solver, with
 Rayleigh damping added. There is no electrophysiology, no cell model and no
 tension model in the loop, so a deviation here points at the mechanics time
 integration itself rather than at anything upstream of it.
@@ -11,6 +11,12 @@ The settings file is our own rather than the benchmark's Problem3.xml, so that
 the published-benchmark fixture and this dynamic one can move independently.
 Everything but the solver, the damping and the output paths is Problem 3 as
 published.
+
+The Newmark-beta fixture runs at Beta=0.25 / Gamma=0.5, the trapezoidal rule.
+That is the scheme the Chung-Hulbert family collapses onto at a spectral radius
+of one, which is what makes the generalized-alpha equivalence check below a
+comparison between two integrators of the same problem rather than between two
+different amounts of numerical damping.
 """
 import shutil
 from pathlib import Path
@@ -23,39 +29,87 @@ from helpers.run import run_binary
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SRC = REPO_ROOT / "examples" / "benchmark2015"
-SETTINGS = Path(__file__).parent / "fixtures" / "dynamic_ellipsoid.xml"
+FIXTURES = Path(__file__).parent / "fixtures"
+SETTINGS = FIXTURES / "dynamic_ellipsoid.xml"
+GENALPHA_SETTINGS = FIXTURES / "dynamic_ellipsoid_genalpha.xml"
+LUMPED_SETTINGS = FIXTURES / "dynamic_ellipsoid_lumped.xml"
+GENALPHA_LUMPED_SETTINGS = FIXTURES / "dynamic_ellipsoid_genalpha_lumped.xml"
 GOLDEN_DIR = Path(__file__).parent / "golden"
 
 NP = 4                     # CardioMechanics is tested only in parallel, as in test_benchmark
 LAST = 20                  # dynamic.<LAST>.vtu at StopTime=0.2, export dt 1e-2
 DEFORM_RTOL, DEFORM_ATOL = 1e-4, 1e-8      # coordinates in m
 
+# Trapezoidal Newmark and generalized-alpha at RhoInf=1 are distinct second-order
+# schemes, so they agree only to their own truncation error, not to round-off.
+# 1e-6 m is 0.016% of the 6.4 mm peak displacement this fixture reaches.
+EQUIV_RTOL, EQUIV_ATOL = 1e-4, 1e-6
+
 pytestmark = [pytest.mark.mpi, pytest.mark.slow]
+
+
+def _stage(wd, settings):
+    """Copy mesh and settings into wd.
+
+    The fixtures use paths relative to the working dir, so the mesh and the
+    ./Results output folder have to live next to the settings file.
+    """
+    (wd / "tetgen").mkdir()
+    for f in SRC.glob("tetgen/ellipsoid.*"):
+        shutil.copy(f, wd / "tetgen")
+    shutil.copy(settings, wd)
+    (wd / "Results").mkdir()
+    return wd
+
+
+def _run(binary, cm_env, wd, settings, **kwargs):
+    return run_binary(binary("CardioMechanics"), ["-settings", settings.name],
+                      cwd=wd, env=cm_env, **kwargs)
+
+
+def _require_mpi():
+    pytest.importorskip("meshio")
+    if shutil.which("mpirun") is None:
+        pytest.skip("mpirun not found")
 
 
 @pytest.fixture(scope="module")
 def dynamic_vtu_dir(binary, cm_env, tmp_path_factory):
-    """Stage the fixture into an isolated tree and run it once at np=NP.
-
-    dynamic_ellipsoid.xml uses paths relative to the working dir, so the mesh
-    and the ./Results output folder have to live next to it.
-    """
-    pytest.importorskip("meshio")
-    if shutil.which("mpirun") is None:
-        pytest.skip("mpirun not found")
-    wd = tmp_path_factory.mktemp("dynamic")
-    (wd / "tetgen").mkdir()
-    for f in SRC.glob("tetgen/ellipsoid.*"):
-        shutil.copy(f, wd / "tetgen")
-    shutil.copy(SETTINGS, wd)
-    (wd / "Results").mkdir()
-    run_binary(binary("CardioMechanics"), ["-settings", SETTINGS.name],
-               cwd=wd, env=cm_env, np=NP, timeout=1800)
+    """Stage the Newmark-beta fixture into an isolated tree and run it once at np=NP."""
+    _require_mpi()
+    wd = _stage(tmp_path_factory.mktemp("dynamic"), SETTINGS)
+    _run(binary, cm_env, wd, SETTINGS, np=NP, timeout=1800)
     return wd / "Results" / "dynamic_vtu"
 
 
-def test_dynamic_deformation(dynamic_vtu_dir, update_golden):
-    pid, pts = read_vtu_points(dynamic_vtu_dir / f"dynamic.{LAST}.vtu")
+@pytest.fixture(scope="module")
+def genalpha_vtu_dir(binary, cm_env, tmp_path_factory):
+    """The same fixture under generalized-alpha at RhoInf=1."""
+    _require_mpi()
+    wd = _stage(tmp_path_factory.mktemp("dynamic_genalpha"), GENALPHA_SETTINGS)
+    _run(binary, cm_env, wd, GENALPHA_SETTINGS, np=NP, timeout=1800)
+    return wd / "Results" / "dynamic_vtu"
+
+
+@pytest.fixture(scope="module")
+def lumped_vtu_dirs(binary, cm_env, tmp_path_factory):
+    """Both integrators on the lumped mass matrix, which no golden covers.
+
+    A lumped run deforms differently from a consistent one, so there is nothing
+    to compare either of these against except each other.
+    """
+    _require_mpi()
+    out = []
+    for name, settings in (("dynamic_lumped", LUMPED_SETTINGS),
+                           ("dynamic_genalpha_lumped", GENALPHA_LUMPED_SETTINGS)):
+        wd = _stage(tmp_path_factory.mktemp(name), settings)
+        _run(binary, cm_env, wd, settings, np=NP, timeout=1800)
+        out.append(wd / "Results" / "dynamic_vtu")
+    return out
+
+
+def _assert_matches_golden(vtu_dir, rtol, atol, update_golden=False):
+    pid, pts = read_vtu_points(vtu_dir / f"dynamic.{LAST}.vtu")
     golden_path = GOLDEN_DIR / "dynamic_deformation.npz"
     if update_golden:
         GOLDEN_DIR.mkdir(exist_ok=True)
@@ -64,10 +118,56 @@ def test_dynamic_deformation(dynamic_vtu_dir, update_golden):
     assert golden_path.is_file(), f"missing golden {golden_path}; run with --update-golden"
     g = np.load(golden_path)
     assert np.array_equal(pid, g["pointid"]), "point ordering / mesh identity changed"
-    if not np.allclose(pts, g["points"], rtol=DEFORM_RTOL, atol=DEFORM_ATOL):
+    if not np.allclose(pts, g["points"], rtol=rtol, atol=atol):
         d = np.linalg.norm(pts - g["points"], axis=1)
         i = int(np.argmax(d))
         raise AssertionError(
-            f"deformed coordinates differ beyond rtol={DEFORM_RTOL} atol={DEFORM_ATOL}: "
+            f"deformed coordinates differ beyond rtol={rtol} atol={atol}: "
             f"node PointID={int(pid[i])} actual={pts[i]} golden={g['points'][i]} "
+            f"|delta|={d[i]:.3e} m")
+
+
+def test_dynamic_deformation(dynamic_vtu_dir, update_golden):
+    _assert_matches_golden(dynamic_vtu_dir, DEFORM_RTOL, DEFORM_ATOL, update_golden)
+
+
+def test_generalized_alpha_reproduces_newmark_at_rhoinf_one(genalpha_vtu_dir):
+    """RhoInf=1 is the non-dissipative end of the Chung-Hulbert family.
+
+    The golden is never regenerated from here: it is the Newmark-beta reference
+    this run is judged against, so writing to it would erase the comparison.
+    """
+    _assert_matches_golden(genalpha_vtu_dir, EQUIV_RTOL, EQUIV_ATOL)
+
+
+@pytest.mark.parametrize("settings_name, expected", [
+    ("dynamic_ellipsoid_genalpha_no_rhoinf.xml", "Solver.GeneralizedAlpha.RhoInf"),
+    ("dynamic_ellipsoid_genalpha_bad_rhoinf.xml", "outside the valid range [0, 1]"),
+])
+def test_generalized_alpha_rejects_bad_rhoinf(binary, cm_env, tmp_path, settings_name, expected):
+    """A missing or out-of-range spectral radius has to abort initialisation.
+
+    Run serially, since these never reach the solver and the parallel path would
+    add nothing but startup cost.
+    """
+    settings = FIXTURES / settings_name
+    wd = _stage(tmp_path, settings)
+    proc = _run(binary, cm_env, wd, settings, timeout=300, check=False)
+    assert proc.returncode != 0, f"expected a non-zero exit\n{proc.stdout[-2000:]}"
+    assert expected in proc.stdout + proc.stderr, (
+        f"error message did not mention {expected!r}\n{(proc.stdout + proc.stderr)[-2000:]}")
+
+
+def test_generalized_alpha_matches_newmark_with_lumped_mass(lumped_vtu_dirs):
+    """The lumped mass path has to carry the RhoInf=1 equivalence too."""
+    newmark_dir, genalpha_dir = lumped_vtu_dirs
+    npid, npts = read_vtu_points(newmark_dir / f"dynamic.{LAST}.vtu")
+    gpid, gpts = read_vtu_points(genalpha_dir / f"dynamic.{LAST}.vtu")
+    assert np.array_equal(npid, gpid), "point ordering / mesh identity differs between runs"
+    if not np.allclose(gpts, npts, rtol=EQUIV_RTOL, atol=EQUIV_ATOL):
+        d = np.linalg.norm(gpts - npts, axis=1)
+        i = int(np.argmax(d))
+        raise AssertionError(
+            f"lumped-mass coordinates differ beyond rtol={EQUIV_RTOL} atol={EQUIV_ATOL}: "
+            f"node PointID={int(gpid[i])} generalized-alpha={gpts[i]} newmark={npts[i]} "
             f"|delta|={d[i]:.3e} m")

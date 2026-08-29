@@ -1,4 +1,4 @@
-<settings>Mechanics-only dynamic fixture: benchmark 2015 Problem 3 under NewmarkBeta</settings>
+<settings>Mechanics-only dynamic fixture under NewmarkBeta with a lumped mass matrix</settings>
 
 <General>
     <LogFile>Results/dynamic.log</LogFile>
@@ -79,6 +79,7 @@
              these coefficients at RhoInf=1, which is what test_dynamic.py compares against. -->
         <Beta>0.25</Beta>
         <Gamma>0.5</Gamma>
+        <ConsistentMassMatrix>false</ConsistentMassMatrix>
     </NewmarkBeta>
 
     <Formulation>TotalLagrangian</Formulation>

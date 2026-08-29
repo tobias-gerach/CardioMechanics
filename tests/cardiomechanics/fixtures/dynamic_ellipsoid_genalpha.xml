@@ -1,4 +1,4 @@
-<settings>Mechanics-only dynamic fixture: benchmark 2015 Problem 3 under NewmarkBeta</settings>
+<settings>Mechanics-only dynamic fixture: benchmark 2015 Problem 3 under GeneralizedAlpha at RhoInf=1</settings>
 
 <General>
     <LogFile>Results/dynamic.log</LogFile>
@@ -73,13 +73,10 @@
     <Verbose>true</Verbose>
     <LU>true</LU>
 
-    <Type>NewmarkBeta</Type>
-    <NewmarkBeta>
-        <!-- Trapezoidal rule. Do not retune: the Chung-Hulbert family collapses onto exactly
-             these coefficients at RhoInf=1, which is what test_dynamic.py compares against. -->
-        <Beta>0.25</Beta>
-        <Gamma>0.5</Gamma>
-    </NewmarkBeta>
+    <Type>GeneralizedAlpha</Type>
+    <GeneralizedAlpha>
+        <RhoInf>1.0</RhoInf>
+    </GeneralizedAlpha>
 
     <Formulation>TotalLagrangian</Formulation>
 

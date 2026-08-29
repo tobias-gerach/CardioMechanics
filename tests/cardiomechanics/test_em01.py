@@ -79,3 +79,38 @@ def test_em01_coupled_sensors(em01_em_out, update_golden):
         pytest.skip(f"updated golden {golden_path.name}")
     assert golden_path.is_file(), f"missing golden {golden_path}; run with --update-golden"
     compare_columns(actual, read_golden(golden_path), rtol=SENSOR_RTOL, atol=SENSOR_ATOL)
+
+
+def test_em01_runs_under_generalized_alpha(em01_root, em01_sim_length, cm_env, binary):
+    """Smoke test that the coupled path survives the new integrator.
+
+    Generalized-alpha is a different scheme from the NewmarkBeta settings the
+    example ships with, so the results legitimately differ and there is nothing
+    to compare against. All this asserts is that electrophysiology coupling,
+    the cell models, the stimuli and the sensors still run end to end. Output
+    goes to its own folder so the golden run above is left alone.
+    """
+    settings = em01_root / "settings"
+    xml = (settings / "M_1mm.xml").read_text()
+    for old, new in (("<StopTime>1.0</StopTime>", f"<StopTime>{em01_sim_length}</StopTime>"),
+                     ("../Results/", "../ResultsGenAlpha/")):
+        assert old in xml, f"M_1mm.xml no longer contains {old!r}"
+        xml = xml.replace(old, new)
+    solver = xml[xml.index("<Type>NewmarkBeta</Type>"):xml.index("</NewmarkBeta>") + len("</NewmarkBeta>")]
+    xml = xml.replace(solver, "<Type>GeneralizedAlpha</Type>\n"
+                              "    <GeneralizedAlpha>\n"
+                              "        <RhoInf>0.8</RhoInf>\n"
+                              "        <ConsistentMassMatrix>true</ConsistentMassMatrix>\n"
+                              "    </GeneralizedAlpha>")
+    (settings / "M_short_genalpha.xml").write_text(xml)
+    (em01_root / "ResultsGenAlpha").mkdir(exist_ok=True)
+    run_binary(
+        binary("CardioMechanics"),
+        ["-settings", "M_short_genalpha.xml"],
+        cwd=settings,
+        env=cm_env,
+        np=NP,
+        timeout=1200,
+    )
+    vtu = em01_root / "ResultsGenAlpha" / "Cube_vtu"
+    assert list(vtu.glob("Cube.*.vtu")), f"no deformation output written to {vtu}"
