@@ -78,8 +78,9 @@ CBStatus CBConstitutiveModelGuccione::CalcEnergy(const Matrix3<TFloat> &deformat
     
     /// multiplicative decomposition of F into volume-changing (vol) and volume-preserving (iso) parts.
     TFloat J              = deformationTensor.Det();
+    TFloat Jm             = pow(J, -2.0 / 3.0);
     Matrix3<TFloat> C     = deformationTensor.GetTranspose() * deformationTensor;
-    Matrix3<TFloat> E     = 0.5 * (C - identity_);
+    Matrix3<TFloat> E     = 0.5 * (Jm * C - identity_);
     TFloat *e             = E.GetArray();
     
     /// strain energy function W
@@ -109,10 +110,12 @@ CBStatus CBConstitutiveModelGuccione::CalcPK2Stress(const Matrix3<TFloat> &defor
     
     /// multiplicative decomposition of F into volume-changing (vol) and volume-preserving (iso) parts.
     TFloat J              = deformationTensor.Det();
+    TFloat Jm             = pow(J, -2.0 / 3.0);
     Matrix3<TFloat> C     = deformationTensor.GetTranspose() * deformationTensor;
-    Matrix3<TFloat> E     = 0.5 * (C - identity_);
+    Matrix3<TFloat> E     = 0.5 * (Jm * C - identity_);
     TFloat *e             = E.GetArray();
-    TFloat *p             = pk2Stress.GetArray();
+    Matrix3<TFloat> pk2Iso;
+    TFloat *p             = pk2Iso.GetArray();
     Matrix3<TFloat> C_inv = C.GetInverse();
     
     /// strain energy function W
@@ -131,6 +134,11 @@ CBStatus CBConstitutiveModelGuccione::CalcPK2Stress(const Matrix3<TFloat> &defor
     p[7] = C_ * bt_ * e[7] * expQ;
     p[8] = C_ * bt_ * e[8] * expQ;
     
+    /// pk2Iso is conjugate to the volume-preserving strain, so it is mapped back to the full
+    /// configuration through the deviatoric projection DEV(S) = S - 1/3 (S:C) C^-1. Without it
+    /// the isochoric term would still do volumetric work and compete with the vol term below.
+    pk2Stress = Jm * (pk2Iso - (1.0 / 3.0) * (pk2Iso * C).Trace() * C_inv);
+
     /// vol
     pk2Stress += k_ * (J - 1) * J * C_inv;
     

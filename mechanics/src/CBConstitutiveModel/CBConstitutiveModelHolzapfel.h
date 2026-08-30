@@ -33,6 +33,7 @@ public:
     CBStatus CalcEnergy(const Matrix3<TFloat> &deformationTensor, TFloat &energy);
     CBStatus CalcPK2Stress(const Matrix3<TFloat> &deformationTensor, Matrix3<TFloat> &pk2Stress);
     TFloat Heavyside(TFloat I4);
+    TFloat HeavysideDerivative(TFloat I4);
     
 protected:
     typedef CBConstitutiveModel Base;

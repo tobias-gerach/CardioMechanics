@@ -136,8 +136,16 @@ CBStatus CBConstitutiveModelHolzapfel::CalcPK2Stress(const Matrix3<TFloat> &defo
     Matrix3<TFloat> pk2Vol      = (kappa_ / 2.0) * (J - 1.0/J) * J * rightCauchyGreenTensor_inv;
     Matrix3<TFloat> pk2Iso      = Jm * a_ * exp(b_ * (Jm * I1 - 3.0)) *
     (identity_ - 1.0/3.0 * I1 * rightCauchyGreenTensor_inv);
-    Matrix3<TFloat> pk2Aniso_f  = 2.0 * af_ * Heavyside(I4f) * (I4f - 1.0) * exp(bf_ * (I4f - 1.0) * (I4f - 1.0)) * fxf_;
-    Matrix3<TFloat> pk2Aniso_s  = 2.0 * as_ * Heavyside(I4s) * (I4s - 1.0) * exp(bs_ * (I4s - 1.0) * (I4s - 1.0)) * sxs_;
+    /// The fibre and sheet energies carry the Heavyside switch inside the derivative, so the
+    /// product rule contributes a second term through dH/dI4. Dropping it leaves stress and
+    /// energy inconsistent around I4 = 1, where the switch is steepest.
+    TFloat expf = exp(bf_ * (I4f - 1.0) * (I4f - 1.0));
+    TFloat exps = exp(bs_ * (I4s - 1.0) * (I4s - 1.0));
+    TFloat gf   = Heavyside(I4f) * (I4f - 1.0) * expf + 0.5 * HeavysideDerivative(I4f) / bf_ * (expf - 1.0);
+    TFloat gs   = Heavyside(I4s) * (I4s - 1.0) * exps + 0.5 * HeavysideDerivative(I4s) / bs_ * (exps - 1.0);
+
+    Matrix3<TFloat> pk2Aniso_f  = 2.0 * af_ * gf * fxf_;
+    Matrix3<TFloat> pk2Aniso_s  = 2.0 * as_ * gs * sxs_;
     Matrix3<TFloat> pk2Aniso_fs = afs_ * I8fs * exp(bfs_ * I8fs * I8fs) * (fxs_ + sxf_);
     
     pk2Stress = pk2Vol + pk2Iso + pk2Aniso_f + pk2Aniso_s + pk2Aniso_fs;
@@ -150,5 +158,16 @@ TFloat CBConstitutiveModelHolzapfel::Heavyside(TFloat I4) {
         return (I4 >= 1.0) ? 1.0 : 0.0;
     } else {
         return 1.0 / (1.0 + exp(-k_ * (I4 - 1.0)));
+    }
+}
+
+/// For k_ = 0 the switch is a true step, whose derivative is a delta distribution that
+/// contributes nothing to the stress away from I4 = 1.
+TFloat CBConstitutiveModelHolzapfel::HeavysideDerivative(TFloat I4) {
+    if (k_ == 0) {
+        return 0.0;
+    } else {
+        TFloat h = Heavyside(I4);
+        return k_ * h * (1.0 - h);
     }
 }
