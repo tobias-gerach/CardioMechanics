@@ -45,7 +45,7 @@ CBStatus CBConstitutiveModelNeoHooke::CalcEnergy(const Matrix3<TFloat> &deformat
     TFloat J              = deformationTensor.Det();
     Matrix3<TFloat> C     = deformationTensor.GetTranspose() * deformationTensor;
     TFloat I3_C           = C.Invariant3();
-    Matrix3<TFloat> C_dist = pow(I3_C, -1/3) * C;
+    Matrix3<TFloat> C_dist = pow(I3_C, -1.0 / 3.0) * C;
     
     /// distortional component
     TFloat dist = (a_/2) * (C_dist.Invariant1() - 3);
@@ -77,7 +77,7 @@ CBStatus CBConstitutiveModelNeoHooke::CalcPK2Stress(const Matrix3<TFloat> &defor
     TFloat I3_C           = C.Invariant3();
     TFloat p              = k_*(J - 1);
     
-    pk2Stress = a_ * pow(I3_C, -1/3) * (identity_ - (I1_C * C_inv)/3) + p * J * C_inv;
+    pk2Stress = a_ * pow(I3_C, -1.0 / 3.0) * (identity_ - (I1_C * C_inv)/3) + p * J * C_inv;
     
     return CBStatus::SUCCESS;
 }  // CBConstitutiveModelNeoHooke::CalcPK2Stress

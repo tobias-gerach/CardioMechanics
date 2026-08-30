@@ -86,7 +86,7 @@ void CBConstitutiveModelHolzapfel::Init(ParameterMap *parameters, TInt materialI
 
 CBStatus CBConstitutiveModelHolzapfel::CalcEnergy(const Matrix3<TFloat> &deformationTensor, TFloat &energy) {
     TFloat  J = deformationTensor.Det();
-    TFloat Jm = pow(J, -2/3);
+    TFloat Jm = pow(J, -2.0 / 3.0);
     
     if (!Base::ignoreCorruptElements_  && (J <= 0))
         return CBStatus::CORRUPT_ELEMENT;
@@ -118,7 +118,7 @@ CBStatus CBConstitutiveModelHolzapfel::CalcEnergy(const Matrix3<TFloat> &deforma
 CBStatus CBConstitutiveModelHolzapfel::CalcPK2Stress(const Matrix3<TFloat> &deformationTensor,
                                                      Matrix3<TFloat> &pk2Stress) {
     TFloat J  = deformationTensor.Det();
-    TFloat Jm = pow(J, -2/3);
+    TFloat Jm = pow(J, -2.0 / 3.0);
     
     if (!Base::ignoreCorruptElements_  && (J <= 0))
         return CBStatus::CORRUPT_ELEMENT;
