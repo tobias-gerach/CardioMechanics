@@ -12,6 +12,9 @@
  */
 
 
+#include <algorithm>
+#include <cassert>
+
 #include "CBSolver.h"
 #include "CBElementAdapter.h"
 
@@ -37,15 +40,73 @@ void CBElementAdapter::LinkNodesComponentsBoundaryConditionsGlobal(bool* nodesCo
     
     for(PetscInt i = 0; i <  numTotalNodes; i++)
     {
-        int n[3]={3*i,3*i+1,3*i+2};
-        ISLocalToGlobalMappingApply(nodesIndicesMapping_, 3, n, n);
-        nodesComponentsBoundaryConditionsLocal_[3*i]   = nodesComponentsBoundaryConditionsGlobal[n[0]];
-        nodesComponentsBoundaryConditionsLocal_[3*i+1] = nodesComponentsBoundaryConditionsGlobal[n[1]];
-        nodesComponentsBoundaryConditionsLocal_[3*i+2] = nodesComponentsBoundaryConditionsGlobal[n[2]];
+        PetscInt n = GlobalNodeIndex(i);
+        for(PetscInt c = 0; c < 3; c++)
+            nodesComponentsBoundaryConditionsLocal_[3*i+c] = nodesComponentsBoundaryConditionsGlobal[3*n+c];
     }
     
     areBoundaryConditionsActive_=true;
     solver_->SetNodesComponentsBoundaryConditionsGlobal(nodesComponentsBoundaryConditionsGlobal);
+}
+
+// --------------------------- Degree of freedom layout ----------------
+
+void CBElementAdapter::InitNodesIndicesMapping()
+{
+    nodesRanges_ = solver_->GetNodesRanges();
+    
+    // Each rank owns one contiguous block of the global unknown vector, so a block starts where
+    // the preceding ranks' unknowns end. numPressureDofs is zero as long as displacement is the
+    // only field, which makes the block of rank r start at 3 * (its first node).
+    dofOffsets_.assign(nodesRanges_.size(), 0);
+    for(std::size_t r = 0; r + 1 < nodesRanges_.size(); r++)
+    {
+        PetscInt numPressureDofs = 0;
+        dofOffsets_[r+1] = dofOffsets_[r] + 3 * (nodesRanges_[r+1] - nodesRanges_[r]) + numPressureDofs;
+    }
+    
+    PetscInt numLocalNodes = solver_->GetNumberOfLocalNodes();
+    PetscInt numTotalNodes = numLocalNodes + solver_->GetNumberOfGhostNodes();
+    
+    std::vector<PetscInt> dofIndices(3 * numTotalNodes);
+    for(PetscInt i = 0; i < numTotalNodes; i++)
+    {
+        PetscInt n = GlobalNodeIndex(i);
+        for(PetscInt c = 0; c < 3; c++)
+            dofIndices[3*i+c] = GlobalDofIndex(n, c);
+    }
+    
+    ISLocalToGlobalMappingCreate(DCPetsc::Comm(), 1, 3 * numTotalNodes, dofIndices.data(), PETSC_COPY_VALUES,
+                                 &nodesIndicesMapping_);
+    ISLocalToGlobalMappingCreate(DCPetsc::Comm(), 1, 3 * numLocalNodes, dofIndices.data(), PETSC_COPY_VALUES,
+                                 &nodesIndicesMappingNonGhosted_);
+}
+
+PetscInt CBElementAdapter::GlobalNodeIndex(PetscInt localNode)
+{
+    PetscInt numLocalNodes = solver_->GetNumberOfLocalNodes();
+    if(localNode < numLocalNodes)
+        return solver_->GetLocalNodesFrom() + localNode;
+    
+    assert(localNode - numLocalNodes < solver_->GetNumberOfGhostNodes());
+    return solver_->GetGhostNodes()[localNode - numLocalNodes];
+}
+
+PetscInt CBElementAdapter::GlobalDofIndex(PetscInt globalNode, PetscInt component)
+{
+    assert(component >= 0 && component < 3);
+    assert(!dofOffsets_.empty() && "CBElementAdapter::InitNodesIndicesMapping() has to be run first");
+    assert(globalNode >= 0 && globalNode < nodesRanges_.back());
+    
+    PetscInt owner = std::upper_bound(nodesRanges_.begin(), nodesRanges_.end(), globalNode) - nodesRanges_.begin() - 1;
+    return dofOffsets_[owner] + 3 * (globalNode - nodesRanges_[owner]) + component;
+}
+
+void CBElementAdapter::GetGlobalDofIndices(PetscInt numNodes, const PetscInt* globalNodes, PetscInt* dofIndices)
+{
+    for(PetscInt i = 0; i < numNodes; i++)
+        for(PetscInt c = 0; c < 3; c++)
+            dofIndices[3*i+c] = GlobalDofIndex(globalNodes[i], c);
 }
 
 const std::vector<CBElement*>& CBElementAdapter::GetElementVector() {
@@ -118,6 +179,16 @@ void CBElementAdapter::GetNodesComponentsBoundaryConditionsGlobal(PetscInt numNo
     }
 }
 
+
+void CBElementAdapter::GetNodesComponentsBoundaryConditionsForGlobalNodes(PetscInt numNodes, const PetscInt* globalNodes, bool* nodesComponentsBoundaryConditions)
+{
+    // The boundary condition array is indexed by node component, not by degree of freedom, and is
+    // therefore unaffected by the rank-dependent unknown layout.
+    for(PetscInt i = 0; i < numNodes; i++)
+        for(PetscInt c = 0; c < 3; c++)
+            nodesComponentsBoundaryConditions[3*i+c] = areBoundaryConditionsActive_ ?
+            nodesComponentsBoundaryConditionsGlobal_[3*globalNodes[i]+c] : false;
+}
 
 
 // --------------------------- Nodal Forces ----------------------------

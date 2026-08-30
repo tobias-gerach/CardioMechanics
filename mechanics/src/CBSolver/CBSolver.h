@@ -118,6 +118,10 @@ public:
     
     TInt GetNumberOfGhostNodes() {return numGhostNodes_; }
     
+    const PetscInt *GetGhostNodes() {return ghostNodes_; }
+    
+    const std::vector<PetscInt> &GetNodesRanges() {return nodesRanges_; }
+    
     bool *GetNodesComponentsBoundaryConditionsGlobal() {return globalNodesComponentsBoundaryConditions_; }
     
     void SetNodesComponentsBoundaryConditionsGlobal(bool *globalNodesComponentsBoundaryConditions);
@@ -182,7 +186,6 @@ protected:
     }
     
     void         InitNodesIndicesMapping();
-    void         InitNodesIndicesMappingNonGhosted();
     void         LoadMesh();
     void         DetermineNodesRanges();
     virtual void InitVectors()     = 0;

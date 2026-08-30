@@ -111,6 +111,20 @@ public:
     void AddLaplacianEntriesGlobal(PetscInt numRows, const PetscInt* rowsIndices, PetscInt numCols, const PetscInt* colsIndices, PetscScalar* laplacianEntries);
     void GetNodesComponentsBoundaryConditions(PetscInt numNodesCoords, const PetscInt* nodesCoordsIndices, bool* nodesComponentsBoundaryConditions);
     void GetNodesComponentsBoundaryConditionsGlobal(PetscInt numNodesCoords, const PetscInt* nodesCoordsIndices, bool* globalNodesComponentsBoundaryConditions);
+    void GetNodesComponentsBoundaryConditionsForGlobalNodes(PetscInt numNodes, const PetscInt* globalNodes, bool* nodesComponentsBoundaryConditions);
+    //! Degree-of-freedom layout, see ADR-0001. Each MPI rank owns one contiguous block of the
+    //! global unknown vector, so a global vector or matrix index depends on which rank owns the
+    //! node and must never be derived from the global node index by hand.
+    void InitNodesIndicesMapping();
+    ISLocalToGlobalMapping GetLocalToGlobalMapping(){return nodesIndicesMapping_; }
+    ISLocalToGlobalMapping GetLocalToGlobalMappingNonGhosted(){return nodesIndicesMappingNonGhosted_; }
+
+    PetscInt GlobalNodeIndex(PetscInt localNode);
+    PetscInt GlobalDofIndex(PetscInt globalNode, PetscInt component);
+
+    //! Fills 3 * numNodes vector and matrix indices, three consecutive components per node.
+    void GetGlobalDofIndices(PetscInt numNodes, const PetscInt* globalNodes, PetscInt* dofIndices);
+
     void ApplyLocalToGlobalMapping(PetscInt* nodesCoordsIndices, PetscInt numIndices){ISLocalToGlobalMappingApply(nodesIndicesMapping_, numIndices, nodesCoordsIndices, nodesCoordsIndices); }
     void ApplyGlobalToLocalMapping(PetscInt* nodesCoordsIndices, PetscInt numIndices) { ISGlobalToLocalMappingApply(nodesIndicesMapping_, IS_GTOLM_MASK, numIndices, nodesCoordsIndices, &numIndices, nodesCoordsIndices); } // index is -1 if not on local process
     void ApplyGlobalToLocalMappingNonGhosted(PetscInt* nodesCoordsIndices, PetscInt numIndices) { ISGlobalToLocalMappingApply(nodesIndicesMappingNonGhosted_, IS_GTOLM_MASK, numIndices, nodesCoordsIndices, &numIndices, nodesCoordsIndices); } // index is -1 if not on local process
@@ -128,9 +142,6 @@ public:
     void LinkNodalForcesActiveStressTensorAndFiberOrientationJacobian(Mat nodalForcesActiveStressTensorAndFiberOrientationJacobian){nodalForcesActiveStressTensorAndFiberOrientationJacobian_ = nodalForcesActiveStressTensorAndFiberOrientationJacobian; }
     void LinkActiveStress(Vec activeStressTensor, PetscInt numActiveStressTensorComponents, PetscInt* activeStressTensorComponentsIndices);
     void LinkLaplacian(Mat laplacian){laplacian_ = laplacian; }
-    
-    void LinkLocalToGlobalMapping(ISLocalToGlobalMapping nodesIndicesMapping){nodesIndicesMapping_ = nodesIndicesMapping; }
-    void LinkLocalToGlobalMappingNonGhosted(ISLocalToGlobalMapping nodesIndicesMapping){nodesIndicesMappingNonGhosted_ = nodesIndicesMapping; }
     
     void ActivateBoundaryConditions(){areBoundaryConditionsActive_=true;}
     void DeactivateBoundaryConditions(){areBoundaryConditionsActive_=false;}
@@ -170,6 +181,8 @@ private:
     bool                   areBoundaryConditionsActive_;
     ISLocalToGlobalMapping nodesIndicesMapping_;
     ISLocalToGlobalMapping nodesIndicesMappingNonGhosted_;
+    std::vector<PetscInt>  nodesRanges_;
+    std::vector<PetscInt>  dofOffsets_;
 };
 
 #endif

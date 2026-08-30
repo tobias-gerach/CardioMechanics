@@ -1247,7 +1247,6 @@ void CBSolver::LoadMesh() {
     DCCtrl::print <<
     "\xd\t\tInitializing: Mesh: Nodes indices mapping ...                                                  ";
     InitNodesIndicesMapping();
-    InitNodesIndicesMappingNonGhosted();
     
     DCCtrl::print <<
     "\xd\t\tInitializing: Mesh: Nodes ...                                                                  ";
@@ -1560,52 +1559,11 @@ void CBSolver::InitNodesIndicesMapping() {
     if (!isInitElementsDone_)
         throw std::runtime_error("CBSolver::InitElements() has to be run before CBSolver::InitNodesIndicesMapping()");
     
-    PetscInt  numTotalNodes = numLocalNodes_ + numGhostNodes_;
-    
-    PetscInt *globalNodesCoordsIndices = new PetscInt[3 * numTotalNodes];
-    
-    for (PetscInt i = 0; i < numTotalNodes; i++) {
-        if (i < numLocalNodes_) {
-            PetscInt n = (localNodesFrom_ + i);
-            globalNodesCoordsIndices[3 * i]     = 3 * n;
-            globalNodesCoordsIndices[3 * i + 1] = 3 * n + 1;
-            globalNodesCoordsIndices[3 * i + 2] = 3 * n + 2;
-        } else {
-            PetscInt n = (ghostNodes_[i - numLocalNodes_]);
-            globalNodesCoordsIndices[3 * i]     = 3 * n;
-            globalNodesCoordsIndices[3 * i + 1] = 3 * n + 1;
-            globalNodesCoordsIndices[3 * i + 2] = 3 * n + 2;
-        }
-    }
-    
-    ISLocalToGlobalMappingCreate(
-                                 DCPetsc::Comm(), 1, 3 * numTotalNodes, globalNodesCoordsIndices, PETSC_COPY_VALUES, &nodesIndicesMapping_);
-    
-    adapter_->LinkLocalToGlobalMapping(nodesIndicesMapping_);
-    delete[] globalNodesCoordsIndices;
+    // The adapter owns the layout of the global unknown vector, see ADR-0001.
+    adapter_->InitNodesIndicesMapping();
+    nodesIndicesMapping_           = adapter_->GetLocalToGlobalMapping();
+    nodesIndicesMappingNonGhosted_ = adapter_->GetLocalToGlobalMappingNonGhosted();
 } // CBSolver::InitNodesIndicesMapping
-
-void CBSolver::InitNodesIndicesMappingNonGhosted() {
-    if (!isInitElementsDone_) {
-        throw std::runtime_error(
-                                 "CBSolver::InitElements() has to be run before CBSolver::InitNodesIndicesMappingNonGhosted()");
-    }
-    
-    PetscInt *globalNodesCoordsIndices = new PetscInt[3 * numLocalNodes_];
-    
-    for (PetscInt i = 0; i < numLocalNodes_; i++) {
-        PetscInt n = (localNodesFrom_ + i);
-        globalNodesCoordsIndices[3 * i]     = 3 * n;
-        globalNodesCoordsIndices[3 * i + 1] = 3 * n + 1;
-        globalNodesCoordsIndices[3 * i + 2] = 3 * n + 2;
-    }
-    
-    ISLocalToGlobalMappingCreate(
-                                 DCPetsc::Comm(), 1, 3 * numLocalNodes_, globalNodesCoordsIndices, PETSC_COPY_VALUES, &nodesIndicesMappingNonGhosted_);
-    
-    adapter_->LinkLocalToGlobalMappingNonGhosted(nodesIndicesMappingNonGhosted_);
-    delete[] globalNodesCoordsIndices;
-}
 
 PetscScalar CBSolver::CalcFiniteDifferencesEpsilon(Vec a) {
     // adapted form snesj.c [petsc-3.3-p1]
@@ -2159,7 +2117,6 @@ void CBSolver::PrepareElements(std::vector<CBElementSolid *> elements) {
         throw std::runtime_error("CBSolver::PrepareElements(): InitNodes() and InitElements() has be finished first");
     
     UpdateGhostNodesAndLinkToAdapter();
-    adapter_->LinkLocalToGlobalMapping(nodesIndicesMapping_);
     
     for (auto &it : elements) {
         it->CheckNodeSorting();
