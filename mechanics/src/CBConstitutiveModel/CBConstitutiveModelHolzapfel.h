@@ -30,8 +30,14 @@ public:
     CBConstitutiveModelHolzapfel() {}
     
     void Init(ParameterMap *parameters, TInt materialIndex);
+    std::string GetType() {return "Holzapfel";}
     CBStatus CalcEnergy(const Matrix3<TFloat> &deformationTensor, TFloat &energy);
     CBStatus CalcPK2Stress(const Matrix3<TFloat> &deformationTensor, Matrix3<TFloat> &pk2Stress);
+    CBStatus CalcIsochoricPK2Stress(const Matrix3<TFloat> &deformationTensor, Matrix3<TFloat> &pk2Stress);
+    CBStatus CalcIsochoricEnergy(const Matrix3<TFloat> &deformationTensor, TFloat &energy);
+    /// A mixed element replaces the volumetric energy kappa/4 (J^2 - 1 - 2 ln J) by the
+    /// kappa/2 (J - 1)^2 of its perturbed constraint. Both have bulk modulus kappa at J = 1.
+    TFloat GetBulkModulus() {return kappa_;}
     TFloat Heavyside(TFloat I4);
     TFloat HeavysideDerivative(TFloat I4);
     

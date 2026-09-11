@@ -71,6 +71,23 @@ void CBConstitutiveModelGuccione::Init(ParameterMap *parameters, TInt materialIn
 } // CBConstitutiveModelGuccione::Init
 
 CBStatus CBConstitutiveModelGuccione::CalcEnergy(const Matrix3<TFloat> &deformationTensor, TFloat &energy) {
+    CBStatus rc = CalcIsochoricEnergy(deformationTensor, energy);
+    if (rc != CBStatus::SUCCESS)
+        return rc;
+
+    /// vol
+    TFloat J = deformationTensor.Det();
+    energy += k_/2. * (J - 1) * (J - 1);
+
+    if (std::isinf(energy))
+        return CBStatus::INFINITIVE;
+    else if (std::isnan(energy))
+        return CBStatus::NOT_A_NUMBER;
+    else
+        return CBStatus::SUCCESS;
+} // CBConstitutiveModelGuccione::CalcEnergy
+
+CBStatus CBConstitutiveModelGuccione::CalcIsochoricEnergy(const Matrix3<TFloat> &deformationTensor, TFloat &energy) {
     if (!Base::ignoreCorruptElements_) {
         if (deformationTensor.Det() <= 0)
             return CBStatus::CORRUPT_ELEMENT;
@@ -89,20 +106,25 @@ CBStatus CBConstitutiveModelGuccione::CalcEnergy(const Matrix3<TFloat> &deformat
     
     /// iso
     energy = C_/2.  * (exp(Q) - 1.0);
-    
-    /// vol
-    energy += k_/2. * (J - 1) * (J - 1);
-    
-    if (std::isinf(energy))
-        return CBStatus::INFINITIVE;
-    else if (std::isnan(energy))
-        return CBStatus::NOT_A_NUMBER;
-    else
-        return CBStatus::SUCCESS;
-} // CBConstitutiveModelGuccione::CalcEnergy
+
+    return CBStatus::SUCCESS;
+} // CBConstitutiveModelGuccione::CalcIsochoricEnergy
 
 CBStatus CBConstitutiveModelGuccione::CalcPK2Stress(const Matrix3<TFloat> &deformationTensor,
                                                     Matrix3<TFloat> &pk2Stress) {
+    CBStatus rc = CalcIsochoricPK2Stress(deformationTensor, pk2Stress);
+    if (rc != CBStatus::SUCCESS)
+        return rc;
+
+    /// vol
+    TFloat J = deformationTensor.Det();
+    pk2Stress += k_ * (J - 1) * J * (deformationTensor.GetTranspose() * deformationTensor).GetInverse();
+
+    return CBStatus::SUCCESS;
+} // CBConstitutiveModelGuccione::CalcPK2Stress
+
+CBStatus CBConstitutiveModelGuccione::CalcIsochoricPK2Stress(const Matrix3<TFloat> &deformationTensor,
+                                                             Matrix3<TFloat> &pk2Stress) {
     if (!Base::ignoreCorruptElements_) {
         if (deformationTensor.Det() <= 0)
             return CBStatus::CORRUPT_ELEMENT;
@@ -136,11 +158,8 @@ CBStatus CBConstitutiveModelGuccione::CalcPK2Stress(const Matrix3<TFloat> &defor
     
     /// pk2Iso is conjugate to the volume-preserving strain, so it is mapped back to the full
     /// configuration through the deviatoric projection DEV(S) = S - 1/3 (S:C) C^-1. Without it
-    /// the isochoric term would still do volumetric work and compete with the vol term below.
+    /// the isochoric term would still do volumetric work and compete with the volumetric term.
     pk2Stress = Jm * (pk2Iso - (1.0 / 3.0) * (pk2Iso * C).Trace() * C_inv);
 
-    /// vol
-    pk2Stress += k_ * (J - 1) * J * C_inv;
-    
     return CBStatus::SUCCESS;
-} // CBConstitutiveModelGuccione::CalcPK2Stress
+} // CBConstitutiveModelGuccione::CalcIsochoricPK2Stress

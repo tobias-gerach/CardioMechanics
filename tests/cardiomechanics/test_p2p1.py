@@ -101,14 +101,32 @@ def _write_mesh(tetgen_dir):
             f.write(f"{n} {' '.join(map(str, s))} {index} {index}\n")
 
 
-def _run(binary, cm_env, wd, element_type="T10P1", kappa=100, env=None, check=True, ranks=None, fixture=FIXTURE):
+# Parameters of each law with every modulus O(1), for the reasons given above. The fixtures have
+# no bases file, so the fibre direction is x, along the cantilever, which bending stretches and
+# compresses. Holzapfel keeps its default smoothed Heavyside switch.
+MATERIALS = {
+    "NeoHooke": "<NeoHooke><a>1</a><k>{kappa}</k></NeoHooke>",
+    "Holzapfel": "<Holzapfel><a>1</a><b>1</b><af>1</af><bf>1</bf><as>0.5</as><bs>1</bs>"
+                 "<afs>0.3</afs><bfs>1</bfs><kappa>{kappa}</kappa></Holzapfel>",
+    "Guccione": "<Guccione><C>1</C><bf>8</bf><bt>2</bt><bfs>4</bfs><K>{kappa}</K></Guccione>",
+    "MooneyRivlin": "<MooneyRivlin><C10>1</C10><B>{kappa}</B></MooneyRivlin>",
+    "Usyk": "<Usyk><a>1</a><bff>8</bff><bss>2</bss><bnn>2</bnn><bfs>4</bfs><bfn>4</bfn><bns>2</bns>"
+            "<k>{kappa}</k></Usyk>",
+}
+
+
+def _run(binary, cm_env, wd, element_type="T10P1", kappa=100, material="NeoHooke", solver="Static",
+         env=None, check=True, ranks=None, fixture=FIXTURE):
     """Stage mesh and settings into wd, run on ranks MPI ranks (serially if None), return (process, vtu directory)."""
     (wd / "tetgen").mkdir()
     _write_mesh(wd / "tetgen")
     (wd / "Results").mkdir()
-    text = fixture.read_text()
+    text, n = re.subn(r"<NeoHooke>.*?</NeoHooke>", MATERIALS[material].format(kappa=kappa),
+                      fixture.read_text(), flags=re.DOTALL)
+    assert n == 1, f"{fixture.name}: cannot substitute the NeoHooke parameters"
     for old, new in (("<Type>T10P1</Type>", f"<Type>{element_type}</Type>"),
-                     ("<k>100</k>", f"<k>{kappa}</k>")):
+                     ("<Type>NeoHooke</Type>", f"<Type>{material}</Type>"),
+                     ("<Type>Static</Type>", f"<Type>{solver}</Type>")):
         assert text.count(old) == 1, f"{fixture.name}: cannot substitute {old}"
         text = text.replace(old, new)
     (wd / fixture.name).write_text(text)
@@ -134,6 +152,27 @@ def test_unknown_element_type_lists_p2p1(binary, cm_env, tmp_path):
     proc, _ = _run(binary, cm_env, tmp_path, element_type="T10Q1", check=False)
     assert proc.returncode != 0, f"expected a non-zero exit\n{proc.stdout[-2000:]}"
     assert "T10P1" in proc.stdout + proc.stderr, (proc.stdout + proc.stderr)[-2000:]
+
+
+def _assert_refused(proc, *names):
+    """The run aborted with an error message naming every one of names on one line."""
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, f"expected a non-zero exit\n{out[-2000:]}"
+    assert any("error" in line.lower() and all(n in line for n in names) for line in out.splitlines()), \
+        f"no error names {names}\n{out[-2000:]}"
+
+
+@pytest.mark.parametrize("material", ["MooneyRivlin", "Usyk"])
+def test_p2p1_refuses_material_without_mixed_formulation(binary, cm_env, tmp_path, material):
+    proc, _ = _run(binary, cm_env, tmp_path, material=material, check=False)
+    _assert_refused(proc, material, "T10P1")
+
+
+def test_active_stress_estimator_refuses_p2p1(binary, cm_env, tmp_path):
+    """The estimator differentiates nodal forces with respect to element tension, which has no
+    counterpart for the pressure field."""
+    proc, _ = _run(binary, cm_env, tmp_path, solver="ActiveStressEstimator", check=False)
+    _assert_refused(proc, "Active Stress Estimator", "T10P1")
 
 
 def test_p2p1_static_run_converges(binary, cm_env, tmp_path):
@@ -245,23 +284,37 @@ KAPPA_SWEEP = (1, 10, 100, 1000)
 MAX_GAP_AT_SMALLEST_KAPPA = 2e-3     # relative to the peak displacement
 
 
+def _gap_to_t10(binary, cm_env, tmp_path, kappa, material="NeoHooke"):
+    """Largest P2P1-T10 node distance over the T10 peak displacement, and the PointID it occurs at."""
+    vtu_dirs = {}
+    for element_type in ("T10", "T10P1"):
+        wd = tmp_path / f"{material}_{element_type}_{kappa}"
+        wd.mkdir()
+        _, vtu_dirs[element_type] = _run(binary, cm_env, wd, element_type=element_type, kappa=kappa,
+                                         material=material)
+    pid, t10 = _final_points(vtu_dirs["T10"])
+    _, p2p1 = _final_points(vtu_dirs["T10P1"])
+    _, ref = read_vtu_points(vtu_dirs["T10"] / "cantilever.0.vtu")
+    d = np.linalg.norm(p2p1 - t10, axis=1)
+    i = int(np.argmax(d))
+    return d[i] / np.linalg.norm(t10 - ref, axis=1).max(), int(pid[i])
+
+
 def test_p2p1_approaches_t10_as_kappa_decreases(binary, cm_env, tmp_path):
     pytest.importorskip("meshio")
-    gaps = []
-    for kappa in KAPPA_SWEEP:
-        vtu_dirs = {}
-        for element_type in ("T10", "T10P1"):
-            wd = tmp_path / f"{element_type}_{kappa}"
-            wd.mkdir()
-            _, vtu_dirs[element_type] = _run(binary, cm_env, wd, element_type=element_type, kappa=kappa)
-        pid, t10 = _final_points(vtu_dirs["T10"])
-        _, p2p1 = _final_points(vtu_dirs["T10P1"])
-        _, ref = read_vtu_points(vtu_dirs["T10"] / "cantilever.0.vtu")
-        d = np.linalg.norm(p2p1 - t10, axis=1)
-        i = int(np.argmax(d))
-        peak = np.linalg.norm(t10 - ref, axis=1).max()
-        gaps.append((kappa, d[i] / peak, int(pid[i])))
+    gaps = [(kappa, *_gap_to_t10(binary, cm_env, tmp_path, kappa)) for kappa in KAPPA_SWEEP]
 
     report = ", ".join(f"kappa={k}: {g:.2e} at PointID={n}" for k, g, n in gaps)
     assert all(a[1] < b[1] for a, b in zip(gaps, gaps[1:])), f"gap does not shrink as kappa decreases: {report}"
     assert gaps[0][1] < MAX_GAP_AT_SMALLEST_KAPPA, f"gap at the smallest kappa too large: {report}"
+
+
+@pytest.mark.parametrize("material", ["Holzapfel", "Guccione"])
+def test_p2p1_matches_t10_at_small_kappa(binary, cm_env, tmp_path, material):
+    """T10 uses the law's full stress, P2P1 its isochoric stress plus the pressure field, so the two
+    agree at small kappa only if the isochoric stress is the law's stress minus its volumetric part.
+    Holzapfel's volumetric energy is kappa/4 (J^2 - 1 - 2 ln J) rather than the kappa/2 (J - 1)^2 of
+    the perturbed constraint; the two differ at third order in J - 1, far below this tolerance."""
+    pytest.importorskip("meshio")
+    gap, pid = _gap_to_t10(binary, cm_env, tmp_path, KAPPA_SWEEP[0], material)
+    assert gap < MAX_GAP_AT_SMALLEST_KAPPA, f"{material}: P2P1 differs from T10 by {gap:.2e} at PointID={pid}"

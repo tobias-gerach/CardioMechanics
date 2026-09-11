@@ -85,28 +85,13 @@ void CBConstitutiveModelHolzapfel::Init(ParameterMap *parameters, TInt materialI
 } // CBConstitutiveModelHolzapfel::Init
 
 CBStatus CBConstitutiveModelHolzapfel::CalcEnergy(const Matrix3<TFloat> &deformationTensor, TFloat &energy) {
-    TFloat  J = deformationTensor.Det();
-    TFloat Jm = pow(J, -2.0 / 3.0);
-    
-    if (!Base::ignoreCorruptElements_  && (J <= 0))
-        return CBStatus::CORRUPT_ELEMENT;
-    
-    Matrix3<TFloat> rightCauchyGreenTensor = deformationTensor.GetTranspose() * deformationTensor;
-    TFloat *C = rightCauchyGreenTensor.GetArray();
-    
-    TFloat I1   = Jm * rightCauchyGreenTensor.Invariant1();
-    TFloat I4f  = C[0]; // f * Cf
-    TFloat I4s  = C[4]; // s * Cs
-    TFloat I8fs = 0.5 * (C[1] + C[3]); // f * Cs
-    
-    TFloat vol      = (kappa_ / 4) * (pow(J, 2) - 1.0 - 2 * log(J) );
-    TFloat iso      = a_ / (2.0 * b_) * (exp(b_ * (I1 - 3.0)) - 1.0);
-    TFloat aniso_f  = Heavyside(I4f) * (af_ / (2.0 * bf_)  * (exp(bf_ * (I4f - 1.0) * (I4f - 1.0)) - 1.0) );
-    TFloat aniso_s  = Heavyside(I4s) * (as_ / (2.0 * bs_)  * (exp(bs_ * (I4s - 1.0) * (I4s - 1.0)) - 1.0) );
-    TFloat aniso_fs = afs_ / (2.0 * bfs_) * (exp(bfs_* I8fs * I8fs) - 1.0);
-    
-    energy = vol + iso + aniso_f + aniso_s + aniso_fs;
-    
+    CBStatus rc = CalcIsochoricEnergy(deformationTensor, energy);
+    if (rc != CBStatus::SUCCESS)
+        return rc;
+
+    TFloat J = deformationTensor.Det();
+    energy += (kappa_ / 4) * (pow(J, 2) - 1.0 - 2 * log(J) );
+
     if (std::isinf(energy))
         return CBStatus::INFINITIVE;
     else if (std::isnan(energy))
@@ -115,8 +100,47 @@ CBStatus CBConstitutiveModelHolzapfel::CalcEnergy(const Matrix3<TFloat> &deforma
         return CBStatus::SUCCESS;
 } // CBConstitutiveModelHolzapfel::CalcEnergy
 
+CBStatus CBConstitutiveModelHolzapfel::CalcIsochoricEnergy(const Matrix3<TFloat> &deformationTensor, TFloat &energy) {
+    TFloat  J = deformationTensor.Det();
+    TFloat Jm = pow(J, -2.0 / 3.0);
+
+    if (!Base::ignoreCorruptElements_  && (J <= 0))
+        return CBStatus::CORRUPT_ELEMENT;
+
+    Matrix3<TFloat> rightCauchyGreenTensor = deformationTensor.GetTranspose() * deformationTensor;
+    TFloat *C = rightCauchyGreenTensor.GetArray();
+
+    TFloat I1   = Jm * rightCauchyGreenTensor.Invariant1();
+    TFloat I4f  = C[0]; // f * Cf
+    TFloat I4s  = C[4]; // s * Cs
+    TFloat I8fs = 0.5 * (C[1] + C[3]); // f * Cs
+
+    TFloat iso      = a_ / (2.0 * b_) * (exp(b_ * (I1 - 3.0)) - 1.0);
+    TFloat aniso_f  = Heavyside(I4f) * (af_ / (2.0 * bf_)  * (exp(bf_ * (I4f - 1.0) * (I4f - 1.0)) - 1.0) );
+    TFloat aniso_s  = Heavyside(I4s) * (as_ / (2.0 * bs_)  * (exp(bs_ * (I4s - 1.0) * (I4s - 1.0)) - 1.0) );
+    TFloat aniso_fs = afs_ / (2.0 * bfs_) * (exp(bfs_* I8fs * I8fs) - 1.0);
+
+    energy = iso + aniso_f + aniso_s + aniso_fs;
+
+    return CBStatus::SUCCESS;
+} // CBConstitutiveModelHolzapfel::CalcIsochoricEnergy
+
 CBStatus CBConstitutiveModelHolzapfel::CalcPK2Stress(const Matrix3<TFloat> &deformationTensor,
                                                      Matrix3<TFloat> &pk2Stress) {
+    CBStatus rc = CalcIsochoricPK2Stress(deformationTensor, pk2Stress);
+    if (rc != CBStatus::SUCCESS)
+        return rc;
+
+    TFloat J = deformationTensor.Det();
+    pk2Stress += (kappa_ / 2.0) * (J - 1.0/J) * J * (deformationTensor.GetTranspose() * deformationTensor).GetInverse();
+
+    return CBStatus::SUCCESS;
+} // CBConstitutiveModelHolzapfel::CalcPK2Stress
+
+/// The anisotropic terms are added unprojected, as in the displacement-only formulation (the HO-ma
+/// variant), so they are part of the isochoric stress although they depend on the full I4 and I8.
+CBStatus CBConstitutiveModelHolzapfel::CalcIsochoricPK2Stress(const Matrix3<TFloat> &deformationTensor,
+                                                              Matrix3<TFloat> &pk2Stress) {
     TFloat J  = deformationTensor.Det();
     TFloat Jm = pow(J, -2.0 / 3.0);
     
@@ -133,7 +157,6 @@ CBStatus CBConstitutiveModelHolzapfel::CalcPK2Stress(const Matrix3<TFloat> &defo
     TFloat I8fs = 0.5 * (C[1] + C[3]); // f * Cs
     
     // passive contributions to PK2Stress
-    Matrix3<TFloat> pk2Vol      = (kappa_ / 2.0) * (J - 1.0/J) * J * rightCauchyGreenTensor_inv;
     Matrix3<TFloat> pk2Iso      = Jm * a_ * exp(b_ * (Jm * I1 - 3.0)) *
     (identity_ - 1.0/3.0 * I1 * rightCauchyGreenTensor_inv);
     /// The fibre and sheet energies carry the Heavyside switch inside the derivative, so the
@@ -148,10 +171,10 @@ CBStatus CBConstitutiveModelHolzapfel::CalcPK2Stress(const Matrix3<TFloat> &defo
     Matrix3<TFloat> pk2Aniso_s  = 2.0 * as_ * gs * sxs_;
     Matrix3<TFloat> pk2Aniso_fs = afs_ * I8fs * exp(bfs_ * I8fs * I8fs) * (fxs_ + sxf_);
     
-    pk2Stress = pk2Vol + pk2Iso + pk2Aniso_f + pk2Aniso_s + pk2Aniso_fs;
-    
+    pk2Stress = pk2Iso + pk2Aniso_f + pk2Aniso_s + pk2Aniso_fs;
+
     return CBStatus::SUCCESS;
-} // CBConstitutiveModelHolzapfel::CalcPK2Stress
+} // CBConstitutiveModelHolzapfel::CalcIsochoricPK2Stress
 
 TFloat CBConstitutiveModelHolzapfel::Heavyside(TFloat I4) {
     if (k_ == 0) {

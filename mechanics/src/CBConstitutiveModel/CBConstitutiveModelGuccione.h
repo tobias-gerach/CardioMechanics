@@ -29,8 +29,12 @@ class CBConstitutiveModelGuccione : public CBConstitutiveModel {
 public:
     CBConstitutiveModelGuccione() : C_(0), bf_(0), bt_(0), bfs_(0), k_(0) {identity_.SetToIdentityMatrix(); }
     
+    std::string GetType() {return "Guccione";}
     CBStatus CalcEnergy(const Matrix3<TFloat> &deformationTensor, TFloat &energy);
     CBStatus CalcPK2Stress(const Matrix3<TFloat> &deformationTensor, Matrix3<TFloat> &pk2Stress);
+    CBStatus CalcIsochoricPK2Stress(const Matrix3<TFloat> &deformationTensor, Matrix3<TFloat> &pk2Stress);
+    CBStatus CalcIsochoricEnergy(const Matrix3<TFloat> &deformationTensor, TFloat &energy);
+    TFloat GetBulkModulus() {return k_;}
     void Init(ParameterMap *parameters, TInt materialIndex);
     
 protected:

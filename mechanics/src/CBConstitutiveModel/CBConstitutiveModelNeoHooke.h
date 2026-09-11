@@ -31,6 +31,7 @@ public:
         identity_.SetToIdentityMatrix();
     }
     
+    std::string GetType() {return "NeoHooke";}
     CBStatus CalcEnergy(const Matrix3<TFloat> &deformationTensor, TFloat &energy);
     CBStatus CalcPK2Stress(const Matrix3<TFloat> &deformationTensor, Matrix3<TFloat> &pk2Stress);
     CBStatus CalcIsochoricPK2Stress(const Matrix3<TFloat> &deformationTensor, Matrix3<TFloat> &pk2Stress);

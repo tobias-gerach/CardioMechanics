@@ -263,8 +263,8 @@ TFloat CBTensionModelLand17::CaElphy(TFloat t) {
     if (e_->GetType() == "T4")
         calcium = caiQP_[0];
     // even though we have calcium at QPs, there is currently only one tension model initialized per element
-    // therefore, we use the centroid value as well in case of T10
-    else if (e_->GetType() == "T10")
+    // therefore, we use the centroid value as well in case of T10 and T10P1
+    else if (e_->GetType() == "T10" || e_->GetType() == "T10P1")
         calcium = caiQP_[0];
     return calcium;
 }
@@ -566,7 +566,7 @@ CBStatus CBTensionModelLand17::SetActiveTensionAtQuadraturePoint(TInt indexQP, T
         } else {
             throw std::runtime_error("CBTensionModelLand17::SetActiveTensionAtQuadraturePoint: try to access a not existing quadrature point for T4 elements.");
         }
-    } else if (e_->GetType() == "T10") {
+    } else if (e_->GetType() == "T10" || e_->GetType() == "T10P1") {
         if (indexQP < 5) {
             caiQP_[indexQP] = Cai;
         } else {
