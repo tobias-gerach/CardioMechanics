@@ -31,6 +31,7 @@ public:
 
     std::string GetType(){return(std::string("T10P1"));}
     unsigned int GetNumberOfPressureNodesIndices(){return(4);}
+    void GetNodesPressures(TFloat* pressures);
     CBStatus CalcNodalForces();
     CBStatus CalcNodalForcesJacobian();
 

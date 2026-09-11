@@ -207,6 +207,7 @@ protected:
     void         ExportCauchy();
     void         ExportPK2Stress();
     void         ExportGreenLagrangeStrain();
+    void         ExportPressure();
     bool         UpdateExportGlobalData(std::string identifier, TFloat value);
     
     /// Method to export the local activation times to view them later (i.e. in paraview)

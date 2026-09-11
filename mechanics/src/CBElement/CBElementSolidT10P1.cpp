@@ -50,6 +50,16 @@ void CBElementSolidT10P1::GetPressures(TInt *pressureIndices, TFloat *pressures)
     Base::adapter_->GetPressures(4, pressureIndices, pressures);
 }
 
+void CBElementSolidT10P1::GetNodesPressures(TFloat *pressures) {
+    TInt pressureIndices[4];
+    GetPressures(pressureIndices, pressures);
+
+    // The field is linear, so at a mid-edge node it is exactly the mean of the edge's vertices.
+    const int edges[6][2] = {{0, 1}, {1, 2}, {0, 2}, {0, 3}, {1, 3}, {2, 3}}; // of local nodes 5-10
+    for (int k = 0; k < 6; k++)
+        pressures[4 + k] = (pressures[edges[k][0]] + pressures[edges[k][1]]) / 2;
+}
+
 CBStatus CBElementSolidT10P1::CalcResiduals(const TFloat *nodesCoords, const TFloat *pressures, const bool *boundaryConditions,
                                             TFloat *forces, TFloat *constraints) {
     CBStatus rc = CBStatus::SUCCESS;

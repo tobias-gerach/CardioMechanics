@@ -570,6 +570,8 @@ void CBSolver::Export(TFloat timeStep) {
     for (auto &it : plugins_)
         it->Export(timeStep);
     
+    ExportPressure();
+    
     // per-element data
     
     std::string str = "ActiveStress";
@@ -923,6 +925,29 @@ void CBSolver::ExportPK2Stress() {
         VecDestroy(&offdiagonalElementes);
     }
 } // CBSolver::ExportPK2Stress
+
+/// Pressure field of P2P1 elements as point data; absent from displacement-only models. Each
+/// rank inserts every node of its own elements, including nodes owned by another rank. Elements
+/// sharing a node insert the same value, because the field is continuous. The pressure is the
+/// solved unknown, p = kappa (J - 1): positive in tension, unlike hydrostatic or cavity pressure.
+void CBSolver::ExportPressure() {
+    if (model_->GetNumberOfPressureNodes() == 0)
+        return;
+
+    Vec pressure;
+    VecCreateMPI(DCPetsc::Comm(), numLocalNodes_, PETSC_DETERMINE, &pressure);
+    for (auto &e : solidElements_) {
+        unsigned int n = e->GetNumberOfNodesIndices();
+        std::vector<PetscInt>    nodes(n);
+        std::vector<PetscScalar> pressures(n);
+        for (unsigned int i = 0; i < n; i++)
+            nodes[i] = adapter_->GlobalNodeIndex(e->GetNodeIndex(i));
+        e->GetNodesPressures(pressures.data());
+        VecSetValues(pressure, n, nodes.data(), pressures.data(), INSERT_VALUES);
+    }
+    ExportNodesScalarData("Pressure", pressure);
+    VecDestroy(&pressure);
+}
 
 void CBSolver::ExportGreenLagrangeStrain() {
     if (model_->GetExporter()->GetExportOption("GreenLagrangeStrain", true)) {

@@ -19,7 +19,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from helpers.compare import read_vtu_points
+from helpers.compare import read_vtu_point_field, read_vtu_points
 from helpers.run import run_binary
 
 FIXTURE = Path(__file__).parent / "fixtures" / "p2p1_cantilever.xml"
@@ -137,9 +137,12 @@ def _run(binary, cm_env, wd, element_type="T10P1", kappa=100, material="NeoHooke
     return proc, wd / "Results" / "cantilever_vtu"
 
 
+def _last_vtu(vtu_dir):
+    return max(vtu_dir.glob("cantilever.*.vtu"), key=lambda p: int(p.stem.split(".")[1]))
+
+
 def _final_points(vtu_dir):
-    last = max(vtu_dir.glob("cantilever.*.vtu"), key=lambda p: int(p.stem.split(".")[1]))
-    return read_vtu_points(last)
+    return read_vtu_points(_last_vtu(vtu_dir))
 
 
 def _peak_displacement(vtu_dir):
@@ -184,12 +187,89 @@ def test_p2p1_static_run_converges(binary, cm_env, tmp_path):
     assert deflection > 1e-2, f"cantilever barely moved: max displacement {deflection:.3e}"
 
 
+def test_p2p1_exports_pressure_linear_along_edges(binary, cm_env, tmp_path):
+    """Mid-edge nodes carry no pressure unknown. The value exported there is the linear field at
+    the edge midpoint, the mean of its two vertices, so a viewer interpolating the quadratic cell
+    reproduces the linear field instead of dipping towards zero on every edge."""
+    meshio = pytest.importorskip("meshio")
+    _, vtu_dir = _run(binary, cm_env, tmp_path)
+    mesh = meshio.read(str(_last_vtu(vtu_dir)))
+    p = np.asarray(mesh.point_data["Pressure"]).ravel()
+    assert np.abs(p).max() > 0, "exported pressure is zero everywhere"
+
+    cells = mesh.cells_dict["tetra10"]     # VTK orders the mid-edge nodes as T10_EDGES
+    expected = np.stack([(p[cells[:, a]] + p[cells[:, b]]) / 2 for a, b in T10_EDGES], axis=1)
+    d = np.abs(p[cells[:, 4:]] - expected)
+    tol = 1e-12 * np.abs(p).max()
+    if d.max() > tol:
+        c, k = np.unravel_index(np.argmax(d), d.shape)
+        raise AssertionError(f"mid-edge pressure is not the mean of its vertices beyond {tol:.1e}: "
+                             f"node {cells[c, 4 + k]} has {p[cells[c, 4 + k]]:.6e}, expected {expected[c, k]:.6e}")
+
+
+# Barycentric coordinates of the four quadrature points of CBElementSolidT10: point q lies at
+# ALPHA on vertex q and at BETA on the other three, each weighing a quarter of the element.
+ALPHA, BETA = (5 + 3 * np.sqrt(5)) / 20, (5 - np.sqrt(5)) / 20
+# The VTU points are single precision, so J - 1, of order 1e-3 here, keeps about four digits:
+# observed 6e-4 of the peak. A sign or scale error in the exported pressure is of order one.
+BALANCE_RTOL = 5e-3
+
+
+def _t10_gradients(L):
+    """Derivatives of the ten T10 shape functions, in VTK node order, with respect to L1, L2, L3
+    at barycentric point L."""
+    dL = np.zeros((10, 4))          # with respect to L0..L3
+    for i in range(4):
+        dL[i, i] = 4 * L[i] - 1
+    for k, (i, j) in enumerate(T10_EDGES):
+        dL[4 + k, i], dL[4 + k, j] = 4 * L[j], 4 * L[i]
+    return dL[:, 1:] - dL[:, :1]    # L0 = 1 - L1 - L2 - L3
+
+
+def test_p2p1_pressure_satisfies_constraint(binary, cm_env, tmp_path):
+    """Rebuild the constraint of every vertex a, int N_a (J - 1 - p/kappa) dV = 0 on the element
+    quadrature rule, from the exported geometry and pressure. This holds to solver precision for
+    the solved pressure, so it pins the sign and scale of the export, which the mid-edge test
+    cannot."""
+    meshio = pytest.importorskip("meshio")
+    kappa = 100
+    _, vtu_dir = _run(binary, cm_env, tmp_path, kappa=kappa)
+    ref = meshio.read(str(vtu_dir / "cantilever.0.vtu"))     # unloaded at t = 0
+    cur = meshio.read(str(_last_vtu(vtu_dir)))
+    cells = cur.cells_dict["tetra10"]
+    p = np.asarray(cur.point_data["Pressure"]).ravel()[cells[:, :4]]
+
+    pressure_term, volume_term = np.zeros(len(cur.points)), np.zeros(len(cur.points))
+    for q in range(4):
+        L = np.full(4, BETA)
+        L[q] = ALPHA
+        dN = _t10_gradients(L)
+        dV = np.linalg.det(np.einsum("cai,ak->cik", ref.points[cells], dN)) / 24
+        dv = np.linalg.det(np.einsum("cai,ak->cik", cur.points[cells], dN)) / 24
+        np.add.at(pressure_term, cells[:, :4], (dV * (p @ L))[:, None] * L)
+        np.add.at(volume_term, cells[:, :4], kappa * (dv - dV)[:, None] * L)
+
+    d = np.abs(pressure_term - volume_term)
+    tol = BALANCE_RTOL * np.abs(pressure_term).max()
+    i = int(np.argmax(d))
+    assert d[i] <= tol, (f"vertex {i}: int N p dV = {pressure_term[i]:.6e} but kappa int N (J-1) dV = "
+                         f"{volume_term[i]:.6e}, beyond {tol:.1e}")
+
+
+def test_displacement_only_exports_no_pressure(binary, cm_env, tmp_path):
+    meshio = pytest.importorskip("meshio")
+    _, vtu_dir = _run(binary, cm_env, tmp_path, element_type="T10")
+    assert "Pressure" not in meshio.read(str(_last_vtu(vtu_dir))).point_data
+
+
 NP = 4
 DEFORM_RTOL, DEFORM_ATOL = 1e-4, 1e-8     # as for the benchmark goldens
+PRESSURE_RTOL = 1e-4                      # absolute tolerance scaled by the peak pressure
 
 
 def _assert_parallel_matches_serial(binary, cm_env, tmp_path, fixture):
-    """Run fixture serially and at NP ranks, assert the final shapes agree, return the serial vtu directory."""
+    """Run fixture serially and at NP ranks, assert the final shapes and pressures agree, return the
+    serial vtu directory."""
     pytest.importorskip("meshio")
     if shutil.which("mpirun") is None:
         pytest.skip("mpirun not found")
@@ -208,6 +288,16 @@ def _assert_parallel_matches_serial(binary, cm_env, tmp_path, fixture):
         raise AssertionError(
             f"{fixture.name}: np={NP} differs from serial beyond rtol={DEFORM_RTOL} atol={DEFORM_ATOL}: "
             f"node PointID={int(pid[i])} parallel={parallel[i]} serial={serial[i]} |delta|={d[i]:.3e}")
+
+    # Each rank writes the pressures of its own elements, including nodes owned by another rank.
+    _, p_serial = read_vtu_point_field(_last_vtu(vtu_dirs[None]), "Pressure")
+    _, p_parallel = read_vtu_point_field(_last_vtu(vtu_dirs[NP]), "Pressure")
+    atol = PRESSURE_RTOL * np.abs(p_serial).max()
+    if not np.allclose(p_parallel, p_serial, rtol=PRESSURE_RTOL, atol=atol):
+        i = int(np.argmax(np.abs(p_parallel - p_serial)))
+        raise AssertionError(
+            f"{fixture.name}: np={NP} pressure differs from serial beyond rtol={PRESSURE_RTOL} atol={atol:.3e}: "
+            f"node PointID={int(pid[i])} parallel={p_parallel[i]:.6e} serial={p_serial[i]:.6e}")
     return vtu_dirs[None]
 
 

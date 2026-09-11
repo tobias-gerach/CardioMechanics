@@ -74,6 +74,12 @@ public:
     /// displacement-only elements.
     virtual unsigned int GetNumberOfPressureNodesIndices() {return 0;}
     
+    /// Pressure field at every element node, including nodes without a pressure degree of freedom.
+    virtual void GetNodesPressures(TFloat *pressures) {
+        throw std::runtime_error(
+                                 "CBElementSolid::GetNodesPressures(): This function is not implemented for the requested child class:");
+    }
+    
     virtual void CalcShapeFunctionDerivatives(TFloat l1, TFloat l2, TFloat l3, TFloat l4, TFloat *dNdX,
                                               bool useReferenceNodes = 0) {}
     

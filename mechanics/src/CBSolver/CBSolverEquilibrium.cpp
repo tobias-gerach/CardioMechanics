@@ -367,6 +367,7 @@ CBStatus CBSolverEquilibrium::SolverStep(PetscScalar time, bool forceJacobianAnd
     
     if ((snesReason <= 0) || (kspReason < 0)) {
         VecSet(displacement_, 0);
+        LinkPressures(pressures_); // the elements hold the last trial pressures, not those of nodes_
         return CBStatus::FAILED;
     }
     
@@ -416,6 +417,7 @@ CBStatus CBSolverEquilibrium::SolverStep(PetscScalar time, bool forceJacobianAnd
     switch (pluginsFeedback) {
         case CBStatus::FAILED:
         case CBStatus::REPEAT:
+            LinkPressures(pressures_);
             return pluginsFeedback;
             
         default:

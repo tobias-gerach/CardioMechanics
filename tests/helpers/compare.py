@@ -110,13 +110,27 @@ def read_vtu_points(path):
     import meshio
 
     m = meshio.read(str(path))
-    pts = m.points
-    pid = m.point_data.get("PointID")
+    return _by_point_id(m, m.points)
+
+
+def read_vtu_point_field(path, name):
+    """Named point-data field from a VTU, ordered by PointID, as read_vtu_points.
+    Returns (pointid, values), scalar fields squeezed to 1-D. Requires meshio."""
+    import meshio
+
+    m = meshio.read(str(path))
+    pid, vals = _by_point_id(m, np.asarray(m.point_data[name]))
+    return pid, vals.squeeze()
+
+
+def _by_point_id(mesh, values):
+    """(pointid, values) of per-point values ordered by PointID, in file order if there is none."""
+    pid = mesh.point_data.get("PointID")
     if pid is None:
-        return np.arange(len(pts)), pts
+        return np.arange(len(values)), values
     pid = np.asarray(pid).ravel()
     order = np.argsort(pid, kind="stable")
-    return pid[order], pts[order]
+    return pid[order], values[order]
 
 
 def read_vtu_cell_field(path, name):
