@@ -2,6 +2,7 @@
 
 The mesh is generated here rather than shipped: a 4 x 1 x 1 block of 8 x 2 x 2 cubes,
 each split into six tetrahedra, clamped at x = 0 and bent by a pressure on its top face.
+Its free end is a second surface, for boundary conditions other than the clamp.
 Every length, the shear modulus and the bulk modulus are O(1), so the displacement,
 coupling and constraint blocks of the Jacobian have comparable magnitude. On a
 millimetre mesh in SI units those blocks differ by many decades, and a relative
@@ -12,6 +13,7 @@ tetrahedra fall on the half-spacing grid, so every half-grid point is a node.
 """
 import itertools
 import re
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -21,9 +23,10 @@ from helpers.compare import read_vtu_points
 from helpers.run import run_binary
 
 FIXTURE = Path(__file__).parent / "fixtures" / "p2p1_cantilever.xml"
+ROBIN_FIXTURE = Path(__file__).parent / "fixtures" / "p2p1_cantilever_robin.xml"
 CELLS = (8, 2, 2)
 CELL_SIZE = 0.5
-MATERIAL, SURFACE = 30, 130
+MATERIAL, SURFACE, END_SURFACE = 30, 130, 131
 
 # T10 local nodes 5-10 sit on the edges (1,2), (2,3), (1,3), (1,4), (2,4), (3,4).
 T10_EDGES = ((0, 1), (1, 2), (0, 2), (0, 3), (1, 3), (2, 3))
@@ -45,7 +48,7 @@ def _clamped_dofs():
 
 
 def _write_mesh(tetgen_dir):
-    """Write the cantilever as tetgen .node/.ele/.sur files, T10 elements, T6 top faces."""
+    """Write the cantilever as tetgen .node/.ele/.sur files, T10 elements, T6 top and T3 end faces."""
     def mid(a, b):
         return tuple((x + y) // 2 for x, y in zip(a, b))
 
@@ -63,15 +66,23 @@ def _write_mesh(tetgen_dir):
             v = [tuple(x) for x in v]
             elements.append([_node(x) for x in v] + [_node(mid(v[a], v[b])) for a, b in T10_EDGES])
 
-    top = 2 * CELLS[2]
     surfaces = []
-    for ci, cj in itertools.product(range(CELLS[0]), range(CELLS[1])):
-        c = (2 * ci, 2 * cj, top)
-        corner = lambda dx, dy: (c[0] + 2 * dx, c[1] + 2 * dy, top)
+
+    def add_square(corner, index, quadratic):
+        """Two outward-facing triangles, T6 or T3, on the square spanned by corner(0..1, 0..1)."""
         for tri in ((corner(0, 0), corner(1, 0), corner(1, 1)),
                     (corner(0, 0), corner(1, 1), corner(0, 1))):
-            surfaces.append([_node(p) for p in tri]
-                            + [_node(mid(tri[a], tri[b])) for a, b in ((0, 1), (1, 2), (2, 0))])
+            mids = [_node(mid(tri[a], tri[b])) for a, b in ((0, 1), (1, 2), (2, 0))] if quadratic else []
+            surfaces.append((index, [_node(p) for p in tri] + mids))
+
+    top, end = 2 * CELLS[2], 2 * CELLS[0]
+    for ci, cj in itertools.product(range(CELLS[0]), range(CELLS[1])):
+        add_square(lambda dx, dy: (2 * (ci + dx), 2 * (cj + dy), top), SURFACE, quadratic=True)
+    # Nodes are numbered with z slowest, so the free end spans every rank's node block, whereas
+    # the bottom face would lie on the first rank alone. It is linear because the Robin boundary
+    # elements are three-node triangles.
+    for cj, ck in itertools.product(range(CELLS[1]), range(CELLS[2])):
+        add_square(lambda dy, dz: (end, 2 * (cj + dy), 2 * (ck + dz)), END_SURFACE, quadratic=False)
 
     points = list(itertools.product(*(range(n) for n in SHAPE)))
     points.sort(key=_node)
@@ -86,23 +97,23 @@ def _write_mesh(tetgen_dir):
             f.write(f"{n} {' '.join(map(str, e))} {MATERIAL}\n")
     with open(tetgen_dir / "cantilever.sur", "w") as f:
         f.write(f"{len(surfaces)} 6 2\n")
-        for n, s in enumerate(surfaces, 1):
-            f.write(f"{n} {' '.join(map(str, s))} {SURFACE} {SURFACE}\n")
+        for n, (index, s) in enumerate(surfaces, 1):
+            f.write(f"{n} {' '.join(map(str, s))} {index} {index}\n")
 
 
-def _run(binary, cm_env, wd, element_type="T10P1", kappa=100, env=None, check=True):
-    """Stage mesh and settings into wd, run serially, return (process, vtu directory)."""
+def _run(binary, cm_env, wd, element_type="T10P1", kappa=100, env=None, check=True, ranks=None, fixture=FIXTURE):
+    """Stage mesh and settings into wd, run on ranks MPI ranks (serially if None), return (process, vtu directory)."""
     (wd / "tetgen").mkdir()
     _write_mesh(wd / "tetgen")
     (wd / "Results").mkdir()
-    text = FIXTURE.read_text()
+    text = fixture.read_text()
     for old, new in (("<Type>T10P1</Type>", f"<Type>{element_type}</Type>"),
                      ("<k>100</k>", f"<k>{kappa}</k>")):
-        assert text.count(old) == 1, f"{FIXTURE.name}: cannot substitute {old}"
+        assert text.count(old) == 1, f"{fixture.name}: cannot substitute {old}"
         text = text.replace(old, new)
-    (wd / FIXTURE.name).write_text(text)
-    proc = run_binary(binary("CardioMechanics"), ["-settings", FIXTURE.name],
-                      cwd=wd, env=env or cm_env, timeout=600, check=check)
+    (wd / fixture.name).write_text(text)
+    proc = run_binary(binary("CardioMechanics"), ["-settings", fixture.name],
+                      cwd=wd, env=env or cm_env, timeout=600, check=check, np=ranks)
     if check:
         assert "SIMULATION FAILED" not in proc.stdout, f"{element_type} kappa={kappa}\n{proc.stdout[-2000:]}"
     return proc, wd / "Results" / "cantilever_vtu"
@@ -111,6 +122,12 @@ def _run(binary, cm_env, wd, element_type="T10P1", kappa=100, env=None, check=Tr
 def _final_points(vtu_dir):
     last = max(vtu_dir.glob("cantilever.*.vtu"), key=lambda p: int(p.stem.split(".")[1]))
     return read_vtu_points(last)
+
+
+def _peak_displacement(vtu_dir):
+    _, pts = _final_points(vtu_dir)
+    _, ref = read_vtu_points(vtu_dir / "cantilever.0.vtu")
+    return np.linalg.norm(pts - ref, axis=1).max()
 
 
 def test_unknown_element_type_lists_p2p1(binary, cm_env, tmp_path):
@@ -126,6 +143,56 @@ def test_p2p1_static_run_converges(binary, cm_env, tmp_path):
     _, ref = read_vtu_points(vtu_dir / "cantilever.0.vtu")
     deflection = np.abs(pts - ref).max()
     assert deflection > 1e-2, f"cantilever barely moved: max displacement {deflection:.3e}"
+
+
+NP = 4
+DEFORM_RTOL, DEFORM_ATOL = 1e-4, 1e-8     # as for the benchmark goldens
+
+
+def _assert_parallel_matches_serial(binary, cm_env, tmp_path, fixture):
+    """Run fixture serially and at NP ranks, assert the final shapes agree, return the serial vtu directory."""
+    pytest.importorskip("meshio")
+    if shutil.which("mpirun") is None:
+        pytest.skip("mpirun not found")
+    points, vtu_dirs = {}, {}
+    for ranks in (None, NP):
+        wd = tmp_path / f"np{ranks or 1}"
+        wd.mkdir(parents=True)
+        _, vtu_dirs[ranks] = _run(binary, cm_env, wd, ranks=ranks, fixture=fixture)
+        points[ranks] = _final_points(vtu_dirs[ranks])
+
+    (pid, serial), (pid_parallel, parallel) = points[None], points[NP]
+    assert np.array_equal(pid, pid_parallel), "point ordering differs between serial and parallel"
+    if not np.allclose(parallel, serial, rtol=DEFORM_RTOL, atol=DEFORM_ATOL):
+        d = np.linalg.norm(parallel - serial, axis=1)
+        i = int(np.argmax(d))
+        raise AssertionError(
+            f"{fixture.name}: np={NP} differs from serial beyond rtol={DEFORM_RTOL} atol={DEFORM_ATOL}: "
+            f"node PointID={int(pid[i])} parallel={parallel[i]} serial={serial[i]} |delta|={d[i]:.3e}")
+    return vtu_dirs[None]
+
+
+@pytest.mark.mpi
+def test_p2p1_parallel_matches_serial(binary, cm_env, tmp_path):
+    """Every rank but the first shifts its displacement unknowns by the pressure unknowns of the
+    ranks before it, and needs the pressures of vertices it ghosts, so a parallel run that writes
+    a global index without the offset, or misses a ghost, departs from the serial one."""
+    _assert_parallel_matches_serial(binary, cm_env, tmp_path, FIXTURE)
+
+
+MIN_ROBIN_EFFECT = 0.05     # relative change of the peak displacement
+
+
+@pytest.mark.mpi
+def test_p2p1_robin_boundary_parallel_matches_serial(binary, cm_env, tmp_path):
+    """A Robin boundary adds its forces by global node rather than through the element mapping,
+    from surface elements on every rank."""
+    robin = _peak_displacement(_assert_parallel_matches_serial(binary, cm_env, tmp_path / "robin", ROBIN_FIXTURE))
+    (tmp_path / "free").mkdir()
+    _, vtu_dir = _run(binary, cm_env, tmp_path / "free")
+    free = _peak_displacement(vtu_dir)
+    assert abs(robin - free) > MIN_ROBIN_EFFECT * free, \
+        f"Robin boundary barely acts: peak displacement {robin:.4e} with, {free:.4e} without"
 
 
 JACOBIAN_THRESHOLD = 1e-6

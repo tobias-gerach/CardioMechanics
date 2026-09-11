@@ -119,7 +119,6 @@ void CBRobinBoundary::ApplyToNodalForces() {
     
     for (int i = 0; i < contactSurfaceElements_.size(); i++) {
         auto element = contactSurfaceElements_.at(i);
-        TInt nodesCoordsIndices[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
         TFloat nodalForces[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
         bool   bc[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
         
@@ -131,7 +130,6 @@ void CBRobinBoundary::ApplyToNodalForces() {
         TInt nodes[3];
         for (int k = 0; k < 3; k++)
             nodes[k] = adapter_->GlobalNodeIndex(element->GetNodeIndex(k));
-        adapter_->GetGlobalDofIndices(3, nodes, nodesCoordsIndices);
         
         displacement_.at(i) = initialPos_.at(i) - element->GetCentroid();
         velocity_.at(i)     = (displacement_.at(i) - prevDisplacement_.at(i)) / dt_;
@@ -152,7 +150,7 @@ void CBRobinBoundary::ApplyToNodalForces() {
             }
             ContactForces_.at(i)    += Vector3<TFloat>(nodalForces[3*k], nodalForces[3*k+1], nodalForces[3*k+2])/3;
         }
-        Base::GetAdapter()->AddNodalForcesComponentsGlobal(9, nodesCoordsIndices, nodalForces);
+        Base::GetAdapter()->AddNodalForcesComponentsGlobal(3, nodes, nodalForces);
     }
 }  // CBRobinBoundary::ApplyToNodalForces
 

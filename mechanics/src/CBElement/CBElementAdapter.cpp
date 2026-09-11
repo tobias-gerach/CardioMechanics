@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <numeric>
 
 #include "CBSolver.h"
 #include "CBElementAdapter.h"
@@ -75,21 +76,52 @@ void CBElementAdapter::InitNodesIndicesMapping()
     PetscInt numTotalNodes = numLocalNodes + solver_->GetNumberOfGhostNodes();
     
     std::vector<PetscInt> dofIndices(3 * numTotalNodes);
+    std::vector<PetscInt> nodesComponents(3 * numTotalNodes);
     for(PetscInt i = 0; i < numTotalNodes; i++)
     {
         PetscInt n = GlobalNodeIndex(i);
         for(PetscInt c = 0; c < 3; c++)
-            dofIndices[3*i+c] = GlobalDofIndex(n, c);
+        {
+            dofIndices[3*i+c]      = GlobalDofIndex(n, c);
+            nodesComponents[3*i+c] = 3*n+c;
+        }
     }
     
     ISLocalToGlobalMappingCreate(DCPetsc::Comm(), 1, 3 * numTotalNodes, dofIndices.data(), PETSC_COPY_VALUES,
                                  &nodesIndicesMapping_);
     ISLocalToGlobalMappingCreate(DCPetsc::Comm(), 1, 3 * numLocalNodes, dofIndices.data(), PETSC_COPY_VALUES,
                                  &nodesIndicesMappingNonGhosted_);
+    ISLocalToGlobalMappingCreate(DCPetsc::Comm(), 1, 3 * numTotalNodes, nodesComponents.data(), PETSC_COPY_VALUES,
+                                 &nodesComponentsMapping_);
 
     PetscInt rank = DCCtrl::GetProcessID();
+
+    // A rank reads the pressures of every vertex of its elements, including the vertices it ghosts,
+    // since the partitioner ghosts every node of an owned element.
+    PetscInt numLocalPressures = GetNumberOfLocalPressureDofs();
+    std::vector<PetscInt> localToGlobalPressures(numLocalPressures);
+    std::iota(localToGlobalPressures.begin(), localToGlobalPressures.end(), pressureRanges_[rank]);
+    localPressureIndices_.assign(numTotalNodes, -1);
+    ghostPressureIndices_.clear();
+    for(PetscInt i = 0; i < numTotalNodes; i++)
+    {
+        PetscInt p = pressureIndices.at(GlobalNodeIndex(i));
+        if(p < 0)
+            continue;
+        if(i < numLocalNodes)
+            localPressureIndices_[i] = p - pressureRanges_[rank];
+        else
+        {
+            localPressureIndices_[i] = numLocalPressures + ghostPressureIndices_.size();
+            ghostPressureIndices_.push_back(p);
+        }
+    }
+    localToGlobalPressures.insert(localToGlobalPressures.end(), ghostPressureIndices_.begin(), ghostPressureIndices_.end());
+    ISLocalToGlobalMappingCreate(DCPetsc::Comm(), 1, localToGlobalPressures.size(), localToGlobalPressures.data(),
+                                 PETSC_COPY_VALUES, &pressureMapping_);
+
     ISCreateStride(DCPetsc::Comm(), 3 * numLocalNodes, dofOffsets_[rank], 1, &displacementDofs_);
-    ISCreateStride(DCPetsc::Comm(), GetNumberOfLocalPressureDofs(), dofOffsets_[rank] + 3 * numLocalNodes, 1,
+    ISCreateStride(DCPetsc::Comm(), numLocalPressures, dofOffsets_[rank] + 3 * numLocalNodes, 1,
                    &pressureDofs_);
 }
 
@@ -132,14 +164,10 @@ void CBElementAdapter::GetGlobalPressureDofIndices(PetscInt numNodes, const Pets
 
 void CBElementAdapter::GetLocalPressureIndices(PetscInt numNodes, const PetscInt* localNodes, PetscInt* pressureIndices)
 {
-    const std::vector<TInt>& modelPressureIndices = solver_->GetModel()->GetPressureIndices();
-    PetscInt firstPressureIndex = pressureRanges_[DCCtrl::GetProcessID()];
     for(PetscInt i = 0; i < numNodes; i++)
     {
-        // Pressures of ghost vertices would need a ghost exchange of their own.
-        assert(localNodes[i] < solver_->GetNumberOfLocalNodes());
-        pressureIndices[i] = modelPressureIndices.at(GlobalNodeIndex(localNodes[i])) - firstPressureIndex;
-        assert(pressureIndices[i] >= 0);
+        pressureIndices[i] = localPressureIndices_.at(localNodes[i]);
+        assert(pressureIndices[i] >= 0 && "node carries no pressure degree of freedom");
     }
 }
 
@@ -282,9 +310,13 @@ void CBElementAdapter::GetNodalForcesComponents(PetscInt numNodalForcesComponent
     VecGetValues(nodalForces_, numNodalForcesComponents, nodalForcesComponentsIndices, nodalForcesComponents);
 }
 
-void CBElementAdapter::AddNodalForcesComponentsGlobal(PetscInt numNodalForcesComponents, const PetscInt* nodalForcesComponentsIndices, const PetscScalar* nodalForcesComponents)
+void CBElementAdapter::AddNodalForcesComponentsGlobal(PetscInt numNodes, const PetscInt* globalNodes, const PetscScalar* nodalForcesComponents)
 {
-    VecSetValues(nodalForces_, numNodalForcesComponents, nodalForcesComponentsIndices, nodalForcesComponents, ADD_VALUES);
+    std::vector<PetscInt> indices(3 * numNodes);
+    for(PetscInt i = 0; i < numNodes; i++)
+        for(PetscInt c = 0; c < 3; c++)
+            indices[3*i+c] = 3*globalNodes[i]+c;
+    VecSetValues(nodalForces_, 3 * numNodes, indices.data(), nodalForcesComponents, ADD_VALUES);
 }
 
 

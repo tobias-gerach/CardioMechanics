@@ -43,6 +43,8 @@ protected:
     CBStatus CalcNodalForcesJacobian(Vec displacement, Mat jacobian);
     /// displacedNodes = nodes + displacement increment; links pressures + pressure increment.
     void ApplyIncrement(Vec unknowns, Vec displacedNodes);
+    /// Updates the ghost vertices of a pressure field and links it to the adapter.
+    void LinkPressures(Vec pressures);
     typedef CBSolver   Base;
     
     SNES snes_;

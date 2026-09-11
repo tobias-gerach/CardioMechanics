@@ -231,9 +231,6 @@ void CBSolver::Init(ParameterMap *parameters, CBModel *model) {
     if (model_->GetNumberOfPressureNodes() > 0) {
         if (!SupportsPressureField())
             throw std::runtime_error("CBSolver::Init(): Solver [" + GetType() + "] does not support T10P1 elements");
-        // Pressures of vertices owned by another rank have no ghost exchange yet.
-        if (DCCtrl::IsParallel())
-            throw std::runtime_error("CBSolver::Init(): T10P1 elements do not yet run on more than one MPI rank");
         // Evaluated once in the reference configuration, so that a material law without a mixed
         // formulation fails here rather than inside the first solve.
         for (auto &it : materials_) {
@@ -460,7 +457,7 @@ void CBSolver::InitNodalForces() {
     else
         VecCreateSeq(PETSC_COMM_SELF, 3 * numNodes_, &nodalForces_);
     
-    VecSetLocalToGlobalMapping(nodalForces_, nodesIndicesMapping_);
+    VecSetLocalToGlobalMapping(nodalForces_, adapter_->GetNodesComponentsLocalToGlobalMapping());
     adapter_->LinkNodalForces(nodalForces_);
 }
 

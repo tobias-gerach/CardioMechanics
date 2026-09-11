@@ -377,7 +377,6 @@ void CBContactHandling::ApplyToNodalForces() {
     for (int i = 0; i < masterElements_.size(); i++) {
         auto e = masterElements_.at(i);
         
-        TInt pos[18];
         bool bc[18]            = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
         TFloat nodalForces[18] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
         TFloat distances[3]    = {0, 0, 0};
@@ -412,7 +411,6 @@ void CBContactHandling::ApplyToNodalForces() {
             for (int k = 3; k < 6; k++)
                 nodes[k] = slaveElementsNodesIndicesGlobal_.at(3*slave+(k-3));
             
-            adapter_->GetGlobalDofIndices(6, nodes, pos);
             GetAdapter()->GetNodesComponentsBoundaryConditionsForGlobalNodes(6, nodes, bc);
             
             for (int k = 0; k < 6; k++) {
@@ -424,7 +422,7 @@ void CBContactHandling::ApplyToNodalForces() {
                     nodalForces[3*k+2] = 0;
             }
             
-            Base::GetAdapter()->AddNodalForcesComponentsGlobal(18, pos, nodalForces);
+            Base::GetAdapter()->AddNodalForcesComponentsGlobal(6, nodes, nodalForces);
         }
         
         if (slaveNormal.Norm() != 0)

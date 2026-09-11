@@ -1,4 +1,4 @@
-<settings>P2P1 cantilever</settings>
+<settings>P2P1 cantilever with a Robin boundary on its free end</settings>
 
 <General>
     <LogFile>./Results/cantilever.log</LogFile>
@@ -18,7 +18,7 @@
 
     <Surfaces>
         <Surface_130><Type>T6</Type></Surface_130>
-        <Surface_131><Type>T3</Type></Surface_131> <!-- free end, unloaded -->
+        <Surface_131><Type>CONTACT_ROBIN</Type></Surface_131>
     </Surfaces>
 </Mesh>
 
@@ -59,6 +59,7 @@
 
     <Plugins>
         <ApplyPressureFromFunction>true</ApplyPressureFromFunction>
+        <RobinBoundaryGeneral>true</RobinBoundaryGeneral>
     </Plugins>
 </Solver>
 
@@ -81,4 +82,13 @@
             </Top>
         </Groups>
     </ApplyPressureFromFunction>
+
+    <!-- The plugin contributes no Jacobian, so Newton converges only linearly, at a rate set by
+         the spring's share of the tip stiffness (about 0.01 here). A weak spring keeps it fast
+         while still moving the tip measurably. No dashpot: a static step has no velocity. -->
+    <RobinBoundaryGeneral>
+        <SurfaceIndex>131</SurfaceIndex>
+        <Alpha>0.002</Alpha>
+        <Beta>0</Beta>
+    </RobinBoundaryGeneral>
 </Plugins>
