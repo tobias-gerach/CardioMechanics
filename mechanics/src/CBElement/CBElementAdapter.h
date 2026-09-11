@@ -36,7 +36,9 @@ public:
     {}
     
     virtual ~CBElementAdapter(){fdEpsilon_ = 0;
-        solver_    = 0; }
+        solver_    = 0;
+        ISDestroy(&displacementDofs_);
+        ISDestroy(&pressureDofs_); }
     
     virtual void Init(){}
     void SetSolver(CBSolver* solver){solver_ = solver; }
@@ -125,6 +127,26 @@ public:
     //! Fills 3 * numNodes vector and matrix indices, three consecutive components per node.
     void GetGlobalDofIndices(PetscInt numNodes, const PetscInt* globalNodes, PetscInt* dofIndices);
 
+    //! Vector and matrix index of the pressure unknown of a vertex node.
+    PetscInt GlobalPressureDofIndex(PetscInt globalNode);
+    void GetGlobalPressureDofIndices(PetscInt numNodes, const PetscInt* globalNodes, PetscInt* dofIndices);
+    PetscInt GetNumberOfLocalPressureDofs();
+    PetscInt GetNumberOfLocalDofs();
+    //! Jacobian non-zeros per row of this rank's unknowns, for preallocation.
+    std::vector<PetscInt> GetLocalDofsNnz();
+
+    //! The displacement and the pressure block of this rank's unknowns, for extracting either
+    //! field from the unknown vector and for a future fieldsplit preconditioner (ADR-0004).
+    IS GetDisplacementDofs(){return displacementDofs_; }
+    IS GetPressureDofs(){return pressureDofs_; }
+
+    //! Pressure field, indexed by the local pressure indices of vertex nodes.
+    void LinkPressures(Vec pressures){pressures_ = pressures; }
+    void LinkPressureResiduals(Vec pressureResiduals){pressureResiduals_ = pressureResiduals; }
+    void GetLocalPressureIndices(PetscInt numNodes, const PetscInt* localNodes, PetscInt* pressureIndices);
+    void GetPressures(PetscInt numPressures, const PetscInt* pressureIndices, PetscScalar* pressures){VecGetValues(pressures_, numPressures, pressureIndices, pressures); }
+    void AddPressureResiduals(PetscInt numPressures, const PetscInt* pressureIndices, const PetscScalar* residuals){VecSetValues(pressureResiduals_, numPressures, pressureIndices, residuals, ADD_VALUES); }
+
     void ApplyLocalToGlobalMapping(PetscInt* nodesCoordsIndices, PetscInt numIndices){ISLocalToGlobalMappingApply(nodesIndicesMapping_, numIndices, nodesCoordsIndices, nodesCoordsIndices); }
     void ApplyGlobalToLocalMapping(PetscInt* nodesCoordsIndices, PetscInt numIndices) { ISGlobalToLocalMappingApply(nodesIndicesMapping_, IS_GTOLM_MASK, numIndices, nodesCoordsIndices, &numIndices, nodesCoordsIndices); } // index is -1 if not on local process
     void ApplyGlobalToLocalMappingNonGhosted(PetscInt* nodesCoordsIndices, PetscInt numIndices) { ISGlobalToLocalMappingApply(nodesIndicesMappingNonGhosted_, IS_GTOLM_MASK, numIndices, nodesCoordsIndices, &numIndices, nodesCoordsIndices); } // index is -1 if not on local process
@@ -183,6 +205,11 @@ private:
     ISLocalToGlobalMapping nodesIndicesMappingNonGhosted_;
     std::vector<PetscInt>  nodesRanges_;
     std::vector<PetscInt>  dofOffsets_;
+    std::vector<PetscInt>  pressureRanges_;
+    IS                     displacementDofs_ = 0;
+    IS                     pressureDofs_ = 0;
+    Vec                    pressures_ = 0;
+    Vec                    pressureResiduals_ = 0;
 };
 
 #endif

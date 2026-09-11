@@ -33,6 +33,9 @@ public:
     
     CBStatus CalcEnergy(const Matrix3<TFloat> &deformationTensor, TFloat &energy);
     CBStatus CalcPK2Stress(const Matrix3<TFloat> &deformationTensor, Matrix3<TFloat> &pk2Stress);
+    CBStatus CalcIsochoricPK2Stress(const Matrix3<TFloat> &deformationTensor, Matrix3<TFloat> &pk2Stress);
+    CBStatus CalcIsochoricEnergy(const Matrix3<TFloat> &deformationTensor, TFloat &energy);
+    TFloat   GetBulkModulus() {return k_;}
     void     Init(ParameterMap *parameters, TInt materialIndex);
     
 protected:

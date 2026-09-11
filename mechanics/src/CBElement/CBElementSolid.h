@@ -70,6 +70,10 @@ public:
     
     virtual TFloat *GetShapeFunctionsDerivatives() = 0;
     
+    /// Number of leading element nodes that carry a pressure degree of freedom; zero for
+    /// displacement-only elements.
+    virtual unsigned int GetNumberOfPressureNodesIndices() {return 0;}
+    
     virtual void CalcShapeFunctionDerivatives(TFloat l1, TFloat l2, TFloat l3, TFloat l4, TFloat *dNdX,
                                               bool useReferenceNodes = 0) {}
     

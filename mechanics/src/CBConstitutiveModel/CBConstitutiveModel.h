@@ -45,6 +45,24 @@ public:
     
     virtual CBStatus CalcPK2Stress(const Matrix3<TFloat> &deformationTensor, Matrix3<TFloat> &pk2Stress)       = 0;
     
+    /// Stress of the volume-preserving part of the deformation alone. Mixed displacement/pressure
+    /// elements carry the volumetric response in their own pressure field and must not receive it
+    /// a second time from the material law.
+    virtual CBStatus CalcIsochoricPK2Stress(const Matrix3<TFloat> &deformationTensor, Matrix3<TFloat> &pk2Stress) {
+        throw std::runtime_error("This material law provides no isochoric stress, which the T10P1 element requires");
+    }
+
+    /// Energy of the volume-preserving part of the deformation alone, the counterpart of
+    /// CalcIsochoricPK2Stress.
+    virtual CBStatus CalcIsochoricEnergy(const Matrix3<TFloat> &deformationTensor, TFloat &energy) {
+        throw std::runtime_error("This material law provides no isochoric energy, which the T10P1 element requires");
+    }
+
+    /// Bulk modulus kappa, the coefficient of the volumetric response.
+    virtual TFloat GetBulkModulus() {
+        throw std::runtime_error("This material law provides no bulk modulus, which the T10P1 element requires");
+    }
+
     TInt GetModelIndex() {return modelIndex_; }
     
     void SetModelIndex(TInt modelIndex) {modelIndex_ = modelIndex; }

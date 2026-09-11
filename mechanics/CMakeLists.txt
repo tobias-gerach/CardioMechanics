@@ -31,6 +31,7 @@ set(SRCS
     src/CBElement/CBElementFactory.cpp
     src/CBElement/CBElementSolid.cpp
     src/CBElement/CBElementSolidT10.cpp
+    src/CBElement/CBElementSolidT10P1.cpp
     src/CBElement/CBElementSolidT4.cpp
     src/CBElement/CBElementSurfaceT3.cpp
     src/CBElement/CBElementSurfaceT6.cpp

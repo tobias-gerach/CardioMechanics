@@ -227,6 +227,23 @@ void CBSolver::Init(ParameterMap *parameters, CBModel *model) {
     InitParameters();
     model_->SetMaxNnz(numNonZeros_);
     LoadMesh();
+
+    if (model_->GetNumberOfPressureNodes() > 0) {
+        if (!SupportsPressureField())
+            throw std::runtime_error("CBSolver::Init(): Solver [" + GetType() + "] does not support T10P1 elements");
+        // Pressures of vertices owned by another rank have no ghost exchange yet.
+        if (DCCtrl::IsParallel())
+            throw std::runtime_error("CBSolver::Init(): T10P1 elements do not yet run on more than one MPI rank");
+        // Evaluated once in the reference configuration, so that a material law without a mixed
+        // formulation fails here rather than inside the first solve.
+        for (auto &it : materials_) {
+            Matrix3<TFloat> stress;
+            TFloat energy;
+            it.second->GetConstitutiveModel()->CalcIsochoricPK2Stress(Matrix3<TFloat>::Identity(), stress);
+            it.second->GetConstitutiveModel()->CalcIsochoricEnergy(Matrix3<TFloat>::Identity(), energy);
+            it.second->GetConstitutiveModel()->GetBulkModulus();
+        }
+    }
     
     MPI_Barrier(DCPetsc::Comm());
     
@@ -1246,6 +1263,7 @@ void CBSolver::LoadMesh() {
     
     DCCtrl::print <<
     "\xd\t\tInitializing: Mesh: Nodes indices mapping ...                                                  ";
+    model_->InitPressureIndices();
     InitNodesIndicesMapping();
     
     DCCtrl::print <<
@@ -1540,13 +1558,13 @@ void CBSolver::InitNodesComponentsBoundaryConditions() {
     
     if (DCCtrl::IsParallel()) {
         MatCreateAIJ(
-                     DCPetsc::Comm(), 3 * numLocalNodes_, 3 * numLocalNodes_, PETSC_DETERMINE, PETSC_DETERMINE, 3, PETSC_NULLPTR, 1, PETSC_NULLPTR,
+                     DCPetsc::Comm(), adapter_->GetNumberOfLocalDofs(), adapter_->GetNumberOfLocalDofs(), PETSC_DETERMINE, PETSC_DETERMINE, 3, PETSC_NULLPTR, 1, PETSC_NULLPTR,
                      &boundaryConditionsNodalForcesJacobianDiagonalComponents_);
         MatSetLocalToGlobalMapping(boundaryConditionsNodalForcesJacobianDiagonalComponents_, nodesIndicesMapping_,
                                    nodesIndicesMapping_);
     } else {
         MatCreateSeqAIJ(
-                        DCPetsc::Comm(), 3 * numNodes_, 3 * numNodes_, 3, PETSC_NULLPTR,
+                        DCPetsc::Comm(), adapter_->GetNumberOfLocalDofs(), adapter_->GetNumberOfLocalDofs(), 3, PETSC_NULLPTR,
                         &boundaryConditionsNodalForcesJacobianDiagonalComponents_);
         MatSetLocalToGlobalMapping(boundaryConditionsNodalForcesJacobianDiagonalComponents_, nodesIndicesMapping_,
                                    nodesIndicesMapping_);
@@ -1583,18 +1601,18 @@ PetscScalar CBSolver::CalcFiniteDifferencesEpsilon(Vec a) {
 }
 
 void CBSolver::CreateNodesJacobianAndLinkToAdapter() {
+    std::vector<PetscInt> nnz = adapter_->GetLocalDofsNnz();
     if (nodalForcesJacobian_ != 0)
         MatDestroy(&nodalForcesJacobian_);
     
     if (DCCtrl::IsParallel()) {
         MatCreateAIJ(
-                     DCPetsc::Comm(), 3 * numLocalNodes_, 3 * numLocalNodes_, PETSC_DETERMINE, PETSC_DETERMINE, 0,
-                     model_->GetNodeNeighborsForNnz().data() + localNodesFrom_*3, 0,
-                     model_->GetNodeNeighborsForNnz().data() + localNodesFrom_*3, &nodalForcesJacobian_);
+                     DCPetsc::Comm(), adapter_->GetNumberOfLocalDofs(), adapter_->GetNumberOfLocalDofs(), PETSC_DETERMINE, PETSC_DETERMINE, 0,
+                     nnz.data(), 0, nnz.data(), &nodalForcesJacobian_);
         MatSetLocalToGlobalMapping(nodalForcesJacobian_, nodesIndicesMapping_, nodesIndicesMapping_);
     } else {
-        [[maybe_unused]] PetscErrorCode ierr = MatCreateSeqAIJ(DCPetsc::Comm(), 3 * numNodes_, 3 * numNodes_, 0,
-                                              model_->GetNodeNeighborsForNnz().data(), &nodalForcesJacobian_);
+        [[maybe_unused]] PetscErrorCode ierr = MatCreateSeqAIJ(DCPetsc::Comm(), adapter_->GetNumberOfLocalDofs(), adapter_->GetNumberOfLocalDofs(), 0,
+                                              nnz.data(), &nodalForcesJacobian_);
         ierr = MatSetLocalToGlobalMapping(nodalForcesJacobian_, nodesIndicesMapping_, nodesIndicesMapping_);
     }
     adapter_->LinkNodalForcesJacobian(nodalForcesJacobian_);

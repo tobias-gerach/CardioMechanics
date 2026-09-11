@@ -644,7 +644,15 @@ CBStatus CBElementSolidT10::CalcNodalForcesHelperFunction(const TFloat *nodesCoo
         // until here, stress holds the PK2 stress
         activeStress = Base::tensionModel_->CalcActiveStress(deformationTensors[QPi], time);
         stress[QPi] += activeStress;
+    }
         
+    CalcNodalForcesFromPK2Stresses(deformationTensors, stress, boundaryConditions, forces);
+    return rc;
+} // CBElementSolidT10::CalcNodalForcesHelperFunction
+
+void CBElementSolidT10::CalcNodalForcesFromPK2Stresses(const Matrix3<TFloat> *deformationTensors, Matrix3<TFloat> *stress,
+                                                       const bool *boundaryConditions, TFloat *forces) {
+    for (int QPi = 0; QPi < 4; QPi++) {
         // convert PK2 stress into nominal stress with respect to the local coordinate system aligned with the fibres
         stress[QPi] = (deformationTensors[QPi] * stress[QPi]).GetTranspose();
         
@@ -688,9 +696,7 @@ CBStatus CBElementSolidT10::CalcNodalForcesHelperFunction(const TFloat *nodesCoo
         else
             forces[3*i+2] = 0;
     }
-    
-    return rc;
-} // CBElementSolidT10::CalcNodalForcesHelperFunction
+} // CBElementSolidT10::CalcNodalForcesFromPK2Stresses
 
 void CBElementSolidT10::CalcT4ShapeFunctionsDerivatives() {
     TFloat nodesCoords[30];

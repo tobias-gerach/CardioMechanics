@@ -71,6 +71,9 @@ protected:
     virtual void CalcDeformationTensorsAtCentroidWithLocalBasisWithT4ShapeFunctions(const TFloat* nodesCoords, Matrix3<TFloat>& deformationTensors);
     void GetNodesCoordsIndices(TInt* nodesCoordsIndices);
     virtual CBStatus CalcNodalForcesHelperFunction(const TFloat* nodesCoords, const bool* boundaryConditions, TFloat* forces);
+    //! Integrates the PK2 stresses at the four quadrature points, given in the local bases, into
+    //! nodal forces. Overwrites stress.
+    void CalcNodalForcesFromPK2Stresses(const Matrix3<TFloat>* deformationTensors, Matrix3<TFloat>* stress, const bool* boundaryConditions, TFloat* forces);
     
     std::array<TInt, 10> nodesIndices_;
     std::array<TFloat, 150> dNdXW_;  // Derivatives of the shape functions at the 4 quadrature points + center

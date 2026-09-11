@@ -55,13 +55,19 @@ void CBElementAdapter::InitNodesIndicesMapping()
 {
     nodesRanges_ = solver_->GetNodesRanges();
     
-    // Each rank owns one contiguous block of the global unknown vector, so a block starts where
-    // the preceding ranks' unknowns end. numPressureDofs is zero as long as displacement is the
-    // only field, which makes the block of rank r start at 3 * (its first node).
+    // Each rank owns one contiguous block of the global unknown vector: its displacement unknowns,
+    // then the pressure unknowns of its vertex nodes. A block starts where the preceding ranks'
+    // unknowns end. Pressure indices number vertex nodes in node order, so a rank's pressure
+    // indices form a contiguous range too.
+    const std::vector<TInt>& pressureIndices = solver_->GetModel()->GetPressureIndices();
     dofOffsets_.assign(nodesRanges_.size(), 0);
+    pressureRanges_.assign(nodesRanges_.size(), 0);
     for(std::size_t r = 0; r + 1 < nodesRanges_.size(); r++)
     {
-        PetscInt numPressureDofs = 0;
+        pressureRanges_[r+1] = pressureRanges_[r] + std::count_if(pressureIndices.begin() + nodesRanges_[r],
+                                                                  pressureIndices.begin() + nodesRanges_[r+1],
+                                                                  [](TInt p){return p >= 0; });
+        PetscInt numPressureDofs = pressureRanges_[r+1] - pressureRanges_[r];
         dofOffsets_[r+1] = dofOffsets_[r] + 3 * (nodesRanges_[r+1] - nodesRanges_[r]) + numPressureDofs;
     }
     
@@ -80,6 +86,61 @@ void CBElementAdapter::InitNodesIndicesMapping()
                                  &nodesIndicesMapping_);
     ISLocalToGlobalMappingCreate(DCPetsc::Comm(), 1, 3 * numLocalNodes, dofIndices.data(), PETSC_COPY_VALUES,
                                  &nodesIndicesMappingNonGhosted_);
+
+    PetscInt rank = DCCtrl::GetProcessID();
+    ISCreateStride(DCPetsc::Comm(), 3 * numLocalNodes, dofOffsets_[rank], 1, &displacementDofs_);
+    ISCreateStride(DCPetsc::Comm(), GetNumberOfLocalPressureDofs(), dofOffsets_[rank] + 3 * numLocalNodes, 1,
+                   &pressureDofs_);
+}
+
+PetscInt CBElementAdapter::GetNumberOfLocalPressureDofs()
+{
+    PetscInt rank = DCCtrl::GetProcessID();
+    return pressureRanges_[rank+1] - pressureRanges_[rank];
+}
+
+PetscInt CBElementAdapter::GetNumberOfLocalDofs()
+{
+    return 3 * solver_->GetNumberOfLocalNodes() + GetNumberOfLocalPressureDofs();
+}
+
+std::vector<PetscInt> CBElementAdapter::GetLocalDofsNnz()
+{
+    std::vector<PetscInt> nodesNnz    = solver_->GetModel()->GetNodeNeighborsForNnz();
+    std::vector<PetscInt> pressureNnz = solver_->GetModel()->GetPressureNeighborsForNnz();
+    PetscInt rank = DCCtrl::GetProcessID();
+
+    std::vector<PetscInt> nnz(nodesNnz.begin() + 3 * nodesRanges_[rank], nodesNnz.begin() + 3 * nodesRanges_[rank+1]);
+    nnz.insert(nnz.end(), pressureNnz.begin() + pressureRanges_[rank], pressureNnz.begin() + pressureRanges_[rank+1]);
+    return nnz;
+}
+
+PetscInt CBElementAdapter::GlobalPressureDofIndex(PetscInt globalNode)
+{
+    PetscInt p = solver_->GetModel()->GetPressureIndices().at(globalNode);
+    assert(p >= 0 && "node carries no pressure degree of freedom");
+
+    PetscInt owner = std::upper_bound(nodesRanges_.begin(), nodesRanges_.end(), globalNode) - nodesRanges_.begin() - 1;
+    return dofOffsets_[owner] + 3 * (nodesRanges_[owner+1] - nodesRanges_[owner]) + p - pressureRanges_[owner];
+}
+
+void CBElementAdapter::GetGlobalPressureDofIndices(PetscInt numNodes, const PetscInt* globalNodes, PetscInt* dofIndices)
+{
+    for(PetscInt i = 0; i < numNodes; i++)
+        dofIndices[i] = GlobalPressureDofIndex(globalNodes[i]);
+}
+
+void CBElementAdapter::GetLocalPressureIndices(PetscInt numNodes, const PetscInt* localNodes, PetscInt* pressureIndices)
+{
+    const std::vector<TInt>& modelPressureIndices = solver_->GetModel()->GetPressureIndices();
+    PetscInt firstPressureIndex = pressureRanges_[DCCtrl::GetProcessID()];
+    for(PetscInt i = 0; i < numNodes; i++)
+    {
+        // Pressures of ghost vertices would need a ghost exchange of their own.
+        assert(localNodes[i] < solver_->GetNumberOfLocalNodes());
+        pressureIndices[i] = modelPressureIndices.at(GlobalNodeIndex(localNodes[i])) - firstPressureIndex;
+        assert(pressureIndices[i] >= 0);
+    }
 }
 
 PetscInt CBElementAdapter::GlobalNodeIndex(PetscInt localNode)

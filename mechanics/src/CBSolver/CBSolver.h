@@ -67,6 +67,9 @@ public:
     virtual void        Run();
     virtual CBStatus    PrepareSimulation();
     virtual std::string GetType() = 0;
+
+    /// Whether the solver carries the pressure field of mixed displacement/pressure elements.
+    virtual bool SupportsPressureField() {return false; }
     
     virtual void SetZeroVelocityAndAcceleration() {}
     
