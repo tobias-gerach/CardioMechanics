@@ -40,6 +40,8 @@ public:
     
     std::string GetType() override {return "Generalized Alpha Solver";  }
     
+    bool SupportsPressureField() override {return true; }
+    
     void SetZeroVelocityAndAcceleration() override;
     void SetZeroDisplacement() override;
     friend PetscErrorCode CBSolverGeneralizedAlphaSNESHelperFunctionForces(SNES snes, Vec x, Vec f, void *solver);
@@ -52,10 +54,13 @@ public:
     
 protected:
     CBStatus SolverStep(PetscScalar time, bool forceJacobianAndDampingRecalculation = false) override;
-    CBStatus CalcNodalForcesJacobian(Vec displacement, Mat jacobian) override;
+    CBStatus CalcNodalForcesJacobian(Vec unknowns, Mat jacobian) override;
     CBStatus CalcDampingMatrix();
     
     bool        useConsistentMassMatrix_;
+    // The unknowns hold the displacement increment, then the pressure increment (ADR-0001). All
+    // other vectors are laid out like the nodes: pressure has no time derivative.
+    Vec         unknowns_;
     Vec         velocity_;
     Vec         acceleration_;
     Vec         displacement_;
@@ -76,7 +81,7 @@ protected:
     
 private:
     using CBSolver::CalcNodalForces;
-    CBStatus CalcNodalForces(Vec displacement, Vec forces);
+    CBStatus CalcNodalForces(Vec unknowns, Vec residual);
     void InitVectors() override;
     void InitMatrices() override;
     void InitMassMatrix();
@@ -93,6 +98,13 @@ private:
     /// that the preparation phase never asks the load history for a time before it is defined.
     PetscScalar IntermediateTime(PetscScalar time);
     
+    /// Adds K_uu, the displacement block of the stiffness in the linked state, to the damping
+    /// matrix. Pressure has no time derivative, so it is neither damped nor damping.
+    void AddDampingStiffness();
+    
+    /// Mass and damping matrices are laid out like the nodes, over the displacement unknowns alone.
+    ISLocalToGlobalMapping NodesComponentsMapping() {return Base::adapter_->GetNodesComponentsLocalToGlobalMapping(); }
+    
     typedef CBSolver   Base;
     
     SNES        snes_;
@@ -102,6 +114,7 @@ private:
     
     Mat         massMatrix_;
     Mat         dampingMatrix_;
+    Mat         elementsJacobian_ = 0; // unknown layout, the source of the damping stiffness K_uu
     
     PetscScalar prevTime_ = INFINITY;
     

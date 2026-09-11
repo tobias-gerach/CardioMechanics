@@ -134,6 +134,11 @@ public:
     //! Fills 3 * numNodes vector and matrix indices, three consecutive components per node.
     void GetGlobalDofIndices(PetscInt numNodes, const PetscInt* globalNodes, PetscInt* dofIndices);
 
+    //! Adds alpha times the owned rows of a matrix laid out like the nodes, such as the mass or
+    //! damping matrix, to the displacement block of dofMatrix, a matrix in the unknown layout.
+    //! dofMatrix has to accept new nonzeros, and be assembled afterwards.
+    void AddToDisplacementBlock(Mat dofMatrix, PetscScalar alpha, Mat nodesMatrix);
+
     //! Vector and matrix index of the pressure unknown of a vertex node.
     PetscInt GlobalPressureDofIndex(PetscInt globalNode);
     void GetGlobalPressureDofIndices(PetscInt numNodes, const PetscInt* globalNodes, PetscInt* dofIndices);

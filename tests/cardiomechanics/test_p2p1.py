@@ -24,6 +24,7 @@ from helpers.run import run_binary
 
 FIXTURE = Path(__file__).parent / "fixtures" / "p2p1_cantilever.xml"
 ROBIN_FIXTURE = Path(__file__).parent / "fixtures" / "p2p1_cantilever_robin.xml"
+DYNAMIC_FIXTURE = Path(__file__).parent / "fixtures" / "p2p1_cantilever_dynamic.xml"
 CELLS = (8, 2, 2)
 CELL_SIZE = 0.5
 MATERIAL, SURFACE, END_SURFACE = 30, 130, 131
@@ -115,18 +116,23 @@ MATERIALS = {
 }
 
 
-def _run(binary, cm_env, wd, element_type="T10P1", kappa=100, material="NeoHooke", solver="Static",
-         env=None, check=True, ranks=None, fixture=FIXTURE):
-    """Stage mesh and settings into wd, run on ranks MPI ranks (serially if None), return (process, vtu directory)."""
+def _run(binary, cm_env, wd, element_type="T10P1", kappa=100, material="NeoHooke", solver=None,
+         env=None, check=True, ranks=None, fixture=FIXTURE, replace=()):
+    """Stage mesh and settings into wd, run on ranks MPI ranks (serially if None), return (process, vtu directory).
+    solver replaces the Static solver of the fixture; None keeps the fixture's own. replace holds further
+    (old, new) substitutions of the settings text."""
     (wd / "tetgen").mkdir()
     _write_mesh(wd / "tetgen")
     (wd / "Results").mkdir()
     text, n = re.subn(r"<NeoHooke>.*?</NeoHooke>", MATERIALS[material].format(kappa=kappa),
                       fixture.read_text(), flags=re.DOTALL)
     assert n == 1, f"{fixture.name}: cannot substitute the NeoHooke parameters"
-    for old, new in (("<Type>T10P1</Type>", f"<Type>{element_type}</Type>"),
-                     ("<Type>NeoHooke</Type>", f"<Type>{material}</Type>"),
-                     ("<Type>Static</Type>", f"<Type>{solver}</Type>")):
+    substitutions = [("<Type>T10P1</Type>", f"<Type>{element_type}</Type>"),
+                     ("<Type>NeoHooke</Type>", f"<Type>{material}</Type>")]
+    if solver:
+        substitutions.append(("<Type>Static</Type>", f"<Type>{solver}</Type>"))
+    substitutions += replace
+    for old, new in substitutions:
         assert text.count(old) == 1, f"{fixture.name}: cannot substitute {old}"
         text = text.replace(old, new)
     (wd / fixture.name).write_text(text)
@@ -187,6 +193,32 @@ def test_p2p1_static_run_converges(binary, cm_env, tmp_path):
     assert deflection > 1e-2, f"cantilever barely moved: max displacement {deflection:.3e}"
 
 
+DYNAMIC_STEPS = 4            # StopTime / TimeStep of the dynamic fixture, one export per step
+MIN_TENSION_EFFECT = 0.05    # relative change of the peak displacement
+
+
+@pytest.mark.parametrize("consistent_mass", ["true", "false"], ids=["consistent_mass", "lumped_mass"])
+def test_p2p1_generalized_alpha_run_completes(binary, cm_env, tmp_path, consistent_mass):
+    """Both mass matrices span the displacement unknowns alone, so the pressure meets neither a mass
+    nor a zero diagonal. The run is compared with one without active tension, since the load alone
+    would move the cantilever too."""
+    pytest.importorskip("meshio")
+    peaks = {}
+    for tension in ("0.05", "0"):
+        wd = tmp_path / f"tension_{tension}"
+        wd.mkdir()
+        _, vtu_dir = _run(binary, cm_env, wd, fixture=DYNAMIC_FIXTURE, replace=[
+            ("<ConsistentMassMatrix>true</ConsistentMassMatrix>",
+             f"<ConsistentMassMatrix>{consistent_mass}</ConsistentMassMatrix>"),
+            ("<TensionMax>0.05</TensionMax>", f"<TensionMax>{tension}</TensionMax>")])
+        assert _last_vtu(vtu_dir).name == f"cantilever.{DYNAMIC_STEPS}.vtu", \
+            f"TensionMax={tension}: run stopped before its stop time"
+        peaks[tension] = _peak_displacement(vtu_dir)
+    assert peaks["0.05"] > 1e-2, f"cantilever barely moved: peak displacement {peaks['0.05']:.3e}"
+    assert abs(peaks["0.05"] - peaks["0"]) > MIN_TENSION_EFFECT * peaks["0"], \
+        f"active tension barely acts: peak displacement {peaks['0.05']:.4e} with, {peaks['0']:.4e} without"
+
+
 def test_p2p1_exports_pressure_linear_along_edges(binary, cm_env, tmp_path):
     """Mid-edge nodes carry no pressure unknown. The value exported there is the linear field at
     the edge midpoint, the mean of its two vertices, so a viewer interpolating the quadratic cell
@@ -226,34 +258,64 @@ def _t10_gradients(L):
     return dL[:, 1:] - dL[:, :1]    # L0 = 1 - L1 - L2 - L3
 
 
-def test_p2p1_pressure_satisfies_constraint(binary, cm_env, tmp_path):
-    """Rebuild the constraint of every vertex a, int N_a (J - 1 - p/kappa) dV = 0 on the element
-    quadrature rule, from the exported geometry and pressure. This holds to solver precision for
-    the solved pressure, so it pins the sign and scale of the export, which the mid-edge test
-    cannot."""
-    meshio = pytest.importorskip("meshio")
-    kappa = 100
-    _, vtu_dir = _run(binary, cm_env, tmp_path, kappa=kappa)
-    ref = meshio.read(str(vtu_dir / "cantilever.0.vtu"))     # unloaded at t = 0
-    cur = meshio.read(str(_last_vtu(vtu_dir)))
-    cells = cur.cells_dict["tetra10"]
-    p = np.asarray(cur.point_data["Pressure"]).ravel()[cells[:, :4]]
-
-    pressure_term, volume_term = np.zeros(len(cur.points)), np.zeros(len(cur.points))
+def _assert_constraint_holds(ref, cur, cells, pressure, kappa, where):
+    """Rebuild the constraint of every vertex a, int N_a (J - 1 - p/kappa) dV = 0, on the element
+    quadrature rule from reference points ref, current points cur and nodal pressures."""
+    p = pressure[cells[:, :4]]
+    pressure_term, volume_term = np.zeros(len(cur)), np.zeros(len(cur))
     for q in range(4):
         L = np.full(4, BETA)
         L[q] = ALPHA
         dN = _t10_gradients(L)
-        dV = np.linalg.det(np.einsum("cai,ak->cik", ref.points[cells], dN)) / 24
-        dv = np.linalg.det(np.einsum("cai,ak->cik", cur.points[cells], dN)) / 24
+        dV = np.linalg.det(np.einsum("cai,ak->cik", ref[cells], dN)) / 24
+        dv = np.linalg.det(np.einsum("cai,ak->cik", cur[cells], dN)) / 24
         np.add.at(pressure_term, cells[:, :4], (dV * (p @ L))[:, None] * L)
         np.add.at(volume_term, cells[:, :4], kappa * (dv - dV)[:, None] * L)
 
     d = np.abs(pressure_term - volume_term)
     tol = BALANCE_RTOL * np.abs(pressure_term).max()
     i = int(np.argmax(d))
-    assert d[i] <= tol, (f"vertex {i}: int N p dV = {pressure_term[i]:.6e} but kappa int N (J-1) dV = "
+    assert d[i] <= tol, (f"{where}, vertex {i}: int N p dV = {pressure_term[i]:.6e} but kappa int N (J-1) dV = "
                          f"{volume_term[i]:.6e}, beyond {tol:.1e}")
+
+
+def test_p2p1_pressure_satisfies_constraint(binary, cm_env, tmp_path):
+    """The constraint holds to solver precision for the solved pressure, so rebuilt from the
+    exported geometry and pressure it pins the sign and scale of the export, which the mid-edge
+    test cannot."""
+    meshio = pytest.importorskip("meshio")
+    kappa = 100
+    _, vtu_dir = _run(binary, cm_env, tmp_path, kappa=kappa)
+    ref = meshio.read(str(vtu_dir / "cantilever.0.vtu"))     # unloaded at t = 0
+    cur = meshio.read(str(_last_vtu(vtu_dir)))
+    _assert_constraint_holds(ref.points, cur.points, cur.cells_dict["tetra10"],
+                             np.asarray(cur.point_data["Pressure"]).ravel(), kappa, "end of the run")
+
+
+RHO_INF = float(re.search(r"<RhoInf>(.*?)</RhoInf>", DYNAMIC_FIXTURE.read_text()).group(1))
+ALPHA_F = RHO_INF / (1 + RHO_INF)   # Chung-Hulbert
+
+
+def test_p2p1_generalized_alpha_constraint_holds_at_intermediate_configuration(binary, cm_env, tmp_path):
+    """Generalized-alpha evaluates the whole residual at d_n+1-alphaF, the constraint included,
+    with the pressure interpolated between time levels exactly like the displacement. Rebuilt from
+    consecutive frames, the constraint therefore holds at that level. Holding it at the end of the
+    step instead, or pairing the intermediate geometry with p_n+1, misses by about alphaF times the
+    pressure change over a step, a third of the pressure in the first step here."""
+    meshio = pytest.importorskip("meshio")
+    kappa = 100
+    _, vtu_dir = _run(binary, cm_env, tmp_path, kappa=kappa, fixture=DYNAMIC_FIXTURE)
+    frames = [meshio.read(str(vtu_dir / f"cantilever.{n}.vtu")) for n in range(DYNAMIC_STEPS + 1)]
+    cells = frames[0].cells_dict["tetra10"]
+
+    def intermediate(old, new):
+        return (1 - ALPHA_F) * np.asarray(new, dtype=float) + ALPHA_F * np.asarray(old, dtype=float)
+
+    for n in range(DYNAMIC_STEPS):
+        old, new = frames[n], frames[n + 1]
+        _assert_constraint_holds(frames[0].points, intermediate(old.points, new.points), cells,
+                                 intermediate(old.point_data["Pressure"], new.point_data["Pressure"]).ravel(),
+                                 kappa, f"step {n + 1}")
 
 
 def test_displacement_only_exports_no_pressure(binary, cm_env, tmp_path):
@@ -309,6 +371,14 @@ def test_p2p1_parallel_matches_serial(binary, cm_env, tmp_path):
     _assert_parallel_matches_serial(binary, cm_env, tmp_path, FIXTURE)
 
 
+@pytest.mark.mpi
+def test_p2p1_generalized_alpha_parallel_matches_serial(binary, cm_env, tmp_path):
+    """The mass and damping matrices are laid out like the nodes, the unknowns like each rank's
+    displacements followed by its pressures, so on every rank but the first adding one to the other
+    needs the translation between the two layouts."""
+    _assert_parallel_matches_serial(binary, cm_env, tmp_path, DYNAMIC_FIXTURE)
+
+
 MIN_ROBIN_EFFECT = 0.05     # relative change of the peak displacement
 
 
@@ -344,8 +414,11 @@ def _jacobian_differences(view_file):
     return entries
 
 
-def test_p2p1_jacobian_matches_finite_differences(binary, cm_env, tmp_path):
+@pytest.mark.parametrize("fixture", [FIXTURE, DYNAMIC_FIXTURE], ids=["static", "generalized_alpha"])
+def test_p2p1_jacobian_matches_finite_differences(binary, cm_env, tmp_path, fixture):
     """Every Jacobian block, coupling and constraint included, against PETSc's finite differences.
+    Under generalized-alpha that includes the mass and damping terms and the (1 - alphaF) factor
+    of both fields at the intermediate configuration.
 
     kappa = 1 keeps the -1/kappa constraint block well above the threshold. Entries in clamped
     rows and columns are excluded: the hand-coded Jacobian replaces those rows by the identity and
@@ -355,7 +428,7 @@ def test_p2p1_jacobian_matches_finite_differences(binary, cm_env, tmp_path):
     view = tmp_path / "jacobian.txt"
     env = dict(cm_env, PETSC_OPTIONS=f"-snes_test_jacobian {JACOBIAN_THRESHOLD} "
                                      f"-snes_test_jacobian_view ascii:{view}")
-    _run(binary, cm_env, tmp_path, kappa=1, env=env)
+    _run(binary, cm_env, tmp_path, kappa=1, env=env, fixture=fixture)
     clamped = _clamped_dofs()
     wrong = [e for e in _jacobian_differences(view) if e[0] not in clamped and e[1] not in clamped]
     if wrong:

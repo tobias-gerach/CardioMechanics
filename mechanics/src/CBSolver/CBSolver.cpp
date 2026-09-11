@@ -501,6 +501,56 @@ void CBSolver::UpdateGhostNodesAndLinkToAdapter() {
     }
 } // CBSolver::UpdateGhostNodesAndLinkToAdapter
 
+void CBSolver::InitPressureVectors() {
+    PetscInt numLocalPressures = adapter_->GetNumberOfLocalPressureDofs();
+    const std::vector<PetscInt> &ghostPressures = adapter_->GetGhostPressureIndices();
+    if (DCCtrl::IsParallel())
+        VecCreateGhost(DCPetsc::Comm(), numLocalPressures, PETSC_DECIDE, ghostPressures.size(), ghostPressures.data(),
+                       &pressures_);
+    else
+        DCPetsc::CreateVector(numLocalPressures, PETSC_DETERMINE, &pressures_);
+    VecDuplicate(pressures_, &trialPressures_);
+    DCPetsc::CreateVector(numLocalPressures, PETSC_DETERMINE, &pressureResiduals_);
+    VecSetLocalToGlobalMapping(pressureResiduals_, adapter_->GetPressureLocalToGlobalMapping());
+    VecZeroEntries(pressures_);
+    VecZeroEntries(pressureResiduals_);
+    LinkPressures(pressures_);
+    adapter_->LinkPressureResiduals(pressureResiduals_);
+}
+
+void CBSolver::LinkPressures(Vec pressures) {
+    if (DCCtrl::IsParallel()) {
+        VecGhostUpdateBegin(pressures, INSERT_VALUES, SCATTER_FORWARD);
+        VecGhostUpdateEnd(pressures, INSERT_VALUES, SCATTER_FORWARD);
+    }
+    // The local form shares the storage of the field and lives as long as the field does, so the
+    // adapter may keep it after it is restored.
+    Vec localPressures;
+    VecGhostGetLocalForm(pressures, &localPressures);
+    adapter_->LinkPressures(localPressures);
+    VecGhostRestoreLocalForm(pressures, &localPressures);
+}
+
+void CBSolver::LinkTrialPressures(Vec unknowns, PetscScalar alpha) {
+    VecCopy(pressures_, trialPressures_);
+    AddBlock(trialPressures_, unknowns, adapter_->GetPressureDofs(), alpha);
+    LinkPressures(trialPressures_);
+}
+
+void CBSolver::AddBlock(Vec field, Vec unknowns, IS dofs, PetscScalar alpha) {
+    Vec block;
+    VecGetSubVector(unknowns, dofs, &block);
+    VecAXPY(field, alpha, block);
+    VecRestoreSubVector(unknowns, dofs, &block);
+}
+
+void CBSolver::SetBlock(Vec unknowns, IS dofs, Vec field) {
+    Vec block;
+    VecGetSubVector(unknowns, dofs, &block);
+    VecCopy(field, block);
+    VecRestoreSubVector(unknowns, dofs, &block);
+}
+
 void CBSolver::InitPlugins() {
     UpdateGhostNodesAndLinkToAdapter();
     adapter_->LinkNodalForcesJacobian(nodalForcesJacobian_);
@@ -1213,6 +1263,9 @@ void CBSolver::ExportLocalActivationTime() {
 } // CBSolver::ExportLocalActivationTime
 
 void CBSolver::DeInit() {
+    VecDestroy(&pressures_);
+    VecDestroy(&trialPressures_);
+    VecDestroy(&pressureResiduals_);
     if (formulation_ != 0)
         delete formulation_;
     if (activeStressData_ != 0)

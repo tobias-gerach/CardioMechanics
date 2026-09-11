@@ -182,6 +182,15 @@ protected:
     virtual void InitLoadedState();
     void         UpdateGhostNodesAndLinkToAdapter();
     void         CreateNodesJacobianAndLinkToAdapter();
+    /// Creates the pressure field of mixed displacement/pressure elements and links it to the adapter.
+    void         InitPressureVectors();
+    /// Updates the ghost vertices of a pressure field and links it to the adapter.
+    void         LinkPressures(Vec pressures);
+    /// Links pressures_ plus alpha times the pressure increment held in unknowns, as trialPressures_.
+    void         LinkTrialPressures(Vec unknowns, PetscScalar alpha = 1);
+    // The unknown vector holds both fields (ADR-0001); these move one field into or out of it.
+    static void  AddBlock(Vec field, Vec unknowns, IS dofs, PetscScalar alpha = 1);
+    static void  SetBlock(Vec unknowns, IS dofs, Vec field);
     
     void ActivateAllElements() {
         for (auto &it : solidElements_)
@@ -302,6 +311,9 @@ protected:
     Vec refNodesSeq_         = 0;
     Vec nodalForces_         = 0;
     Mat nodalForcesJacobian_ = 0;
+    Vec pressures_           = 0; // converged pressure field, the counterpart of nodes_
+    Vec trialPressures_      = 0;
+    Vec pressureResiduals_   = 0;
     
     PetscInt activeStressLowerIndex_                               = 0;
     PetscInt activeStressUpperIndex_                               = 0;

@@ -198,6 +198,31 @@ void CBElementAdapter::GetGlobalDofIndices(PetscInt numNodes, const PetscInt* gl
             dofIndices[3*i+c] = GlobalDofIndex(globalNodes[i], c);
 }
 
+void CBElementAdapter::AddToDisplacementBlock(Mat dofMatrix, PetscScalar alpha, Mat nodesMatrix)
+{
+    PetscInt from, to;
+    MatGetOwnershipRange(nodesMatrix, &from, &to);
+    std::vector<PetscInt>    dofs;
+    std::vector<PetscScalar> values;
+    for(PetscInt row = from; row < to; row++)
+    {
+        PetscInt           numCols;
+        const PetscInt*    cols;
+        const PetscScalar* vals;
+        MatGetRow(nodesMatrix, row, &numCols, &cols, &vals);
+        dofs.resize(numCols);
+        values.resize(numCols);
+        for(PetscInt k = 0; k < numCols; k++)
+        {
+            dofs[k]   = GlobalDofIndex(cols[k] / 3, cols[k] % 3);
+            values[k] = alpha * vals[k];
+        }
+        PetscInt rowDof = GlobalDofIndex(row / 3, row % 3);
+        MatSetValues(dofMatrix, 1, &rowDof, numCols, dofs.data(), values.data(), ADD_VALUES);
+        MatRestoreRow(nodesMatrix, row, &numCols, &cols, &vals);
+    }
+}
+
 const std::vector<CBElement*>& CBElementAdapter::GetElementVector() {
     return solver_->GetElementVector();
 }

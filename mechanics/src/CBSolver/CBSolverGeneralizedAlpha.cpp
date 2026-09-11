@@ -44,6 +44,7 @@ void CBSolverGeneralizedAlpha::Init(ParameterMap *_parameter, CBModel *_model) {
 
 void CBSolverGeneralizedAlpha::DeInit() {
     VecDestroy(&residuum_);
+    VecDestroy(&unknowns_);
     VecDestroy(&displacement_);
     VecDestroy(&absDisplacement_);
     VecDestroy(&tmpDisplacement_);
@@ -52,6 +53,7 @@ void CBSolverGeneralizedAlpha::DeInit() {
     VecDestroy(&velocity_);
     VecDestroy(&acceleration_);
     VecDestroy(&tmpVector_);
+    MatDestroy(&elementsJacobian_);
     SNESDestroy(&snes_);
     KSPDestroy(&ksp_);
     PCDestroy(&pc_);
@@ -61,16 +63,18 @@ void CBSolverGeneralizedAlpha::DeInit() {
 void CBSolverGeneralizedAlpha::InitVectors() {
     Base::InitNodalForces();
     
-    VecDuplicate(Base::nodalForces_, &residuum_);
+    DCPetsc::CreateVector(Base::adapter_->GetNumberOfLocalDofs(), PETSC_DETERMINE, &residuum_);
+    VecDuplicate(residuum_, &unknowns_);
+    VecDuplicate(residuum_, &initialGuess_);
     VecDuplicate(Base::nodes_, &displacement_);
     VecDuplicate(Base::nodes_, &absDisplacement_);
-    VecDuplicate(Base::nodes_, &initialGuess_);
     VecDuplicate(Base::nodes_, &tmpDisplacement_);
     VecDuplicate(Base::nodes_, &tmpVelocity_);
     VecDuplicate(Base::nodes_, &velocity_);
     VecDuplicate(Base::nodes_, &acceleration_);
     VecDuplicate(Base::nodes_, &tmpVector_);
     VecZeroEntries(residuum_);
+    VecZeroEntries(unknowns_);
     VecZeroEntries(displacement_);
     VecZeroEntries(absDisplacement_);
     VecZeroEntries(initialGuess_);
@@ -79,6 +83,7 @@ void CBSolverGeneralizedAlpha::InitVectors() {
     VecZeroEntries(velocity_);
     VecZeroEntries(acceleration_);
     VecZeroEntries(tmpVector_);
+    Base::InitPressureVectors();
 }
 
 void CBSolverGeneralizedAlpha::SetVelocity(std::vector<Vector3<TFloat>> vel) {
@@ -155,6 +160,10 @@ void CBSolverGeneralizedAlpha::InitPETScSolver() {
     // function to calc jacobian A = m1 * M + c1 * C + (1 - alphaF) * (K_int - K_ext)
     SNESSetJacobian(snes_, Base::nodalForcesJacobian_, Base::nodalForcesJacobian_,
                     CBSolverGeneralizedAlphaSNESHelperFunctionForcesJacobian, (void *)this);
+    
+    // The mass and damping matrices couple clamped components too, whose columns the element
+    // Jacobians leave out, so adding them allocates entries beyond those of the elements.
+    MatSetOption(Base::nodalForcesJacobian_, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_FALSE);
     
     SNESSetTolerances(snes_, precision_, precision_, precision_, maxSnesIts_, maxFunEval_);
     
@@ -241,6 +250,23 @@ PetscScalar CBSolverGeneralizedAlpha::IntermediateTime(PetscScalar time) {
     return std::max(time - alphaF_ * timing_.GetTimeStep(), timing_.GetStartTime());
 }
 
+void CBSolverGeneralizedAlpha::AddDampingStiffness() {
+    MatZeroEntries(elementsJacobian_);
+    Base::adapter_->LinkNodalForcesJacobian(elementsJacobian_);
+    Base::formulation_->CalcNodalForcesJacobian();
+    MatAssemblyBegin(elementsJacobian_, MAT_FINAL_ASSEMBLY);
+    MatAssemblyEnd(elementsJacobian_, MAT_FINAL_ASSEMBLY);
+    
+    // The displacement block, numbered by its position in the unknowns, which is the node layout.
+    Mat displacementBlock;
+    IS  dofs = Base::adapter_->GetDisplacementDofs();
+    MatCreateSubMatrix(elementsJacobian_, dofs, dofs, MAT_INITIAL_MATRIX, &displacementBlock);
+    MatAssemblyBegin(dampingMatrix_, MAT_FINAL_ASSEMBLY);
+    MatAssemblyEnd(dampingMatrix_, MAT_FINAL_ASSEMBLY);
+    MatAXPY(dampingMatrix_, 1, displacementBlock, DIFFERENT_NONZERO_PATTERN);
+    MatDestroy(&displacementBlock);
+}
+
 void CBSolverGeneralizedAlpha::InitDampingMatrix() {
     if (!isInitDampingParametersDone_) {
         throw std::runtime_error(
@@ -270,21 +296,18 @@ void CBSolverGeneralizedAlpha::InitDampingMatrix() {
                          DCPetsc::Comm(), 3 * numLocalNodes_, 3 * numLocalNodes_, PETSC_DETERMINE, PETSC_DETERMINE, 0,
                          model_->GetNodeNeighborsForNnz().data() + localNodesFrom_*3, 0,
                          model_->GetNodeNeighborsForNnz().data() + localNodesFrom_*3, &dampingMatrix_);
-            MatSetLocalToGlobalMapping(dampingMatrix_, Base::nodesIndicesMapping_, Base::nodesIndicesMapping_);
+            MatSetLocalToGlobalMapping(dampingMatrix_, NodesComponentsMapping(), NodesComponentsMapping());
         } else {
             MatCreateSeqAIJ(DCPetsc::Comm(), 3 * Base::numNodes_, 3 * Base::numNodes_, 0,
                             model_->GetNodeNeighborsForNnz().data(), &dampingMatrix_);
-            MatSetLocalToGlobalMapping(dampingMatrix_, Base::nodesIndicesMapping_, Base::nodesIndicesMapping_);
+            MatSetLocalToGlobalMapping(dampingMatrix_, NodesComponentsMapping(), NodesComponentsMapping());
         }
         
         UpdateGhostNodesAndLinkToAdapter();
         
         if (globalRayleighBeta_ != 0) {
-            Base::adapter_->LinkNodalForcesJacobian(dampingMatrix_);
-            Base::formulation_->CalcNodalForcesJacobian();
-            
-            MatAssemblyBegin(dampingMatrix_, MAT_FINAL_ASSEMBLY);
-            MatAssemblyEnd(dampingMatrix_, MAT_FINAL_ASSEMBLY);
+            MatDuplicate(Base::nodalForcesJacobian_, MAT_DO_NOT_COPY_VALUES, &elementsJacobian_);
+            AddDampingStiffness();
             
             if (globalRayleighAlpha_ != 0) {
                 MatAXPY(dampingMatrix_, globalRayleighAlpha_/globalRayleighBeta_, massMatrix_, DIFFERENT_NONZERO_PATTERN);
@@ -297,7 +320,7 @@ void CBSolverGeneralizedAlpha::InitDampingMatrix() {
             MatScale(dampingMatrix_, globalRayleighAlpha_);
         }
         
-        MatSetLocalToGlobalMapping(dampingMatrix_, Base::nodesIndicesMapping_, Base::nodesIndicesMapping_);
+        MatSetLocalToGlobalMapping(dampingMatrix_, NodesComponentsMapping(), NodesComponentsMapping());
         MatAssemblyBegin(dampingMatrix_, MAT_FINAL_ASSEMBLY);
         MatAssemblyEnd(dampingMatrix_, MAT_FINAL_ASSEMBLY);
     }
@@ -368,13 +391,19 @@ void CBSolverGeneralizedAlpha::ExportSNESMatrix(TFloat time) {
     PetscViewerDestroy(&viewVector);
 }  // CBSolverGeneralizedAlpha::ExportSNESMatrix
 
-CBStatus CBSolverGeneralizedAlpha::CalcNodalForces(Vec displacement, Vec forces) {
+CBStatus CBSolverGeneralizedAlpha::CalcNodalForces(Vec unknowns, Vec residual) {
     snesStep_++;
     DCCtrl::debug << "SNES Step:" << snesStep_ << " - F-Norm: ";
     
     Vec localDisplacedNodesSeq = 0;
     Vec velocity               = 0;
     Vec accelerationNew        = 0;
+    Vec displacement           = 0;
+    Vec forces                 = 0;
+    
+    // Pressure has no time derivative, so inertia and damping act on the displacement block alone
+    VecGetSubVector(unknowns, Base::adapter_->GetDisplacementDofs(), &displacement);
+    VecGetSubVector(residual, Base::adapter_->GetDisplacementDofs(), &forces);
     
     // Set node coordinates to the intermediate configuration d_n+1-alphaF
     VecCopy(Base::nodes_, tmpVector_);
@@ -389,8 +418,12 @@ CBStatus CBSolverGeneralizedAlpha::CalcNodalForces(Vec displacement, Vec forces)
         Base::adapter_->LinkNodes(tmpVector_);
     }
     
+    // pressure is interpolated between the time levels exactly like the displacement
+    LinkTrialPressures(unknowns, 1 - alphaF_);
+    
     // add internal nodal forces f_int (passive and active stress contribution of the tissue)
     VecZeroEntries(Base::nodalForces_);
+    VecZeroEntries(Base::pressureResiduals_);
     Base::adapter_->LinkNodalForces(Base::nodalForces_);
     CBStatus rc = Base::formulation_->CalcNodalForces();
     
@@ -403,6 +436,8 @@ CBStatus CBSolverGeneralizedAlpha::CalcNodalForces(Vec displacement, Vec forces)
     
     VecAssemblyBegin(Base::nodalForces_);
     VecAssemblyEnd(Base::nodalForces_);
+    VecAssemblyBegin(Base::pressureResiduals_);
+    VecAssemblyEnd(Base::pressureResiduals_);
     
     // a_n+1 = (d_n+1 - d~_n+1) / (beta * dt^2)
     PetscScalar timestep = timing_.GetTimeStep();
@@ -430,6 +465,10 @@ CBStatus CBSolverGeneralizedAlpha::CalcNodalForces(Vec displacement, Vec forces)
     
     VecAXPY(forces, 1, Base::nodalForces_);
     
+    VecRestoreSubVector(residual, Base::adapter_->GetDisplacementDofs(), &forces);
+    VecRestoreSubVector(unknowns, Base::adapter_->GetDisplacementDofs(), &displacement);
+    SetBlock(residual, Base::adapter_->GetPressureDofs(), Base::pressureResiduals_);
+    
     VecDestroy(&velocity);
     VecDestroy(&accelerationNew);
     
@@ -439,8 +478,8 @@ CBStatus CBSolverGeneralizedAlpha::CalcNodalForces(Vec displacement, Vec forces)
     PetscScalar r, s;
     
     // Calc ||F|| and ||x|| of SNES Step to print
-    VecNorm(forces, NORM_2, &r);
-    VecNorm(displacement_, NORM_2, &s);
+    VecNorm(residual, NORM_2, &r);
+    VecNorm(unknowns, NORM_2, &s);
     DCCtrl::debug << std::setprecision(12) << std::fixed << r << " - S-Norm: " << s << "\n";
     
     int localSuccess;
@@ -459,7 +498,7 @@ CBStatus CBSolverGeneralizedAlpha::CalcNodalForces(Vec displacement, Vec forces)
         return CBStatus::SUCCESS;
 }  // CBSolverGeneralizedAlpha::CalcNodalForces
 
-CBStatus CBSolverGeneralizedAlpha::CalcNodalForcesJacobian(Vec displacement, Mat jacobian) {
+CBStatus CBSolverGeneralizedAlpha::CalcNodalForcesJacobian(Vec unknowns, Mat jacobian) {
     double t = MPI_Wtime();
     
     DCCtrl::debug<< "\n\nCalculating System Matrix:\n";
@@ -469,10 +508,12 @@ CBStatus CBSolverGeneralizedAlpha::CalcNodalForcesJacobian(Vec displacement, Mat
     
     Vec localDisplacedNodesSeq = 0;
     
-    // Set nodes to the intermediate configuration d_n+1-alphaF
+    // Set nodes and pressures to the intermediate configuration d_n+1-alphaF
     VecCopy(Base::nodes_, tmpVector_);
-    if (displacement != 0)
-        VecAXPY(tmpVector_, 1 - alphaF_, displacement);
+    if (unknowns != 0) {
+        AddBlock(tmpVector_, unknowns, Base::adapter_->GetDisplacementDofs(), 1 - alphaF_);
+        LinkTrialPressures(unknowns, 1 - alphaF_);
+    }
     
     if (DCCtrl::IsParallel()) {
         VecGhostUpdateBegin(tmpVector_, INSERT_VALUES, SCATTER_FORWARD);
@@ -516,19 +557,22 @@ CBStatus CBSolverGeneralizedAlpha::CalcNodalForcesJacobian(Vec displacement, Mat
     
     DCCtrl::debug << "Damping matrix ... ";
     
-    // chain rule: the forces are evaluated at d_n+1-alphaF, which depends on the unknown d_n+1
-    // with factor (1 - alphaF)
+    // chain rule: the forces and the constraint are evaluated at d_n+1-alphaF and p_n+1-alphaF,
+    // which depend on the unknowns d_n+1 and p_n+1 with factor (1 - alphaF)
     MatScale(jacobian, 1 - alphaF_);
     
+    // mass and damping act on the displacement block alone
     if ((globalRayleighAlpha_ != 0) || (globalRayleighBeta_ != 0)) {
         // A += (1-alphaF) * gamma/(dt*beta) * C
-        MatAXPY(jacobian, (1 - alphaF_) * gamma_ / (beta_*timing_.GetTimeStep()), dampingMatrix_,
-                DIFFERENT_NONZERO_PATTERN);
+        Base::adapter_->AddToDisplacementBlock(jacobian, (1 - alphaF_) * gamma_ / (beta_*timing_.GetTimeStep()),
+                                               dampingMatrix_);
     }
     
     // A += (1-alphaM)/(dt^2*beta) * M
-    MatAXPY(jacobian, (1 - alphaM_) / (beta_*timing_.GetTimeStep()*timing_.GetTimeStep()), massMatrix_,
-            DIFFERENT_NONZERO_PATTERN);
+    Base::adapter_->AddToDisplacementBlock(jacobian, (1 - alphaM_) / (beta_*timing_.GetTimeStep()*timing_.GetTimeStep()),
+                                           massMatrix_);
+    MatAssemblyBegin(jacobian, MAT_FINAL_ASSEMBLY);
+    MatAssemblyEnd(jacobian, MAT_FINAL_ASSEMBLY);
     
     MatAXPY(jacobian, 1, boundaryConditionsNodalForcesJacobianDiagonalComponents_, DIFFERENT_NONZERO_PATTERN);
     MatSetLocalToGlobalMapping(jacobian, Base::nodesIndicesMapping_, Base::nodesIndicesMapping_);
@@ -561,11 +605,7 @@ CBStatus CBSolverGeneralizedAlpha::CalcDampingMatrix() {
         CBStatus rc = CBStatus::FAILED;
         
         if (globalRayleighBeta_ != 0) {
-            Base::adapter_->LinkNodalForcesJacobian(dampingMatrix_);
-            rc = Base::formulation_->CalcNodalForcesJacobian();
-            
-            MatAssemblyBegin(dampingMatrix_, MAT_FINAL_ASSEMBLY);
-            MatAssemblyEnd(dampingMatrix_, MAT_FINAL_ASSEMBLY);
+            AddDampingStiffness();
             
             // C = rayleighAlpha * M + rayleighBeta * K
             MatScale(dampingMatrix_, globalRayleighBeta_);
@@ -579,7 +619,7 @@ CBStatus CBSolverGeneralizedAlpha::CalcDampingMatrix() {
             rc = CBStatus::SUCCESS;
         }
         
-        MatSetLocalToGlobalMapping(dampingMatrix_, Base::nodesIndicesMapping_, Base::nodesIndicesMapping_);
+        MatSetLocalToGlobalMapping(dampingMatrix_, NodesComponentsMapping(), NodesComponentsMapping());
         MatAssemblyBegin(dampingMatrix_, MAT_FINAL_ASSEMBLY);
         MatAssemblyEnd(dampingMatrix_, MAT_FINAL_ASSEMBLY);
         
@@ -594,11 +634,11 @@ void CBSolverGeneralizedAlpha::InitMassMatrixLumped() {
                      DCPetsc::Comm(), 3 * Base::numLocalNodes_, 3 * Base::numLocalNodes_, PETSC_DETERMINE, PETSC_DETERMINE, 0,
                      model_->GetNodeNeighborsForNnz().data() + localNodesFrom_*3, 0,
                      model_->GetNodeNeighborsForNnz().data() + localNodesFrom_*3, &massMatrix_);
-        MatSetLocalToGlobalMapping(massMatrix_, Base::nodesIndicesMapping_, Base::nodesIndicesMapping_);
+        MatSetLocalToGlobalMapping(massMatrix_, NodesComponentsMapping(), NodesComponentsMapping());
     } else {
         MatCreateSeqAIJ(DCPetsc::Comm(), 3 * Base::numNodes_, 3 * Base::numNodes_, 0,
                         model_->GetNodeNeighborsForNnz().data(), &massMatrix_);
-        MatSetLocalToGlobalMapping(massMatrix_, Base::nodesIndicesMapping_, Base::nodesIndicesMapping_);
+        MatSetLocalToGlobalMapping(massMatrix_, NodesComponentsMapping(), NodesComponentsMapping());
     }
     
     Base::adapter_->LinkMassMatrix(massMatrix_);
@@ -634,11 +674,11 @@ void CBSolverGeneralizedAlpha::InitMassMatrixConsistent() {
                      DCPetsc::Comm(), 3 * Base::numLocalNodes_, 3 * Base::numLocalNodes_, PETSC_DETERMINE, PETSC_DETERMINE, 0,
                      model_->GetNodeNeighborsForNnz().data() + localNodesFrom_*3, 0,
                      model_->GetNodeNeighborsForNnz().data() + localNodesFrom_*3, &massMatrix_);
-        MatSetLocalToGlobalMapping(massMatrix_, Base::nodesIndicesMapping_, Base::nodesIndicesMapping_);
+        MatSetLocalToGlobalMapping(massMatrix_, NodesComponentsMapping(), NodesComponentsMapping());
     } else {
         MatCreateSeqAIJ(DCPetsc::Comm(), 3 * Base::numNodes_, 3 * Base::numNodes_, 0,
                         model_->GetNodeNeighborsForNnz().data(), &massMatrix_);
-        MatSetLocalToGlobalMapping(massMatrix_, Base::nodesIndicesMapping_, Base::nodesIndicesMapping_);
+        MatSetLocalToGlobalMapping(massMatrix_, NodesComponentsMapping(), NodesComponentsMapping());
     }
     
     Base::adapter_->LinkMassMatrix(massMatrix_);
@@ -736,11 +776,12 @@ CBStatus CBSolverGeneralizedAlpha::SolverStep(PetscScalar time, bool forceJacobi
     // tmpVelocity_     = v~_n+1 = v_n + dt * (1-gamma) * a_n
     VecAXPBYPCZ(tmpVelocity_, 1.0, (1 - gamma_) * timing_.GetTimeStep(), 0, velocity_, acceleration_);
     
-    // update displacement_ with tmpDisplacement_ since we need to explicitly set an initial value for SNESSolve
-    VecCopy(tmpDisplacement_, displacement_);
+    // the predictor is the initial value for SNESSolve; the pressure increment starts at zero
+    VecZeroEntries(unknowns_);
+    SetBlock(unknowns_, Base::adapter_->GetDisplacementDofs(), tmpDisplacement_);
     
-    // initialGuess_ = displacement_   -> save initialGuess to be exported by ExportSNESMatrix
-    VecCopy(displacement_, initialGuess_);
+    // initialGuess_ = unknowns_   -> save initialGuess to be exported by ExportSNESMatrix
+    VecCopy(unknowns_, initialGuess_);
     
     if ((std::abs(time-prevTime_) > std::numeric_limits<float>::epsilon()) || forceJacobianAndDampingRecalculation ||
         updateJacobian_) {
@@ -771,7 +812,16 @@ CBStatus CBSolverGeneralizedAlpha::SolverStep(PetscScalar time, bool forceJacobi
     // intermediate configuration d_n+1-alphaF, using Newton's method with the Jacobian:
     // A = (1-alphaM)/(beta*dt^2) * M + (1-alphaF)*gamma/(beta*dt) * C + (1-alphaF) * (K_int - K_ext)
     // Note that f_tot = f_int + f_ext in our case, since all plugins that contribute to f_ext return negative values
-    SNESSolve(snes_, PETSC_NULLPTR, displacement_);
+    SNESSolve(snes_, PETSC_NULLPTR, unknowns_);
+    
+    Vec displacement;
+    VecGetSubVector(unknowns_, Base::adapter_->GetDisplacementDofs(), &displacement);
+    VecCopy(displacement, displacement_);
+    VecRestoreSubVector(unknowns_, Base::adapter_->GetDisplacementDofs(), &displacement);
+    
+    // The elements hold the pressures of the last Newton iterate. Until the step is accepted they
+    // have to see the converged field that belongs to nodes_.
+    LinkPressures(Base::pressures_);
     
     timing_.SetCurrentTime(time);
     
@@ -834,6 +884,9 @@ CBStatus CBSolverGeneralizedAlpha::SolverStep(PetscScalar time, bool forceJacobi
             Base::adapter_->LinkNodes(tmpVector_);
         }
         
+        // the plugins analyse the end of the step, the pressure field included
+        LinkTrialPressures(unknowns_);
+        
         for (auto p : plugins_)
             p->AnalyzeResults();
     }
@@ -858,6 +911,7 @@ CBStatus CBSolverGeneralizedAlpha::SolverStep(PetscScalar time, bool forceJacobi
     switch (pluginsFeedback) {
         case CBStatus::FAILED:
         case CBStatus::REPEAT:
+            LinkPressures(Base::pressures_);
             return pluginsFeedback;
             
         default:
@@ -894,7 +948,10 @@ CBStatus CBSolverGeneralizedAlpha::SolverStep(PetscScalar time, bool forceJacobi
                 VecAXPY(absDisplacement_, 1.0, displacement_);
             }
             
-            // Apply displacements to global nodes vector
+            // Apply pressures to the pressure field, and displacements to global nodes vector
+            AddBlock(Base::pressures_, unknowns_, Base::adapter_->GetPressureDofs());
+            LinkPressures(Base::pressures_);
+            
             if (evaluate)
                 VecCopy(tmpVector_, Base::nodes_);
             else

@@ -15,31 +15,6 @@
 #include "CBSolverEquilibrium.h"
 #include <stdlib.h>
 
-namespace {
-Vec CreateVector(PetscInt localSize) {
-    Vec v;
-    VecCreate(DCPetsc::Comm(), &v);
-    VecSetSizes(v, localSize, PETSC_DECIDE);
-    VecSetFromOptions(v);
-    return v;
-}
-
-// The unknown vector holds both fields (ADR-0001); these move one field into or out of it.
-void AddBlock(Vec field, Vec unknowns, IS dofs) {
-    Vec block;
-    VecGetSubVector(unknowns, dofs, &block);
-    VecAXPY(field, 1, block);
-    VecRestoreSubVector(unknowns, dofs, &block);
-}
-
-void SetBlock(Vec unknowns, IS dofs, Vec field) {
-    Vec block;
-    VecGetSubVector(unknowns, dofs, &block);
-    VecCopy(field, block);
-    VecRestoreSubVector(unknowns, dofs, &block);
-}
-}
-
 PetscErrorCode CBSolverEquilibriumSNESHelperFunctionForces(SNES snes, Vec u, Vec f, void *_solver) {
     CBSolverEquilibrium *solver = reinterpret_cast<CBSolverEquilibrium *>(_solver);
     CBStatus              rc     = solver->CalcNodalForces(u, f);
@@ -213,22 +188,7 @@ CBStatus CBSolverEquilibrium::CalcNodalForcesJacobian(Vec displacement, Mat jaco
 void CBSolverEquilibrium::ApplyIncrement(Vec unknowns, Vec displacedNodes) {
     VecCopy(Base::nodes_, displacedNodes);
     AddBlock(displacedNodes, unknowns, Base::adapter_->GetDisplacementDofs());
-    VecCopy(pressures_, trialPressures_);
-    AddBlock(trialPressures_, unknowns, Base::adapter_->GetPressureDofs());
-    LinkPressures(trialPressures_);
-}
-
-void CBSolverEquilibrium::LinkPressures(Vec pressures) {
-    if (DCCtrl::IsParallel()) {
-        VecGhostUpdateBegin(pressures, INSERT_VALUES, SCATTER_FORWARD);
-        VecGhostUpdateEnd(pressures, INSERT_VALUES, SCATTER_FORWARD);
-    }
-    // The local form shares the storage of the field and lives as long as the field does, so the
-    // adapter may keep it after it is restored.
-    Vec localPressures;
-    VecGhostGetLocalForm(pressures, &localPressures);
-    Base::adapter_->LinkPressures(localPressures);
-    VecGhostRestoreLocalForm(pressures, &localPressures);
+    LinkTrialPressures(unknowns);
 }
 
 void CBSolverEquilibrium::InitPETScSolver() {
@@ -254,28 +214,15 @@ void CBSolverEquilibrium::InitPETScSolver() {
 void CBSolverEquilibrium::InitVectors() {
     Base::InitNodalForces();
     
-    residuum_ = CreateVector(Base::adapter_->GetNumberOfLocalDofs());
+    DCPetsc::CreateVector(Base::adapter_->GetNumberOfLocalDofs(), PETSC_DETERMINE, &residuum_);
     VecDuplicate(residuum_, &displacement_);
     VecDuplicate(residuum_, &initialGuess_);
     VecDuplicate(Base::nodes_, &tmpVector_);
-    PetscInt numLocalPressures = Base::adapter_->GetNumberOfLocalPressureDofs();
-    const std::vector<PetscInt> &ghostPressures = Base::adapter_->GetGhostPressureIndices();
-    if (DCCtrl::IsParallel())
-        VecCreateGhost(DCPetsc::Comm(), numLocalPressures, PETSC_DECIDE, ghostPressures.size(), ghostPressures.data(),
-                       &pressures_);
-    else
-        pressures_ = CreateVector(numLocalPressures);
-    VecDuplicate(pressures_, &trialPressures_);
-    pressureResiduals_ = CreateVector(numLocalPressures);
-    VecSetLocalToGlobalMapping(pressureResiduals_, Base::adapter_->GetPressureLocalToGlobalMapping());
     VecZeroEntries(residuum_);
     VecZeroEntries(displacement_);
     VecZeroEntries(initialGuess_);
     VecZeroEntries(tmpVector_);
-    VecZeroEntries(pressures_);
-    VecZeroEntries(pressureResiduals_);
-    LinkPressures(pressures_);
-    Base::adapter_->LinkPressureResiduals(pressureResiduals_);
+    Base::InitPressureVectors();
 }
 
 void CBSolverEquilibrium::InitMatrices() {
@@ -287,9 +234,6 @@ void CBSolverEquilibrium::DeInit() {
     VecDestroy(&displacement_);
     VecDestroy(&initialGuess_);
     VecDestroy(&tmpVector_);
-    VecDestroy(&pressures_);
-    VecDestroy(&trialPressures_);
-    VecDestroy(&pressureResiduals_);
     SNESDestroy(&snes_);
     KSPDestroy(&ksp_);
     PCDestroy(&pc_);
