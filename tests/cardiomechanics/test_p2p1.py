@@ -275,6 +275,10 @@ ALPHA, BETA = (5 + 3 * np.sqrt(5)) / 20, (5 - np.sqrt(5)) / 20
 # The VTU points are single precision, so J - 1, of order 1e-3 here, keeps about four digits:
 # observed 6e-4 of the peak. A sign or scale error in the exported pressure is of order one.
 BALANCE_RTOL = 5e-3
+# The first generalized-alpha step deforms far less, J - 1 about 2e-6, and float32 rounding alone
+# moves the misfit there between 4e-3 and 1.2e-2. Pairing the intermediate geometry with p_n+1,
+# the error the test targets, misses by 0.11 (last step) to 0.33 (first step).
+DYNAMIC_BALANCE_RTOL = 3e-2
 
 
 def _t10_gradients(L):
@@ -288,7 +292,7 @@ def _t10_gradients(L):
     return dL[:, 1:] - dL[:, :1]    # L0 = 1 - L1 - L2 - L3
 
 
-def _assert_constraint_holds(ref, cur, cells, pressure, kappa, where):
+def _assert_constraint_holds(ref, cur, cells, pressure, kappa, where, rtol=BALANCE_RTOL):
     """Rebuild the constraint of every vertex a, int N_a (J - 1 - p/kappa) dV = 0, on the element
     quadrature rule from reference points ref, current points cur and nodal pressures."""
     p = pressure[cells[:, :4]]
@@ -303,7 +307,7 @@ def _assert_constraint_holds(ref, cur, cells, pressure, kappa, where):
         np.add.at(volume_term, cells[:, :4], kappa * (dv - dV)[:, None] * L)
 
     d = np.abs(pressure_term - volume_term)
-    tol = BALANCE_RTOL * np.abs(pressure_term).max()
+    tol = rtol * np.abs(pressure_term).max()
     i = int(np.argmax(d))
     assert d[i] <= tol, (f"{where}, vertex {i}: int N p dV = {pressure_term[i]:.6e} but kappa int N (J-1) dV = "
                          f"{volume_term[i]:.6e}, beyond {tol:.1e}")
@@ -345,7 +349,7 @@ def test_p2p1_generalized_alpha_constraint_holds_at_intermediate_configuration(b
         old, new = frames[n], frames[n + 1]
         _assert_constraint_holds(frames[0].points, intermediate(old.points, new.points), cells,
                                  intermediate(old.point_data["Pressure"], new.point_data["Pressure"]).ravel(),
-                                 kappa, f"step {n + 1}")
+                                 kappa, f"step {n + 1}", DYNAMIC_BALANCE_RTOL)
 
 
 def test_displacement_only_exports_no_pressure(binary, cm_env, tmp_path):

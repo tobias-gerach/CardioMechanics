@@ -605,6 +605,9 @@ CBStatus CBSolverGeneralizedAlpha::CalcDampingMatrix() {
         CBStatus rc = CBStatus::FAILED;
         
         if (globalRayleighBeta_ != 0) {
+            // AddDampingStiffness adds to what the matrix holds, so C of the previous state has
+            // to go first or it would carry over into this one.
+            MatZeroEntries(dampingMatrix_);
             AddDampingStiffness();
             
             // C = rayleighAlpha * M + rayleighBeta * K

@@ -14,7 +14,10 @@ Coverage:
   Problem 3 (T10 ellipsoid, pressure and active-tension ramps) run with the
   `NewmarkBeta` solver and Rayleigh damping instead of the benchmark's `Static`
   solver, at `mpirun -np 4`; compares the final deformed geometry. Isolates the
-  time integrator from the coupled EM chain. Marked `mpi slow`.
+  time integrator from the coupled EM chain. Marked `mpi slow`. The same module
+  also runs a creep fixture under both dynamic solvers: stiffness-proportional
+  Rayleigh damping only, large enough to overdamp every mode, so the cavity
+  volume has to relax with time constant `Beta`.
 - **CardioMechanics damping sweep** — the same ellipsoid with Rayleigh damping
   and active tension removed and a step endocardial pressure, run under
   `GeneralizedAlpha` at six values of `RhoInf` at `mpirun -np 4`; checks that

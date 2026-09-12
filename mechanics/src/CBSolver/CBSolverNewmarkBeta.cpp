@@ -659,6 +659,9 @@ CBStatus CBSolverNewmarkBeta::CalcDampingMatrix() {
         CBStatus rc = CBStatus::FAILED;
         
         if (globalRayleighBeta_ != 0) {
+            // The elements add their stiffness to what the matrix holds, so C of the previous
+            // state has to go first or it would carry over into this one.
+            MatZeroEntries(dampingMatrix_);
             Base::adapter_->LinkNodalForcesJacobian(dampingMatrix_);
             rc = Base::formulation_->CalcNodalForcesJacobian();
             

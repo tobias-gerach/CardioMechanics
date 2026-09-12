@@ -24,7 +24,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from helpers.compare import read_vtu_points
+from helpers.compare import read_table, read_vtu_points
 from helpers.run import run_binary
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -34,6 +34,8 @@ SETTINGS = FIXTURES / "dynamic_ellipsoid.xml"
 GENALPHA_SETTINGS = FIXTURES / "dynamic_ellipsoid_genalpha.xml"
 LUMPED_SETTINGS = FIXTURES / "dynamic_ellipsoid_lumped.xml"
 GENALPHA_LUMPED_SETTINGS = FIXTURES / "dynamic_ellipsoid_genalpha_lumped.xml"
+CREEP_SETTINGS = FIXTURES / "dynamic_ellipsoid_creep.xml"
+GENALPHA_CREEP_SETTINGS = FIXTURES / "dynamic_ellipsoid_genalpha_creep.xml"
 GOLDEN_DIR = Path(__file__).parent / "golden"
 
 NP = 4                     # CardioMechanics is tested only in parallel, as in test_benchmark
@@ -44,6 +46,12 @@ DEFORM_RTOL, DEFORM_ATOL = 1e-4, 1e-8      # coordinates in m
 # schemes, so they agree only to their own truncation error, not to round-off.
 # 1e-6 m is 0.016% of the 6.4 mm peak displacement this fixture reaches.
 EQUIV_RTOL, EQUIV_ATOL = 1e-4, 1e-6
+
+CREEP_BETA = 0.3           # s; Rayleigh Beta of the creep fixtures, which have no Alpha
+CREEP_DT = 1e-2            # Solver.TimeStep of the creep fixtures
+CREEP_STOP_TIME = 0.9      # Solver.StopTime of the creep fixtures
+CREEP_FIT_FROM = 0.1       # s; skips the start-up transient
+CREEP_RTOL = 0.05          # observed 0.6%; a damping matrix that accumulates gives 43%
 
 pytestmark = [pytest.mark.mpi, pytest.mark.slow]
 
@@ -156,6 +164,35 @@ def test_generalized_alpha_rejects_bad_rhoinf(binary, cm_env, tmp_path, settings
     assert proc.returncode != 0, f"expected a non-zero exit\n{proc.stdout[-2000:]}"
     assert expected in proc.stdout + proc.stderr, (
         f"error message did not mention {expected!r}\n{(proc.stdout + proc.stderr)[-2000:]}")
+
+
+@pytest.mark.parametrize("settings", [CREEP_SETTINGS, GENALPHA_CREEP_SETTINGS],
+                         ids=["newmark", "genalpha"])
+def test_rayleigh_damping_creeps_with_time_constant_beta(binary, cm_env, tmp_path, settings):
+    """The damping matrix has to be Beta K of the current state at every step.
+
+    Beta = 0.3 s overdamps every mode of the ellipsoid many times over (zeta = Beta omega / 2,
+    with omega above 2 pi 100 Hz), so inertia drops out and each mode obeys Beta K v + K u = f:
+    under a held step load the cavity volume creeps towards equilibrium as exp(-t / Beta),
+    whatever the mode. A damping matrix that carries a share of its previous value into each
+    update settles at Beta K / (1 - Beta) instead, which stretches the time constant to 0.43 s.
+    The load is small because its follower stiffness is part of the relaxation but not of C.
+    """
+    _require_mpi()
+    wd = _stage(tmp_path, settings)
+    _run(binary, cm_env, wd, settings, np=NP, timeout=1800)
+    names, data = read_table(wd / "Results" / "Pressure.dat")
+    t, v = data[:, names.index("time")], data[:, names.index("volume1")]
+    # CardioMechanics exits 0 even when the solve gives up, so a short trace is how that shows,
+    # and the fit below needs every step exactly once.
+    assert len(t) == int(round(CREEP_STOP_TIME / CREEP_DT)) + 1, f"run stopped at t={t[-1]} s"
+    assert np.allclose(np.diff(t), CREEP_DT), "trace is not sampled uniformly"
+    # The increments of exp(-t / tau) on a uniform grid decay like the function itself.
+    fit = t[1:] >= CREEP_FIT_FROM
+    tau = -1 / np.polyfit(t[1:][fit], np.log(np.abs(np.diff(v)[fit])), 1)[0]
+    assert abs(tau / CREEP_BETA - 1) <= CREEP_RTOL, (
+        f"volume creeps with time constant {tau:.4f} s, expected Beta = {CREEP_BETA} s "
+        f"within {CREEP_RTOL:.0%}")
 
 
 def test_generalized_alpha_matches_newmark_with_lumped_mass(lumped_vtu_dirs):
