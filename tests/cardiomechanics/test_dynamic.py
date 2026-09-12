@@ -25,7 +25,7 @@ import numpy as np
 import pytest
 
 from helpers.compare import read_table, read_vtu_points
-from helpers.run import run_binary
+from helpers.run import assert_no_petsc_error, run_binary
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SRC = REPO_ROOT / "examples" / "benchmark2015"
@@ -71,8 +71,10 @@ def _stage(wd, settings):
 
 
 def _run(binary, cm_env, wd, settings, **kwargs):
-    return run_binary(binary("CardioMechanics"), ["-settings", settings.name],
+    proc = run_binary(binary("CardioMechanics"), ["-settings", settings.name],
                       cwd=wd, env=cm_env, **kwargs)
+    (wd / "run.log").write_text(proc.stdout + proc.stderr)
+    return proc
 
 
 def _require_mpi():
@@ -193,6 +195,14 @@ def test_rayleigh_damping_creeps_with_time_constant_beta(binary, cm_env, tmp_pat
     assert abs(tau / CREEP_BETA - 1) <= CREEP_RTOL, (
         f"volume creeps with time constant {tau:.4f} s, expected Beta = {CREEP_BETA} s "
         f"within {CREEP_RTOL:.0%}")
+
+
+def test_generalized_alpha_jacobian_fits_its_preallocation(genalpha_vtu_dir, lumped_vtu_dirs):
+    """The node-neighbour preallocation holds every entry of M and C, clamped couplings included.
+    An entry outside it would reallocate the Jacobian row block at every build, which costs more
+    than the rest of the build together, so PETSc's default for a preallocated matrix refuses it."""
+    for vtu_dir in (genalpha_vtu_dir, lumped_vtu_dirs[1]):
+        assert_no_petsc_error((vtu_dir.parents[1] / "run.log").read_text())
 
 
 def test_generalized_alpha_matches_newmark_with_lumped_mass(lumped_vtu_dirs):

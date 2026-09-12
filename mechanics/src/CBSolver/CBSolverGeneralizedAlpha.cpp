@@ -162,10 +162,6 @@ void CBSolverGeneralizedAlpha::InitPETScSolver() {
     SNESSetJacobian(snes_, Base::nodalForcesJacobian_, Base::nodalForcesJacobian_,
                     CBSolverGeneralizedAlphaSNESHelperFunctionForcesJacobian, (void *)this);
     
-    // The mass and damping matrices couple clamped components too, whose columns the element
-    // Jacobians leave out, so adding them allocates entries beyond those of the elements.
-    MatSetOption(Base::nodalForcesJacobian_, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_FALSE);
-    
     SNESSetTolerances(snes_, precision_, precision_, precision_, maxSnesIts_, maxFunEval_);
     
     SNESGetKSP(snes_, &ksp_);
@@ -557,36 +553,35 @@ CBStatus CBSolverGeneralizedAlpha::CalcNodalForcesJacobian(Vec unknowns, Mat jac
     }
     
     t1 = MPI_Wtime();
+    DCCtrl::debug << "Damping matrix ... ";
+    
+    // Mass and damping act on the displacement block alone. They couple clamped components,
+    // which the elements leave out, so they have to go in before the final assembly compresses
+    // away the free slots of the preallocation. Their factors are divided by the (1 - alphaF)
+    // the whole matrix is scaled with below.
+    if ((globalRayleighAlpha_ != 0) || (globalRayleighBeta_ != 0)) {
+        // A += (1-alphaF) * gamma/(dt*beta) * C
+        Base::adapter_->AddToDisplacementBlock(jacobian, gamma_ / (beta_*timing_.GetTimeStep()), dampingMatrix_);
+    }
+    
+    // A += (1-alphaM)/(dt^2*beta) * M
+    Base::adapter_->AddToDisplacementBlock(jacobian,
+                                           (1 - alphaM_) / ((1 - alphaF_) * beta_*timing_.GetTimeStep()*timing_.GetTimeStep()),
+                                           massMatrix_);
+    DCCtrl::debug << " done [" << MPI_Wtime() - t1 << " s]" << std::endl;
+    
+    t1 = MPI_Wtime();
     DCCtrl::debug << "Assembling ...";
     MatAssemblyBegin(jacobian, MAT_FINAL_ASSEMBLY);
     MatAssemblyEnd(jacobian, MAT_FINAL_ASSEMBLY);
     DCCtrl::debug << " done [" << MPI_Wtime() - t1 << " s]" << std::endl;
     
-    t1 = MPI_Wtime();
-    
-    DCCtrl::debug << "Damping matrix ... ";
-    
     // chain rule: the forces and the constraint are evaluated at d_n+1-alphaF and p_n+1-alphaF,
     // which depend on the unknowns d_n+1 and p_n+1 with factor (1 - alphaF)
     MatScale(jacobian, 1 - alphaF_);
     
-    // mass and damping act on the displacement block alone
-    if ((globalRayleighAlpha_ != 0) || (globalRayleighBeta_ != 0)) {
-        // A += (1-alphaF) * gamma/(dt*beta) * C
-        Base::adapter_->AddToDisplacementBlock(jacobian, (1 - alphaF_) * gamma_ / (beta_*timing_.GetTimeStep()),
-                                               dampingMatrix_);
-    }
-    
-    // A += (1-alphaM)/(dt^2*beta) * M
-    Base::adapter_->AddToDisplacementBlock(jacobian, (1 - alphaM_) / (beta_*timing_.GetTimeStep()*timing_.GetTimeStep()),
-                                           massMatrix_);
-    MatAssemblyBegin(jacobian, MAT_FINAL_ASSEMBLY);
-    MatAssemblyEnd(jacobian, MAT_FINAL_ASSEMBLY);
-    
     MatAXPY(jacobian, 1, boundaryConditionsNodalForcesJacobianDiagonalComponents_, DIFFERENT_NONZERO_PATTERN);
     MatSetLocalToGlobalMapping(jacobian, Base::nodesIndicesMapping_, Base::nodesIndicesMapping_);
-    
-    DCCtrl::debug << " done [" << MPI_Wtime() - t1 << " s]" << std::endl;
     
     if (localDisplacedNodesSeq)
         VecDestroy(&localDisplacedNodesSeq);

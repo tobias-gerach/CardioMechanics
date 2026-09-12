@@ -30,3 +30,9 @@ def run_binary(binary, args, cwd, env, timeout=300, np=None, check=True):
             f"args: {args}\n--- stderr (tail) ---\n{proc.stderr[-2000:]}"
         )
     return proc
+
+
+def assert_no_petsc_error(output):
+    """CardioMechanics ignores most PETSc return codes, so an error often shows only in its output."""
+    first = output.find("PETSC ERROR")
+    assert first < 0, f"PETSc reported an error:\n{output[output.rfind(chr(10), 0, first) + 1:][:2000]}"

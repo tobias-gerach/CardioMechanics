@@ -20,7 +20,7 @@ import numpy as np
 import pytest
 
 from helpers.compare import read_vtu_point_field, read_vtu_points
-from helpers.run import run_binary
+from helpers.run import assert_no_petsc_error, run_binary
 
 FIXTURE = Path(__file__).parent / "fixtures" / "p2p1_cantilever.xml"
 ROBIN_FIXTURE = Path(__file__).parent / "fixtures" / "p2p1_cantilever_robin.xml"
@@ -237,10 +237,11 @@ def test_p2p1_generalized_alpha_run_completes(binary, cm_env, tmp_path, consiste
     for tension in ("0.05", "0"):
         wd = tmp_path / f"tension_{tension}"
         wd.mkdir()
-        _, vtu_dir = _run(binary, cm_env, wd, fixture=DYNAMIC_FIXTURE, replace=[
+        proc, vtu_dir = _run(binary, cm_env, wd, fixture=DYNAMIC_FIXTURE, replace=[
             ("<ConsistentMassMatrix>true</ConsistentMassMatrix>",
              f"<ConsistentMassMatrix>{consistent_mass}</ConsistentMassMatrix>"),
             ("<TensionMax>0.05</TensionMax>", f"<TensionMax>{tension}</TensionMax>")])
+        assert_no_petsc_error(proc.stdout + proc.stderr)
         assert _last_vtu(vtu_dir).name == f"cantilever.{DYNAMIC_STEPS}.vtu", \
             f"TensionMax={tension}: run stopped before its stop time"
         peaks[tension] = _peak_displacement(vtu_dir)

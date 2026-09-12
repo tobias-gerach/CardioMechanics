@@ -218,7 +218,9 @@ void CBElementAdapter::AddToDisplacementBlock(Mat dofMatrix, PetscScalar alpha, 
             values[k] = alpha * vals[k];
         }
         PetscInt rowDof = GlobalDofIndex(row / 3, row % 3);
-        MatSetValues(dofMatrix, 1, &rowDof, numCols, dofs.data(), values.data(), ADD_VALUES);
+        // A matrix refusing an entry outside its preallocation drops it, and solving on with it
+        // missing would go unnoticed.
+        PetscCallAbort(PETSC_COMM_SELF, MatSetValues(dofMatrix, 1, &rowDof, numCols, dofs.data(), values.data(), ADD_VALUES));
         MatRestoreRow(nodesMatrix, row, &numCols, &cols, &vals);
     }
 }
