@@ -43,14 +43,15 @@ CELLS = 3                   # per axis
 JITTER = 0.2                # largest vertex displacement along each axis, as a fraction of the cell size
 
 
-def write_box(directory, quadratic=True, basis=None):
+def write_box(directory, quadratic=True, basis=None, symmetry_planes=True):
     """Write the unit cube as tetgen box.node, box.ele and box.sur into directory.
 
     T10 elements with a T6 loaded face if quadratic, otherwise T4 elements with a T3 loaded face
-    on the same vertices. Every node on the plane x_i = 0 has component i fixed, so the three
-    faces through the origin are symmetry planes. The loaded face is x_0 = 1, its triangles
-    ordered so that their normals point out of the box. If basis is given, its rows are the fibre,
-    sheet and sheet-normal directions of every element, written to box.bases.
+    on the same vertices. If symmetry_planes, every node on the plane x_i = 0 has component i
+    fixed, so the three faces through the origin are symmetry planes; otherwise every node is
+    free. The loaded face is x_0 = 1, its triangles ordered so that their normals point out of
+    the box. If basis is given, its rows are the fibre, sheet and sheet-normal directions of
+    every element, written to box.bases.
     """
     cells = np.full(3, CELLS)
     h, upper = 1 / cells, 2 * cells       # cell size, largest half-grid key
@@ -85,7 +86,8 @@ def write_box(directory, quadratic=True, basis=None):
         f.write(f"{len(keys)} 3 1 0\n")
         for k in keys:
             x, y, z = position(k)
-            f.write(f"{index[k]} {x:.17g} {y:.17g} {z:.17g} {sum(1 << i for i in range(3) if k[i] == 0)}\n")
+            fixed = sum(1 << i for i in range(3) if k[i] == 0) if symmetry_planes else 0
+            f.write(f"{index[k]} {x:.17g} {y:.17g} {z:.17g} {fixed}\n")
     with open(directory / "box.ele", "w") as f:
         f.write(f"{len(elements)} {len(elements[0])} 1\n")
         for n, e in enumerate(elements, 1):

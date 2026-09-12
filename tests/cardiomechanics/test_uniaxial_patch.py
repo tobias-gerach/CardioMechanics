@@ -44,6 +44,7 @@ import pytest
 
 from helpers.box import write_box
 from helpers.compare import read_vtu_point_field, read_vtu_points
+from helpers.materials import LAWS, material_block
 from helpers.run import run_binary
 
 FIXTURE = Path(__file__).parent / "fixtures" / "uniaxial_box.xml"
@@ -53,16 +54,6 @@ ELEMENTS = {"T4": "T3", "T10": "T6", "T10P1": "T6"}     # element type: loaded f
 # Compressible and nearly incompressible, Poisson's ratio 0.45 and 0.4995. J - 1 is 3e-2 and 3e-4,
 # so the kappa term moves the lateral stretch far beyond the tolerance at either.
 KAPPAS = (10, 1000)
-# Settings of each law, with the tag of its bulk modulus; every modulus is O(1). Holzapfel's k is
-# the slope of its smoothed Heavyside switch. At 10 rather than the default 100, the fibre I4 of
-# 1.25 along the load and 0.80 across it lies on the flank of the switch, where its derivative adds
-# about 2e-2 to the fibre and sheet stress; at 100 it would add at most 7e-5.
-LAWS = {
-    "NeoHooke": ("k", {"a": 1}),
-    "Holzapfel": ("kappa", {"a": 1, "b": 1, "af": 1, "bf": 1, "as": 0.5, "bs": 1, "afs": 0.3, "bfs": 1,
-                            "k": 10}),
-    "Guccione": ("K", {"C": 1, "bf": 8, "bt": 2, "bfs": 4}),
-}
 FIBRES = {"along": (0, 1, 2), "across": (1, 2, 0)}      # box axis of the fibre, sheet and sheet normal
 CASES = [("NeoHooke", None)] + [(law, fibres) for law in ("Holzapfel", "Guccione") for fibres in FIBRES]
 
@@ -157,11 +148,6 @@ def reference_stretches(element_type, law, fibres, kappa):
     axes = FIBRES[fibres]
     return uniaxial_stretches(lambda *l: ENERGIES[law](*(l[i] for i in axes), params),
                               j_of_pressure(law, element_type, kappa), TRACTION)
-
-
-def material_block(law, kappa):
-    tag, params = LAWS[law]
-    return f"<{law}>" + "".join(f"<{k}>{v}</{k}>" for k, v in {**params, tag: kappa}.items()) + f"</{law}>"
 
 
 @pytest.fixture(scope="module", params=[(e, law, f, k) for e in ELEMENTS for law, f in CASES for k in KAPPAS],
