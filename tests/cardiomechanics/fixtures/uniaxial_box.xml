@@ -42,7 +42,9 @@
 <Solver>
     <NonZeros>2000</NonZeros>
     <DomainDecomposition>false</DomainDecomposition>
-    <Precision>1e-10</Precision>
+    <!-- The P2P1 pressure is compared to 1e-10 relative, and under Holzapfel its fibre term couples
+         it to the stretches, so the iteration must stop well below that. -->
+    <Precision>1e-12</Precision>
     <!-- Coordinates are O(1) here, so the default finite-difference step of 1e-12 would sit
          at round-off; 1e-7 is the square root of machine precision for unit-sized values. -->
     <Epsilon>1e-7</Epsilon>

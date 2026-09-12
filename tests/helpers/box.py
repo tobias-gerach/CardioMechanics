@@ -43,13 +43,14 @@ CELLS = 3                   # per axis
 JITTER = 0.2                # largest vertex displacement along each axis, as a fraction of the cell size
 
 
-def write_box(directory, quadratic=True):
+def write_box(directory, quadratic=True, basis=None):
     """Write the unit cube as tetgen box.node, box.ele and box.sur into directory.
 
     T10 elements with a T6 loaded face if quadratic, otherwise T4 elements with a T3 loaded face
     on the same vertices. Every node on the plane x_i = 0 has component i fixed, so the three
     faces through the origin are symmetry planes. The loaded face is x_0 = 1, its triangles
-    ordered so that their normals point out of the box.
+    ordered so that their normals point out of the box. If basis is given, its rows are the fibre,
+    sheet and sheet-normal directions of every element, written to box.bases.
     """
     cells = np.full(3, CELLS)
     h, upper = 1 / cells, 2 * cells       # cell size, largest half-grid key
@@ -93,3 +94,8 @@ def write_box(directory, quadratic=True):
         f.write(f"{len(faces)} {len(faces[0])} 2\n")
         for n, s in enumerate(faces, 1):
             f.write(f"{n} {' '.join(str(index[k]) for k in s)} {LOADED_FACE} {LOADED_FACE}\n")
+    if basis is not None:
+        with open(directory / "box.bases", "w") as f:
+            f.write(f"{len(elements)} 1\n")          # one basis per element, shared by its quadrature points
+            for n in range(1, len(elements) + 1):
+                f.write(f"{n} {' '.join(f'{x:.17g}' for x in np.ravel(basis))}\n")
