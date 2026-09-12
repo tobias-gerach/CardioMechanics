@@ -115,6 +115,7 @@ private:
     Mat         massMatrix_;
     Mat         dampingMatrix_;
     Mat         elementsJacobian_ = 0; // unknown layout, the source of the damping stiffness K_uu
+    Mat         displacementBlock_ = 0; // K_uu, kept so that each update refills its storage
     
     PetscScalar prevTime_ = INFINITY;
     

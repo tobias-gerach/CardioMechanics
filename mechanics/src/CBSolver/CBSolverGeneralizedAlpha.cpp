@@ -54,6 +54,7 @@ void CBSolverGeneralizedAlpha::DeInit() {
     VecDestroy(&acceleration_);
     VecDestroy(&tmpVector_);
     MatDestroy(&elementsJacobian_);
+    MatDestroy(&displacementBlock_);
     SNESDestroy(&snes_);
     KSPDestroy(&ksp_);
     PCDestroy(&pc_);
@@ -258,13 +259,15 @@ void CBSolverGeneralizedAlpha::AddDampingStiffness() {
     MatAssemblyEnd(elementsJacobian_, MAT_FINAL_ASSEMBLY);
     
     // The displacement block, numbered by its position in the unknowns, which is the node layout.
-    Mat displacementBlock;
-    IS  dofs = Base::adapter_->GetDisplacementDofs();
-    MatCreateSubMatrix(elementsJacobian_, dofs, dofs, MAT_INITIAL_MATRIX, &displacementBlock);
+    // The mesh fixes its pattern: the first extraction allocates the block, and the still empty C
+    // with it, and every later one refills both in place.
+    bool first = !displacementBlock_;
+    IS   dofs  = Base::adapter_->GetDisplacementDofs();
+    MatCreateSubMatrix(elementsJacobian_, dofs, dofs, first ? MAT_INITIAL_MATRIX : MAT_REUSE_MATRIX,
+                       &displacementBlock_);
     MatAssemblyBegin(dampingMatrix_, MAT_FINAL_ASSEMBLY);
     MatAssemblyEnd(dampingMatrix_, MAT_FINAL_ASSEMBLY);
-    MatAXPY(dampingMatrix_, 1, displacementBlock, DIFFERENT_NONZERO_PATTERN);
-    MatDestroy(&displacementBlock);
+    MatAXPY(dampingMatrix_, 1, displacementBlock_, first ? DIFFERENT_NONZERO_PATTERN : SUBSET_NONZERO_PATTERN);
 }
 
 void CBSolverGeneralizedAlpha::InitDampingMatrix() {
@@ -316,6 +319,9 @@ void CBSolverGeneralizedAlpha::InitDampingMatrix() {
                 MatScale(dampingMatrix_, globalRayleighBeta_);
             }
         } else {
+            // A copy into a new pattern scales the target first, which needs it assembled, if empty.
+            MatAssemblyBegin(dampingMatrix_, MAT_FINAL_ASSEMBLY);
+            MatAssemblyEnd(dampingMatrix_, MAT_FINAL_ASSEMBLY);
             MatCopy(massMatrix_, dampingMatrix_, DIFFERENT_NONZERO_PATTERN);
             MatScale(dampingMatrix_, globalRayleighAlpha_);
         }
@@ -323,6 +329,9 @@ void CBSolverGeneralizedAlpha::InitDampingMatrix() {
         MatSetLocalToGlobalMapping(dampingMatrix_, NodesComponentsMapping(), NodesComponentsMapping());
         MatAssemblyBegin(dampingMatrix_, MAT_FINAL_ASSEMBLY);
         MatAssemblyEnd(dampingMatrix_, MAT_FINAL_ASSEMBLY);
+        // C now holds the nonzeros of every term it is built from, M and K_uu, and each update
+        // refills them in place. A nonzero outside them would reallocate C, so it is an error.
+        MatSetOption(dampingMatrix_, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_TRUE);
     }
 }  // CBSolverGeneralizedAlpha::InitDampingMatrix
 
@@ -604,6 +613,7 @@ CBStatus CBSolverGeneralizedAlpha::CalcDampingMatrix() {
     if ((globalRayleighAlpha_ != 0) || (globalRayleighBeta_ != 0)) {
         CBStatus rc = CBStatus::FAILED;
         
+        // Every term below fits the nonzeros InitDampingMatrix gave C, so C is filled in place.
         if (globalRayleighBeta_ != 0) {
             // AddDampingStiffness adds to what the matrix holds, so C of the previous state has
             // to go first or it would carry over into this one.
@@ -613,11 +623,11 @@ CBStatus CBSolverGeneralizedAlpha::CalcDampingMatrix() {
             // C = rayleighAlpha * M + rayleighBeta * K
             MatScale(dampingMatrix_, globalRayleighBeta_);
             if (globalRayleighAlpha_ != 0)
-                MatAXPY(dampingMatrix_, globalRayleighAlpha_, massMatrix_, DIFFERENT_NONZERO_PATTERN);
+                MatAXPY(dampingMatrix_, globalRayleighAlpha_, massMatrix_, SUBSET_NONZERO_PATTERN);
             
             rc = CBStatus::SUCCESS;
         } else {
-            MatCopy(massMatrix_, dampingMatrix_, DIFFERENT_NONZERO_PATTERN);
+            MatCopy(massMatrix_, dampingMatrix_, SAME_NONZERO_PATTERN);
             MatScale(dampingMatrix_, globalRayleighAlpha_);
             rc = CBStatus::SUCCESS;
         }
