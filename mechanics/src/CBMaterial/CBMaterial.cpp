@@ -45,6 +45,15 @@ void CBMaterial::Init(ParameterMap* parameters, TInt materialIndex)
         properties_->tensionName_ = parameters->Get<std::string>("Materials.Mat_Default.TensionModel");
     else
         properties_->tensionName_ = parameters->Get<std::string>("Materials.Mat_" + std::to_string(materialIndex_) + ".TensionModel", "None");
+
+    std::string activeTensionMeasure;
+    if(parameters->IsAvailable("Materials.Mat_" + std::to_string(materialIndex_) + ".ActiveTensionMeasure") == false && parameters->IsAvailable("Materials.Mat_Default.ActiveTensionMeasure") == true)
+        activeTensionMeasure = parameters->Get<std::string>("Materials.Mat_Default.ActiveTensionMeasure");
+    else
+        activeTensionMeasure = parameters->Get<std::string>("Materials.Mat_" + std::to_string(materialIndex_) + ".ActiveTensionMeasure", "Nominal");
+    if(activeTensionMeasure != "Nominal" && activeTensionMeasure != "PK2")
+        throw std::runtime_error("CBMaterial::Init(): Error, unknown ActiveTensionMeasure [" + activeTensionMeasure + "] of material " + std::to_string(materialIndex_) + ", expected Nominal or PK2");
+    properties_->pk2ActiveTension_ = activeTensionMeasure == "PK2";
     
     if(parameters->IsAvailable("Materials.Mat_" + std::to_string(materialIndex_) + ".SimpleElectroMechanicalFeedback") == false && parameters->IsAvailable("Materials.Mat_Default.SimpleElectroMechanicalFeedback") == true)
         properties_->useSimpleElectroMechanicalFeedback_ = parameters->Get<bool>("Materials.Mat_Default.SimpleElectroMechanicalFeedback");

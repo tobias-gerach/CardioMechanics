@@ -68,6 +68,7 @@ CBTensionModel *CBTensionFactory::New(CBElementSolid *ele) {
     } else {
         ProducerFunction pf = producer->second;
         tensionModel = pf(ele);
+        tensionModel->SetPK2ActiveTension(ele->GetMaterial()->GetPK2ActiveTension());
     }
     assert(tensionModel != 0);
     return tensionModel;

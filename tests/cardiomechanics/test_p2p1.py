@@ -184,6 +184,36 @@ def test_active_stress_estimator_refuses_p2p1(binary, cm_env, tmp_path):
     _assert_refused(proc, "Active Stress Estimator", "T10P1")
 
 
+def _active_tension(measure):
+    """Settings substitution for a fibre tension ramped to 0.3 over the run, with the top face unloaded."""
+    return [("<TensionMax>0</TensionMax>",
+             "<TensionMax>0.3</TensionMax><TensionModel>FromFunction</TensionModel>"
+             "<FromFunction><Type>Linear</Type><StartTime>0</StartTime><StopTime>1</StopTime></FromFunction>"
+             f"<ActiveTensionMeasure>{measure}</ActiveTensionMeasure>"),
+            ("<Amplitude>0.003</Amplitude>", "<Amplitude>0</Amplitude>")]
+
+
+def test_unknown_active_tension_measure_is_refused(binary, cm_env, tmp_path):
+    proc, _ = _run(binary, cm_env, tmp_path, replace=_active_tension("Cauchy"), check=False)
+    _assert_refused(proc, "ActiveTensionMeasure", "Cauchy")
+
+
+def test_pk2_active_tension_shortens_fibres_less_than_nominal(binary, cm_env, tmp_path):
+    """A shortening fibre has stretch below one, so the nominal measure's PK2 stress, tension over
+    stretch, exceeds the constant PK2 stress of the same tension."""
+    pytest.importorskip("meshio")
+    shortening = {}
+    for measure in ("Nominal", "PK2"):
+        wd = tmp_path / measure
+        wd.mkdir()
+        _, vtu_dir = _run(binary, cm_env, wd, replace=_active_tension(measure))
+        _, pts = _final_points(vtu_dir)
+        _, ref = read_vtu_points(vtu_dir / "cantilever.0.vtu")
+        shortening[measure] = ref[:, 0].max() - pts[:, 0].max()
+    assert shortening["PK2"] > 1e-2, f"fibres barely shortened: {shortening}"
+    assert shortening["PK2"] < shortening["Nominal"], f"PK2 shortened at least as much as nominal: {shortening}"
+
+
 def test_p2p1_static_run_converges(binary, cm_env, tmp_path):
     pytest.importorskip("meshio")
     _, vtu_dir = _run(binary, cm_env, tmp_path)
