@@ -1,0 +1,85 @@
+<settings>Uniaxial tension of a distorted box</settings>
+
+<General>
+    <LogFile>./Results/box.log</LogFile>
+</General>
+
+<Mesh>
+    <Type>T10P1</Type>
+    <Format>Tetgen</Format>
+    <Sorting>None</Sorting>
+
+    <Tetgen>
+        <Unit>1</Unit>
+        <Nodes>./tetgen/box.node</Nodes>
+        <Elements>./tetgen/box.ele</Elements>
+        <Surfaces>./tetgen/box.sur</Surfaces>
+    </Tetgen>
+
+    <Surfaces>
+        <Surface_130><Type>T6</Type></Surface_130>
+    </Surfaces>
+</Mesh>
+
+<Materials>
+    <Mat_30>
+        <Type>NeoHooke</Type>
+        <Density>1</Density>
+        <NeoHooke>
+            <a>1</a>
+            <k>100</k>
+        </NeoHooke>
+        <TensionMax>0</TensionMax>
+    </Mat_30>
+</Materials>
+
+<Export>
+    <Format>VTK</Format>
+    <Prefix>./Results/box</Prefix>
+    <TimeStep>0.25</TimeStep>
+</Export>
+
+<Solver>
+    <NonZeros>2000</NonZeros>
+    <DomainDecomposition>false</DomainDecomposition>
+    <Precision>1e-10</Precision>
+    <!-- Coordinates are O(1) here, so the default finite-difference step of 1e-12 would sit
+         at round-off; 1e-7 is the square root of machine precision for unit-sized values. -->
+    <Epsilon>1e-7</Epsilon>
+    <LU>true</LU>
+
+    <Type>Static</Type>
+
+    <Formulation>TotalLagrangian</Formulation>
+
+    <StartTime>0</StartTime>
+    <StopTime>1</StopTime>
+    <TimeStep>0.25</TimeStep>
+
+    <Plugins>
+        <ApplyPressureFromFunction>true</ApplyPressureFromFunction>
+    </Plugins>
+</Solver>
+
+<Plugins>
+    <ApplyPressureFromFunction>
+        <ExportFile>./Results/Pressure.dat</ExportFile>
+        <Groups>
+            <End>
+                <Surfaces>130</Surfaces>
+                <Intervals>
+                    <Interval_1>
+                        <Type>Linear</Type>
+                        <Invert>false</Invert>
+                        <StartTime>0.0</StartTime>
+                        <StopTime>1.0</StopTime>
+                        <Offset>0</Offset>
+                        <!-- Surface forces enter the residual with the sign of the internal forces,
+                             so a positive pressure acts along the face normal: out of the box, a pull. -->
+                        <Amplitude>1</Amplitude>
+                    </Interval_1>
+                </Intervals>
+            </End>
+        </Groups>
+    </ApplyPressureFromFunction>
+</Plugins>
