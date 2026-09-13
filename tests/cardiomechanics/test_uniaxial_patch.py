@@ -45,7 +45,7 @@ import pytest
 from helpers.box import write_box
 from helpers.compare import read_vtu_point_field, read_vtu_points
 from helpers.materials import LAWS, material_block
-from helpers.run import run_binary
+from helpers.run import assert_refused, run_binary
 
 FIXTURE = Path(__file__).parent / "fixtures" / "uniaxial_box.xml"
 TRACTION = float(re.search(r"<Amplitude>(.*?)</Amplitude>", FIXTURE.read_text()).group(1))
@@ -56,6 +56,9 @@ ELEMENTS = {"T4": "T3", "T10": "T6", "T10P1": "T6"}     # element type: loaded f
 KAPPAS = (10, 1000)
 FIBRES = {"along": (0, 1, 2), "across": (1, 2, 0)}      # box axis of the fibre, sheet and sheet normal
 CASES = [("NeoHooke", None)] + [(law, fibres) for law in ("Holzapfel", "Guccione") for fibres in FIBRES]
+# Mesh.QuadratureDegree of each run, None for the default. Degree 5 selects the 14-point rule of T10
+# and P2P1; T4 has its own one-point rule.
+DEGREES = {"T4": (None,), "T10": (None, 5), "T10P1": (None, 5)}
 
 # The VTU points are single precision: rounding moves a coordinate below 2 by at most 1.2e-7, in
 # the reference and the deformed frame alike, and the expected position inherits the reference
@@ -150,33 +153,48 @@ def reference_stretches(element_type, law, fibres, kappa):
                               j_of_pressure(law, element_type, kappa), TRACTION)
 
 
-@pytest.fixture(scope="module", params=[(e, law, f, k) for e in ELEMENTS for law, f in CASES for k in KAPPAS],
-                ids=lambda p: f"{p[0]}-{p[1]}{'-fibres-' + p[2] if p[2] else ''}-kappa{p[3]}")
-def solution(request, binary, cm_env, tmp_path_factory):
-    """Run the box under one element type, law, fibre direction and kappa. Returns (label, kappa,
-    PointID, reference points, final points, final pressure or None, expected stretches)."""
-    pytest.importorskip("meshio")
-    element_type, law, fibres, kappa = request.param
-    label = f"{element_type} {law}{' fibres ' + fibres if fibres else ''} kappa={kappa}"
-    wd = tmp_path_factory.mktemp(f"{element_type}_{law}_{fibres}_{kappa}")
+def _run_box(binary, cm_env, wd, element_type, law, kappa, basis=None, degree=None, check=True):
+    """Stage the box in wd with the fibre basis of write_box, if any, and run it under one element
+    type, law, kappa and Mesh.QuadratureDegree (the default if None). Returns the process."""
     (wd / "tetgen").mkdir()
     (wd / "Results").mkdir()
-    write_box(wd / "tetgen", quadratic=element_type != "T4",
-              basis=np.eye(3)[list(FIBRES[fibres])] if fibres else None)
+    write_box(wd / "tetgen", quadratic=element_type != "T4", basis=basis)
     text, n = re.subn(r"<NeoHooke>.*?</NeoHooke>", material_block(law, kappa), FIXTURE.read_text(), flags=re.DOTALL)
     assert n == 1, f"{FIXTURE.name}: cannot substitute the NeoHooke parameters"
     substitutions = [("<Type>T10P1</Type>", f"<Type>{element_type}</Type>"),
                      ("<Type>T6</Type>", f"<Type>{ELEMENTS[element_type]}</Type>"),
                      ("<Type>NeoHooke</Type>", f"<Type>{law}</Type>")]
-    if fibres:
+    if basis is not None:
         substitutions.append(("<Surfaces>./tetgen/box.sur</Surfaces>",
                               "<Surfaces>./tetgen/box.sur</Surfaces><Bases>./tetgen/box.bases</Bases>"))
+    if degree is not None:
+        substitutions.append(("<Format>Tetgen</Format>",
+                              f"<Format>Tetgen</Format><QuadratureDegree>{degree}</QuadratureDegree>"))
     for old, new in substitutions:
         assert text.count(old) == 1, f"{FIXTURE.name}: cannot substitute {old}"
         text = text.replace(old, new)
     (wd / FIXTURE.name).write_text(text)
-    proc = run_binary(binary("CardioMechanics"), ["-settings", FIXTURE.name], cwd=wd, env=cm_env, timeout=600)
-    assert "SIMULATION FAILED" not in proc.stdout, proc.stdout[-2000:]
+    proc = run_binary(binary("CardioMechanics"), ["-settings", FIXTURE.name], cwd=wd, env=cm_env, timeout=600,
+                      check=check)
+    if check:
+        assert "SIMULATION FAILED" not in proc.stdout, proc.stdout[-2000:]
+    return proc
+
+
+@pytest.fixture(scope="module",
+                params=[(e, law, f, k, d) for e in ELEMENTS for law, f in CASES for k in KAPPAS for d in DEGREES[e]],
+                ids=lambda p: f"{p[0]}-{p[1]}{'-fibres-' + p[2] if p[2] else ''}-kappa{p[3]}"
+                              f"{'-degree' + str(p[4]) if p[4] else ''}")
+def solution(request, binary, cm_env, tmp_path_factory):
+    """Run the box under one element type, law, fibre direction, kappa and quadrature degree. Returns
+    (label, kappa, PointID, reference points, final points, final pressure or None, expected stretches)."""
+    pytest.importorskip("meshio")
+    element_type, law, fibres, kappa, degree = request.param
+    label = (f"{element_type} {law}{' fibres ' + fibres if fibres else ''} kappa={kappa}"
+             f"{' degree ' + str(degree) if degree else ''}")
+    wd = tmp_path_factory.mktemp(f"{element_type}_{law}_{fibres}_{kappa}_{degree}")
+    _run_box(binary, cm_env, wd, element_type, law, kappa,
+             basis=np.eye(3)[list(FIBRES[fibres])] if fibres else None, degree=degree)
 
     vtu_dir = wd / "Results" / "box_vtu"
     last = vtu_dir / f"box.{STEPS}.vtu"
@@ -237,3 +255,16 @@ def test_p2p1_pressure_is_uniform_kappa_j_minus_one(solution):
     expected = kappa * (np.prod(stretches) - 1)
     _assert_nodes_match(label, pid, pressure[:, None], np.full((len(pressure), 1), expected),
                         PRESSURE_RTOL * abs(expected), "pressure not kappa (J - 1)")
+
+
+def test_unsupported_quadrature_degree_is_refused(binary, cm_env, tmp_path):
+    proc = _run_box(binary, cm_env, tmp_path, "T10P1", "NeoHooke", KAPPAS[0], degree=3, check=False)
+    assert_refused(proc, "QuadratureDegree", "3")
+
+
+def test_degree_5_refuses_bases_that_differ_between_quadrature_points(binary, cm_env, tmp_path):
+    """The bases file holds frames at the centroid and the four points of the default rule, which
+    are not points of the 14-point rule."""
+    frames = [np.eye(3)] + [np.eye(3)[list(FIBRES["across"])]] * 4
+    proc = _run_box(binary, cm_env, tmp_path, "T10P1", "Holzapfel", KAPPAS[0], basis=frames, degree=5, check=False)
+    assert_refused(proc, "QuadratureDegree", "bases")

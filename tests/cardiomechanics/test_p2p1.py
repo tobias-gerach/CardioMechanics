@@ -20,7 +20,7 @@ import numpy as np
 import pytest
 
 from helpers.compare import read_vtu_point_field, read_vtu_points
-from helpers.run import assert_no_petsc_error, run_binary
+from helpers.run import assert_no_petsc_error, assert_refused, run_binary
 
 FIXTURE = Path(__file__).parent / "fixtures" / "p2p1_cantilever.xml"
 ROBIN_FIXTURE = Path(__file__).parent / "fixtures" / "p2p1_cantilever_robin.xml"
@@ -163,25 +163,17 @@ def test_unknown_element_type_lists_p2p1(binary, cm_env, tmp_path):
     assert "T10P1" in proc.stdout + proc.stderr, (proc.stdout + proc.stderr)[-2000:]
 
 
-def _assert_refused(proc, *names):
-    """The run aborted with an error message naming every one of names on one line."""
-    out = proc.stdout + proc.stderr
-    assert proc.returncode != 0, f"expected a non-zero exit\n{out[-2000:]}"
-    assert any("error" in line.lower() and all(n in line for n in names) for line in out.splitlines()), \
-        f"no error names {names}\n{out[-2000:]}"
-
-
 @pytest.mark.parametrize("material", ["MooneyRivlin", "Usyk"])
 def test_p2p1_refuses_material_without_mixed_formulation(binary, cm_env, tmp_path, material):
     proc, _ = _run(binary, cm_env, tmp_path, material=material, check=False)
-    _assert_refused(proc, material, "T10P1")
+    assert_refused(proc, material, "T10P1")
 
 
 def test_active_stress_estimator_refuses_p2p1(binary, cm_env, tmp_path):
     """The estimator differentiates nodal forces with respect to element tension, which has no
     counterpart for the pressure field."""
     proc, _ = _run(binary, cm_env, tmp_path, solver="ActiveStressEstimator", check=False)
-    _assert_refused(proc, "Active Stress Estimator", "T10P1")
+    assert_refused(proc, "Active Stress Estimator", "T10P1")
 
 
 def _active_tension(measure):
@@ -195,7 +187,7 @@ def _active_tension(measure):
 
 def test_unknown_active_tension_measure_is_refused(binary, cm_env, tmp_path):
     proc, _ = _run(binary, cm_env, tmp_path, replace=_active_tension("Cauchy"), check=False)
-    _assert_refused(proc, "ActiveTensionMeasure", "Cauchy")
+    assert_refused(proc, "ActiveTensionMeasure", "Cauchy")
 
 
 def test_pk2_active_tension_shortens_fibres_less_than_nominal(binary, cm_env, tmp_path):

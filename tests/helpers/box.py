@@ -51,7 +51,8 @@ def write_box(directory, quadratic=True, basis=None, symmetry_planes=True):
     fixed, so the three faces through the origin are symmetry planes; otherwise every node is
     free. The loaded face is x_0 = 1, its triangles ordered so that their normals point out of
     the box. If basis is given, its rows are the fibre, sheet and sheet-normal directions of
-    every element, written to box.bases.
+    every element, written to box.bases. A stack of bases gives one per quadrature point of the
+    element instead, the centroid first.
     """
     cells = np.full(3, CELLS)
     h, upper = 1 / cells, 2 * cells       # cell size, largest half-grid key
@@ -97,7 +98,8 @@ def write_box(directory, quadratic=True, basis=None, symmetry_planes=True):
         for n, s in enumerate(faces, 1):
             f.write(f"{n} {' '.join(str(index[k]) for k in s)} {LOADED_FACE} {LOADED_FACE}\n")
     if basis is not None:
+        bases = np.reshape(basis, (-1, 3, 3))      # a single basis is shared by the quadrature points
         with open(directory / "box.bases", "w") as f:
-            f.write(f"{len(elements)} 1\n")          # one basis per element, shared by its quadrature points
+            f.write(f"{len(elements)} {len(bases)}\n")
             for n in range(1, len(elements) + 1):
-                f.write(f"{n} {' '.join(f'{x:.17g}' for x in np.ravel(basis))}\n")
+                f.write(f"{n} {' '.join(f'{x:.17g}' for x in np.ravel(bases))}\n")

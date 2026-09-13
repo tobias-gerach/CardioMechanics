@@ -32,6 +32,14 @@ def run_binary(binary, args, cwd, env, timeout=300, np=None, check=True):
     return proc
 
 
+def assert_refused(proc, *names):
+    """The run aborted with an error message naming every one of names on one line."""
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, f"expected a non-zero exit\n{out[-2000:]}"
+    assert any("error" in line.lower() and all(n in line for n in names) for line in out.splitlines()), \
+        f"no error names {names}\n{out[-2000:]}"
+
+
 def assert_no_petsc_error(output):
     """CardioMechanics ignores most PETSc return codes, so an error often shows only in its output."""
     first = output.find("PETSC ERROR")

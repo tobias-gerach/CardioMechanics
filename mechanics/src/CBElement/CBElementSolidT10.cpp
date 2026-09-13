@@ -22,9 +22,38 @@
 #include "CBSolver.h"
 #include "CBData.h"
 
+namespace {
+const TFloat alpha = (5+3*sqrt(5))/20;
+const TFloat beta  = (5-sqrt(5))/20;
+}
+
+// Point q lies at alpha on vertex q and at beta on the other three.
+const CBElementSolidT10::QuadratureRule CBElementSolidT10::rule4_ = {4,
+    {{{alpha, beta, beta, beta}, {beta, alpha, beta, beta}, {beta, beta, alpha, beta}, {beta, beta, beta, alpha}}},
+    {{0.25, 0.25, 0.25, 0.25}}};
+
+// The 14-point rule of degree 5 with positive weights, gmsh's Gauss5 on the tetrahedron. It
+// integrates the degree 4 constraint integrand of P2P1 on affine elements exactly, which the
+// 4-point rule does not.
+const CBElementSolidT10::QuadratureRule CBElementSolidT10::rule14_ = [] {
+    // Orbits of four points at a on three vertices and 1 - 3a on the fourth, for a = a1 and a2, and
+    // of six points at c on two vertices and 1/2 - c on the other two.
+    const TFloat a1 = 0.0927352503108912264, b1 = 0.7217942490673263208, w1 = 0.0734930431163619495;
+    const TFloat a2 = 0.3108859192633006097, b2 = 0.0673422422100981709, w2 = 0.1126879257180158508;
+    const TFloat c  = 0.0455037041256496494, d  = 0.4544962958743503506, w3 = 0.0425460207770814664;
+    return QuadratureRule{14,
+        {{{b1, a1, a1, a1}, {a1, b1, a1, a1}, {a1, a1, b1, a1}, {a1, a1, a1, b1},
+          {b2, a2, a2, a2}, {a2, b2, a2, a2}, {a2, a2, b2, a2}, {a2, a2, a2, b2},
+          {c, c, d, d}, {c, d, c, d}, {c, d, d, c}, {d, c, c, d}, {d, c, d, c}, {d, d, c, c}}},
+        {{w1, w1, w1, w1, w2, w2, w2, w2, w3, w3, w3, w3, w3, w3}}};
+}();
+
 CBElementSolidT10::CBElementSolidT10(CBElementSolidT10 &other) : CBElementSolid(other) {
     nodesIndices_ = other.nodesIndices_;
+    rule_ = other.rule_;
     dNdXW_ = other.dNdXW_;
+    dNdXCentroid_ = other.dNdXCentroid_;
+    dV_ = other.dV_;
     dNdXt4_ = other.dNdXt4_;
     detJ_ = other.detJ_;
     basisAtQuadraturePoint_ = other.basisAtQuadraturePoint_;
@@ -39,6 +68,20 @@ CBElement *CBElementSolidT10::Clone() {
 }
 
 void CBElementSolidT10::UpdateShapeFunctions() {
+    int degree = Base::parameters_->Get<int>("Mesh.QuadratureDegree", 2);
+    if (degree == 2) {
+        rule_ = &rule4_;
+    } else if (degree == 5) {
+        rule_ = &rule14_;
+        // The bases file can only give frames at the points of the 4-point rule.
+        for (int i = 1; i < 5; i++)
+            if (!(basisAtQuadraturePoint_[i] == basisAtQuadraturePoint_[0]))
+                throw std::runtime_error("CBElementSolidT10: Mesh.QuadratureDegree 5 needs one fibre basis per element, but the bases of element "
+                                         + std::to_string(index_+1) + " differ between its quadrature points");
+    } else {
+        throw std::runtime_error("CBElementSolidT10: Mesh.QuadratureDegree " + std::to_string(degree)
+                                 + " is not supported, use 2 (4-point rule) or 5 (14-point rule)");
+    }
     CalcShapeFunctionDerivativesAtQuadraturePoints();
     CalcShapeFunctionDerivativesAtCentroid();
     CalcT4ShapeFunctionsDerivatives();
@@ -76,14 +119,23 @@ Matrix3<TFloat> *CBElementSolidT10::GetBasisAtQuadraturePoint(int i) {
     }
 }
 
+Matrix3<TFloat> &CBElementSolidT10::QuadraturePointBasis(int q) {
+    // The bases are stored with the centroid's first, then those of the 4-point rule. The 14-point
+    // rule, whose points have none of their own, uses the centroid's.
+    return basisAtQuadraturePoint_[rule_ == &rule4_ ? q+1 : 0];
+}
+
 void CBElementSolidT10::CalcShapeFunctionDerivativesAtQuadraturePoints() {
-    // RM: A bit irritating as Bases are stored with the centroid at [0] in bases - but correct!
-    
-    CalcShapeFunctionDerivatives((5+3*sqrt(5))/20, (5-sqrt(5))/20, (5-sqrt(5))/20, (5-sqrt(5))/20, &(dNdXW_[0]));
-    CalcShapeFunctionDerivatives((5-sqrt(5))/20, (5+3*sqrt(5))/20, (5-sqrt(5))/20, (5-sqrt(5))/20, &(dNdXW_[30]));
-    CalcShapeFunctionDerivatives((5-sqrt(5))/20, (5-sqrt(5))/20, (5+3*sqrt(5))/20, (5-sqrt(5))/20, &(dNdXW_[60]));
-    CalcShapeFunctionDerivatives((5-sqrt(5))/20, (5-sqrt(5))/20, (5-sqrt(5))/20, (5+3*sqrt(5))/20, &(dNdXW_[90]));
-    CalcShapeFunctionDerivatives(0.25, 0.25,  0.25, 0.25, &(dNdXW_[120]));
+    for (int q = 0; q < rule_->numPoints; q++) {
+        const std::array<TFloat, 4> &l = rule_->points[q];
+        CalcShapeFunctionDerivatives(l[0], l[1], l[2], l[3], &dNdXW_[30*q]);
+        dV_[q] = rule_->weights[q] * detJ_/6;
+    }
+    CalcShapeFunctionDerivatives(0.25, 0.25,  0.25, 0.25, dNdXCentroid_.data());
+    // The default rule weights its points by the determinant at the centroid, exact on affine
+    // elements only. The 14-point rule takes it at each point, so it integrates curved elements too.
+    if (rule_ == &rule4_)
+        dV_.fill(detJ_/24);
     CalcT4ShapeFunctionsDerivatives();
     Ancestor::initialVolume_ = GetVolume();
 }
@@ -264,8 +316,8 @@ void CBElementSolidT10::CalcShapeFunctionDerivatives(TFloat l1, TFloat l2, TFloa
 } // CBElementSolidT10::CalcShapeFunctionDerivatives
 
 void CBElementSolidT10::CalcDeformationTensorsAtQuadraturePointsWithLocalBasis(const TFloat *nodesCoords, Matrix3<TFloat> *deformationTensors) {
-    for (unsigned int n = 0; n < 4; n++) {
-        TFloat *dNdX = &dNdXW_[30*n];         // Derivatives of shape functions at quadrature point n 0-4 = QuadP ; n=5/120 = center
+    for (int n = 0; n < rule_->numPoints; n++) {
+        TFloat *dNdX = &dNdXW_[30*n];
         TFloat *f    = deformationTensors[n].GetArray();
         
         for (unsigned int i = 0; i < 3; i++) { // x/y/z
@@ -281,15 +333,15 @@ void CBElementSolidT10::CalcDeformationTensorsAtQuadraturePointsWithLocalBasis(c
     }
     
     
-    for (int i = 0; i < 4; i++) {
-        deformationTensors[i] =  GetBasisAtQuadraturePoint(i+1)->GetTranspose() * deformationTensors[i] *
-        GetBasisAtQuadraturePoint(i+1)->GetInverse().GetTranspose();
+    for (int i = 0; i < rule_->numPoints; i++) {
+        deformationTensors[i] =  QuadraturePointBasis(i).GetTranspose() * deformationTensors[i] *
+        QuadraturePointBasis(i).GetInverse().GetTranspose();
     }
 } // CBElementSolidT10::CalcDeformationTensorsAtQuadraturePointsWithLocalBasis
 
 void CBElementSolidT10::CalcDeformationTensorsAtQuadraturePointsWithGlobalBasis(const TFloat *nodesCoords, Matrix3<TFloat> *deformationTensors) {
-    for (unsigned int n = 0; n < 4; n++) {
-        TFloat *dNdX = &dNdXW_[30*n];         // Derivatives of shape functions at quadrature point n 0-4 = QuadP ; n=5/120 = center
+    for (int n = 0; n < rule_->numPoints; n++) {
+        TFloat *dNdX = &dNdXW_[30*n];
         TFloat *f    = deformationTensors[n].GetArray();
         
         for (unsigned int i = 0; i < 3; i++)
@@ -305,7 +357,7 @@ void CBElementSolidT10::CalcDeformationTensorsAtQuadraturePointsWithGlobalBasis(
 }
 
 void CBElementSolidT10::CalcDeformationTensorsAtCentroidWithLocalBasis(const TFloat *nodesCoords, Matrix3<TFloat> &deformationTensor) {
-    TFloat *dNdX = &dNdXW_[120];
+    TFloat *dNdX = dNdXCentroid_.data();
     TFloat *f    = deformationTensor.GetArray();
     
     for (unsigned int i = 0; i < 3; i++)
@@ -620,16 +672,13 @@ void CBElementSolidT10::CheckNodeSorting() {
 CBStatus CBElementSolidT10::CalcNodalForcesHelperFunction(const TFloat *nodesCoords, const bool *boundaryConditions, TFloat *forces) {
     CBStatus rc;
     Matrix3<TFloat> activeStress    = {0, 0, 0, 0, 0, 0, 0, 0, 0};
-    Matrix3<TFloat> deformationTensors[4];
-    Matrix3<TFloat> stress[4]       = { {0, 0, 0, 0, 0, 0, 0, 0, 0},
-        {0, 0, 0, 0, 0, 0, 0, 0, 0},
-        {0, 0, 0, 0, 0, 0, 0, 0, 0},
-        {0, 0, 0, 0, 0, 0, 0, 0, 0}   };
+    Matrix3<TFloat> deformationTensors[maxQuadraturePoints];
+    Matrix3<TFloat> stress[maxQuadraturePoints];
     TFloat time = adapter_->GetSolver()->GetTiming().GetCurrentTime();
     
     CalcDeformationTensorsAtQuadraturePointsWithLocalBasis(nodesCoords, deformationTensors);
     
-    for (int QPi = 0; QPi < 4; QPi++) {
+    for (int QPi = 0; QPi < rule_->numPoints; QPi++) {
         rc = Base::material_->GetConstitutiveModel()->CalcPK2Stress(deformationTensors[QPi], stress[QPi]);
         
         // print corrupt element messages from each processor
@@ -652,47 +701,45 @@ CBStatus CBElementSolidT10::CalcNodalForcesHelperFunction(const TFloat *nodesCoo
 
 void CBElementSolidT10::CalcNodalForcesFromPK2Stresses(const Matrix3<TFloat> *deformationTensors, Matrix3<TFloat> *stress,
                                                        const bool *boundaryConditions, TFloat *forces) {
-    for (int QPi = 0; QPi < 4; QPi++) {
+    for (int QPi = 0; QPi < rule_->numPoints; QPi++) {
         // convert PK2 stress into nominal stress with respect to the local coordinate system aligned with the fibres
         stress[QPi] = (deformationTensors[QPi] * stress[QPi]).GetTranspose();
         
         // transform  stress back into the global coordinate system
-        stress[QPi] = GetBasisAtQuadraturePoint(QPi+1)->GetInverse().GetTranspose() * stress[QPi] * GetBasisAtQuadraturePoint(QPi+1)->GetTranspose(); // +1 since centroid is at i = 0
+        stress[QPi] = QuadraturePointBasis(QPi).GetInverse().GetTranspose() * stress[QPi] * QuadraturePointBasis(QPi).GetTranspose();
     }
     
-    // Calculate force contribution from all nodes with 2nd order quadrature rule: W_i = 1/4, tetCoords = a,b,b,b
-    // f_i = V * 1/4 * [ f_j(a,b,b,b) + f_j(b,a,b,b) + f_j(b,b,a,b) + f_j(b,b,b,a) ]
+    // f_i = sum_j dV_j P_j^T dN_i/dX(j) over the quadrature points j
     TFloat t[3];
-    double V = detJ_/24.0; // technically here V = det(J)/6 * 1/4
     for (int i = 0; i < 10; i++) { // for each node
         t[0] = 0;
         t[1] = 0;
         t[2] = 0;
         
-        for (int j = 0; j < 4; j++) { // for each QP
-            t[0] += dNdXW_[30*j + 3*i+0] *
-            stress[j].Get(0, 0)  + dNdXW_[30*j + 3*i+1] * stress[j].Get(1, 0) + dNdXW_[30*j + 3*i+2] * stress[j].Get(2, 0);
-            t[1] += dNdXW_[30*j + 3*i+0] *
-            stress[j].Get(0, 1)  + dNdXW_[30*j + 3*i+1] * stress[j].Get(1, 1) + dNdXW_[30*j + 3*i+2] * stress[j].Get(2, 1);
-            t[2] += dNdXW_[30*j + 3*i+0] *
-            stress[j].Get(0, 2)  + dNdXW_[30*j + 3*i+1] * stress[j].Get(1, 2) + dNdXW_[30*j + 3*i+2] * stress[j].Get(2, 2);
+        for (int j = 0; j < rule_->numPoints; j++) { // for each QP
+            t[0] += dV_[j] * (dNdXW_[30*j + 3*i+0] *
+            stress[j].Get(0, 0)  + dNdXW_[30*j + 3*i+1] * stress[j].Get(1, 0) + dNdXW_[30*j + 3*i+2] * stress[j].Get(2, 0));
+            t[1] += dV_[j] * (dNdXW_[30*j + 3*i+0] *
+            stress[j].Get(0, 1)  + dNdXW_[30*j + 3*i+1] * stress[j].Get(1, 1) + dNdXW_[30*j + 3*i+2] * stress[j].Get(2, 1));
+            t[2] += dV_[j] * (dNdXW_[30*j + 3*i+0] *
+            stress[j].Get(0, 2)  + dNdXW_[30*j + 3*i+1] * stress[j].Get(1, 2) + dNdXW_[30*j + 3*i+2] * stress[j].Get(2, 2));
         }
         
         // check if node i has boundary Conditions in x direction
         if (boundaryConditions[3*i] == 0)
-            forces[3*i] = V * t[0];
+            forces[3*i] = t[0];
         else
             forces[3*i] = 0;
         
         // check if node has BC in y dir
         if (boundaryConditions[3*i+1] == 0)
-            forces[3*i+1] = V * t[1];
+            forces[3*i+1] = t[1];
         else
             forces[3*i+1] = 0;
         
         // check if node has BC in z dir
         if (boundaryConditions[3*i+2] == 0)
-            forces[3*i+2] = V * t[2];
+            forces[3*i+2] = t[2];
         else
             forces[3*i+2] = 0;
     }
@@ -754,13 +801,13 @@ bool CBElementSolidT10::IsElementInverted() {
     TFloat nodesCoords[30];
     TInt   nodesCoordsIndices[30];
     
-    Matrix3<TFloat> deformationTensors[4];
+    Matrix3<TFloat> deformationTensors[maxQuadraturePoints];
     
     GetNodesCoordsIndices(nodesCoordsIndices);
     Base::adapter_->GetNodesCoords(30, nodesCoordsIndices, nodesCoords);
     CalcDeformationTensorsAtQuadraturePointsWithLocalBasis(nodesCoords, deformationTensors);
     
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < rule_->numPoints; i++)
         if (deformationTensors[i].Det() < 0)
             return true;
     
@@ -783,6 +830,9 @@ CBStatus CBElementSolidT10::GetDeformationTensor(Matrix3<TFloat> &f) {
 }
 
 CBStatus CBElementSolidT10::GetDeformationTensorAtQuadraturePoints(Matrix3<TFloat> *f) {
+    // Its callers interpolate from the four points of the default rule.
+    if (rule_ != &rule4_)
+        throw std::runtime_error("CBElementSolidT10::GetDeformationTensorAtQuadraturePoints() needs Mesh.QuadratureDegree 2");
     TFloat nodesCoords[30];
     TInt   nodesCoordsIndices[30];
     
@@ -808,16 +858,16 @@ TFloat CBElementSolidT10::GetDeformationEnergy() {
     }
     
     Base::adapter_->GetNodesCoords(30, nodesCoordsIndices, nodesCoords);
-    Matrix3<TFloat> deformationTensors[4];
+    Matrix3<TFloat> deformationTensors[maxQuadraturePoints];
     CalcDeformationTensorsAtQuadraturePointsWithLocalBasis(nodesCoords, deformationTensors);
-    TFloat e1, e2, e3, e4;
     
-    Base::material_->GetConstitutiveModel()->CalcEnergy(deformationTensors[0], e1);
-    Base::material_->GetConstitutiveModel()->CalcEnergy(deformationTensors[1], e2);
-    Base::material_->GetConstitutiveModel()->CalcEnergy(deformationTensors[2], e3);
-    Base::material_->GetConstitutiveModel()->CalcEnergy(deformationTensors[3], e4);
-    
-    return 0.25 *initialVolume_ * (e1+e2+e3+e4);
+    TFloat energy = 0;
+    for (int q = 0; q < rule_->numPoints; q++) {
+        TFloat e;
+        Base::material_->GetConstitutiveModel()->CalcEnergy(deformationTensors[q], e);
+        energy += dV_[q] * e;
+    }
+    return energy;
 }
 
 Matrix3<TFloat> CBElementSolidT10::GetPK2Stress() {
@@ -831,16 +881,16 @@ Matrix3<TFloat> CBElementSolidT10::GetPK2Stress() {
     }
     
     Base::adapter_->GetNodesCoords(30, nodesCoordsIndices, nodesCoords);
-    Matrix3<TFloat> deformationTensors[4];
+    Matrix3<TFloat> deformationTensors[maxQuadraturePoints];
     CalcDeformationTensorsAtQuadraturePointsWithLocalBasis(nodesCoords, deformationTensors);
-    Matrix3<TFloat> e1, e2, e3, e4;
     
-    Base::material_->GetConstitutiveModel()->CalcPK2Stress(deformationTensors[0], e1);
-    Base::material_->GetConstitutiveModel()->CalcPK2Stress(deformationTensors[1], e2);
-    Base::material_->GetConstitutiveModel()->CalcPK2Stress(deformationTensors[2], e3);
-    Base::material_->GetConstitutiveModel()->CalcPK2Stress(deformationTensors[3], e4);
-    
-    return (e1+e2+e3+e4)/4;
+    Matrix3<TFloat> pk2Stress = {0, 0, 0, 0, 0, 0, 0, 0, 0};
+    for (int q = 0; q < rule_->numPoints; q++) {
+        Matrix3<TFloat> s;
+        Base::material_->GetConstitutiveModel()->CalcPK2Stress(deformationTensors[q], s);
+        pk2Stress += rule_->weights[q] * s;
+    }
+    return pk2Stress;
 }
 
 CBStatus CBElementSolidT10::GetCauchyStress(Matrix3<TFloat> &cauchyStress) {

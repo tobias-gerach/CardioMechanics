@@ -38,8 +38,17 @@ precision, which moves them by at most 1.2e-7, far below the finest error.
 The rates are asserted between the two finest levels of each family, because the coarsest mesh has
 only two elements across the wall.
 
+P2P1 runs under both quadrature rules of Mesh.QuadratureDegree: the default 4-point rule of degree
+2 and the 14-point rule of degree 5. J is cubic on an affine element, so the constraint integrand
+N_a (J - 1 - p / kappa) is of degree 4, which only the second integrates exactly. The rules also
+differ in their weights: the default takes the determinant of the element map at the centroid, the
+14-point rule at each point. Only the determinant matters here. On the curved elements at the
+spheres the centroid determinant nearly doubles the finest displacement L2 and pressure errors, whereas the 4-point
+rule with pointwise determinants matches the 14-point rule to 0.6%.
+
 Serial runtime, P2P1: 0.3 s, 1.6 s and 27 s at sizes 0.5, 0.25 and 0.125; the fourth level, in the
-slow family, takes about 20 min. T10 needs 87 s at size 0.125 and is slow as well.
+slow family, takes about 20 min. T10 needs 87 s at size 0.125 and is slow as well, and so is every
+run under the 14-point rule.
 """
 import re
 from pathlib import Path
@@ -60,6 +69,7 @@ PRESSURE = -float(re.search(r"<Amplitude>(.*?)</Amplitude>", FIXTURE.read_text()
 SHEAR = float(re.search(r"<a>(.*?)</a>", FIXTURE.read_text()).group(1))
 KAPPA = float(re.search(r"<k>(.*?)</k>", FIXTURE.read_text()).group(1))
 SIZES = (0.5, 0.25, 0.125, 0.0625)         # gmsh element sizes of the mesh family
+DEGREES = (2, 5)                           # Mesh.QuadratureDegree
 # P2P1 orders: displacement O(h^3) in L2 and O(h^2) in H1, pressure O(h^2) in L2.
 ORDERS = {"displacement L2": 3, "displacement H1": 2, "pressure L2": 2}
 # Before the asymptotic range the rates fall short of the orders by up to 0.24 on the coarse family
@@ -207,19 +217,23 @@ def errors_at(binary, cm_env, tmp_path_factory):
     reference = radial_solution(PRESSURE, SHEAR, KAPPA)
     cache = {}
 
-    def run(element_type, size):
-        if (element_type, size) not in cache:
-            wd = tmp_path_factory.mktemp(f"{element_type}_{size}")
+    def run(element_type, size, degree=DEGREES[0]):
+        if (element_type, size, degree) not in cache:
+            wd = tmp_path_factory.mktemp(f"{element_type}_{size}_{degree}")
             (wd / "tetgen").mkdir()
             (wd / "Results").mkdir()
             write_sphere_octant(wd / "tetgen", size)
             text = FIXTURE.read_text()
-            assert text.count("<Type>T10P1</Type>") == 1, f"{FIXTURE.name}: cannot substitute the element type"
-            (wd / FIXTURE.name).write_text(text.replace("<Type>T10P1</Type>", f"<Type>{element_type}</Type>"))
-            proc = run_binary(binary("CardioMechanics"), ["-settings", FIXTURE.name], cwd=wd, env=cm_env, timeout=3600)
+            for old, new in [("<Type>T10P1</Type>", f"<Type>{element_type}</Type>"),
+                             ("<Format>Tetgen</Format>",
+                              f"<Format>Tetgen</Format><QuadratureDegree>{degree}</QuadratureDegree>")]:
+                assert text.count(old) == 1, f"{FIXTURE.name}: cannot substitute {old}"
+                text = text.replace(old, new)
+            (wd / FIXTURE.name).write_text(text)
+            proc = run_binary(binary("CardioMechanics"), ["-settings", FIXTURE.name], cwd=wd, env=cm_env, timeout=7200)
             assert "SIMULATION FAILED" not in proc.stdout, proc.stdout[-2000:]
-            cache[element_type, size] = discretization_errors(wd, element_type, reference)
-        return cache[element_type, size]
+            cache[element_type, size, degree] = discretization_errors(wd, element_type, reference)
+        return cache[element_type, size, degree]
     return run
 
 
@@ -287,13 +301,28 @@ def test_reference_approaches_lame_solution():
 
 @pytest.mark.parametrize("norm", ["displacement L2", "displacement H1", "pressure L2"])
 @pytest.mark.parametrize("sizes", [SIZES[:3], pytest.param(SIZES[1:], marks=pytest.mark.slow)], ids=["coarse", "fine"])
-def test_p2p1_converges_at_expected_rate(errors_at, sizes, norm):
+@pytest.mark.parametrize("degree", [DEGREES[0], pytest.param(DEGREES[1], marks=pytest.mark.slow)],
+                         ids=[f"degree{d}" for d in DEGREES])
+def test_p2p1_converges_at_expected_rate(errors_at, degree, sizes, norm):
     """Asserted on the finest pair of levels; every rate is shown with -rP."""
-    errors = [errors_at("T10P1", s) for s in sizes]
-    print(_table("P2P1", errors))
+    errors = [errors_at("T10P1", s, degree) for s in sizes]
+    label = f"P2P1 degree {degree}"
+    print(_table(label, errors))
     rate = rates(errors)[norm][-1]
     assert rate >= ORDERS[norm] - RATE_TOL, (f"{norm} converges at {rate:.2f}, below the P2P1 order "
-                                             f"{ORDERS[norm]} less {RATE_TOL}\n{_table('P2P1', errors)}")
+                                             f"{ORDERS[norm]} less {RATE_TOL}\n{_table(label, errors)}")
+
+
+@pytest.mark.slow
+def test_quadrature_degrees_are_compared(errors_at):
+    """The P2P1 errors under both rules, and their ratio at each level, shown with -rP."""
+    errors = {d: [errors_at("T10P1", s, d) for s in SIZES] for d in DEGREES}
+    for d in DEGREES:
+        print(_table(f"P2P1 degree {d}", errors[d]))
+    norms = [k for k in errors[DEGREES[0]][0] if k != "h"]
+    print(f"degree {DEGREES[1]} / degree {DEGREES[0]}: " + "  ".join(f"{k:>16}" for k in norms))
+    for low, high in zip(errors[DEGREES[0]], errors[DEGREES[1]]):
+        print("  " + "  ".join(f"{high[k] / low[k]:16.4f}" for k in norms))
 
 
 @pytest.mark.slow

@@ -71,18 +71,37 @@ protected:
     virtual void CalcDeformationTensorsAtCentroidWithLocalBasisWithT4ShapeFunctions(const TFloat* nodesCoords, Matrix3<TFloat>& deformationTensors);
     void GetNodesCoordsIndices(TInt* nodesCoordsIndices);
     virtual CBStatus CalcNodalForcesHelperFunction(const TFloat* nodesCoords, const bool* boundaryConditions, TFloat* forces);
-    //! Integrates the PK2 stresses at the four quadrature points, given in the local bases, into
+    //! Integrates the PK2 stresses at the quadrature points, given in the local bases, into
     //! nodal forces. Overwrites stress.
     void CalcNodalForcesFromPK2Stresses(const Matrix3<TFloat>* deformationTensors, Matrix3<TFloat>* stress, const bool* boundaryConditions, TFloat* forces);
     
+    static constexpr int maxQuadraturePoints = 14;
+
+    //! Quadrature rule on the reference tetrahedron: barycentric coordinates of the points and
+    //! weights summing to one.
+    struct QuadratureRule {
+        int numPoints;
+        std::array<std::array<TFloat, 4>, maxQuadraturePoints> points;
+        std::array<TFloat, maxQuadraturePoints> weights;
+    };
+
     std::array<TInt, 10> nodesIndices_;
-    std::array<TFloat, 150> dNdXW_;  // Derivatives of the shape functions at the 4 quadrature points + center
+    const QuadratureRule* rule_ = nullptr;  // selected by Mesh.QuadratureDegree in UpdateShapeFunctions
+    std::array<TFloat, 30*maxQuadraturePoints> dNdXW_;  // Derivatives of the shape functions at the quadrature points
+    std::array<TFloat, 30> dNdXCentroid_;
+    std::array<TFloat, maxQuadraturePoints> dV_;         // Volume represented by each quadrature point
     std::array<TFloat, 12> dNdXt4_;
     TFloat detJ_ = 0;
     
 private:
     typedef CBElement        Base;
     typedef CBElementSolid   Ancestor;
+    
+    static const QuadratureRule rule4_;   // degree 2, the default
+    static const QuadratureRule rule14_;  // degree 5
+    
+    //! Fibre basis at quadrature point q.
+    Matrix3<TFloat>& QuadraturePointBasis(int q);
     
     std::array<Matrix3<TFloat>, 5> basisAtQuadraturePoint_;
     

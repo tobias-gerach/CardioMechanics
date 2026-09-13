@@ -17,19 +17,12 @@
 #include "CBSolver.h"
 
 namespace {
-// Barycentric coordinates of the four quadrature points of CBElementSolidT10: point q lies at
-// alpha on vertex q and at beta on the other three.
-const TFloat alpha = (5+3*sqrt(5))/20;
-const TFloat beta  = (5-sqrt(5))/20;
-
-//! Linear pressure shape function of vertex a at quadrature point q.
-inline TFloat N(int a, int q) {return a == q ? alpha : beta;}
-
-//! Pressure at quadrature point q from the four vertex pressures.
-inline TFloat Interpolate(const TFloat *pressures, int q) {
+//! Pressure at barycentric coordinates l from the four vertex pressures. The linear shape function
+//! of vertex a is l[a].
+inline TFloat Interpolate(const std::array<TFloat, 4> &l, const TFloat *pressures) {
     TFloat p = 0;
     for (int a = 0; a < 4; a++)
-        p += N(a, q) * pressures[a];
+        p += l[a] * pressures[a];
     return p;
 }
 
@@ -63,17 +56,16 @@ void CBElementSolidT10P1::GetNodesPressures(TFloat *pressures) {
 CBStatus CBElementSolidT10P1::CalcResiduals(const TFloat *nodesCoords, const TFloat *pressures, const bool *boundaryConditions,
                                             TFloat *forces, TFloat *constraints) {
     CBStatus rc = CBStatus::SUCCESS;
-    Matrix3<TFloat> deformationTensors[4];
-    Matrix3<TFloat> stress[4];
+    Matrix3<TFloat> deformationTensors[maxQuadraturePoints];
+    Matrix3<TFloat> stress[maxQuadraturePoints];
     CBConstitutiveModel *constitutiveModel = Base::material_->GetConstitutiveModel();
     TFloat kappa = constitutiveModel->GetBulkModulus();
     TFloat time  = Base::adapter_->GetSolver()->GetTiming().GetCurrentTime();
-    TFloat V     = detJ_/24.0; // quadrature weight 1/4 times the element volume
 
     CalcDeformationTensorsAtQuadraturePointsWithLocalBasis(nodesCoords, deformationTensors);
     std::fill(constraints, constraints + 4, 0.0);
 
-    for (int q = 0; q < 4; q++) {
+    for (int q = 0; q < rule_->numPoints; q++) {
         rc = constitutiveModel->CalcIsochoricPK2Stress(deformationTensors[q], stress[q]);
 
         if (rc == CBStatus::CORRUPT_ELEMENT) {
@@ -84,15 +76,16 @@ CBStatus CBElementSolidT10P1::CalcResiduals(const TFloat *nodesCoords, const TFl
         if (rc != CBStatus::SUCCESS)
             return rc;
 
+        const std::array<TFloat, 4> &l = rule_->points[q];
         TFloat J = deformationTensors[q].Det();
-        TFloat p = Interpolate(pressures, q);
+        TFloat p = Interpolate(l, pressures);
 
         // Active stress is added raw, exactly as for T10. Whether a mixed formulation should
         // project it onto its deviatoric part is an open modelling question.
         stress[q] += p * JCInverse(deformationTensors[q]) + Base::tensionModel_->CalcActiveStress(deformationTensors[q], time);
 
         for (int a = 0; a < 4; a++)
-            constraints[a] += V * N(a, q) * (J - 1 - p / kappa);
+            constraints[a] += dV_[q] * l[a] * (J - 1 - p / kappa);
     }
 
     CalcNodalForcesFromPK2Stresses(deformationTensors, stress, boundaryConditions, forces);
@@ -172,12 +165,12 @@ CBStatus CBElementSolidT10P1::CalcNodalForcesJacobian() {
     // the stress N_b J C^-1 are the derivative of the forces with respect to pressure b. Since
     // dJ/dF = J F^-T, the same vector is the derivative of constraint b with respect to the
     // displacement, which makes the system symmetric.
-    Matrix3<TFloat> deformationTensors[4];
+    Matrix3<TFloat> deformationTensors[maxQuadraturePoints];
     CalcDeformationTensorsAtQuadraturePointsWithLocalBasis(nodesCoords, deformationTensors);
     for (int b = 0; b < 4; b++) {
-        Matrix3<TFloat> stress[4];
-        for (int q = 0; q < 4; q++)
-            stress[q] = N(b, q) * JCInverse(deformationTensors[q]);
+        Matrix3<TFloat> stress[maxQuadraturePoints];
+        for (int q = 0; q < rule_->numPoints; q++)
+            stress[q] = rule_->points[q][b] * JCInverse(deformationTensors[q]);
 
         TFloat coupling[30];
         CalcNodalForcesFromPK2Stresses(deformationTensors, stress, boundaryConditions, coupling);
@@ -190,12 +183,11 @@ CBStatus CBElementSolidT10P1::CalcNodalForcesJacobian() {
     // -1/kappa times the pressure mass matrix, the block that keeps the saddle-point system
     // non-singular (ADR-0002).
     TFloat kappa = Base::material_->GetConstitutiveModel()->GetBulkModulus();
-    TFloat V     = detJ_/24.0;
     for (int a = 0; a < 4; a++)
         for (int b = 0; b < 4; b++) {
             TFloat m = 0;
-            for (int q = 0; q < 4; q++)
-                m += V * N(a, q) * N(b, q);
+            for (int q = 0; q < rule_->numPoints; q++)
+                m += dV_[q] * rule_->points[q][a] * rule_->points[q][b];
             jacobian[34*(30 + a) + 30 + b] = -m / kappa;
         }
 
@@ -215,37 +207,37 @@ void CBElementSolidT10P1::GetDeformationTensorsAndPressures(Matrix3<TFloat> *def
 }
 
 TFloat CBElementSolidT10P1::GetDeformationEnergy() {
-    Matrix3<TFloat> deformationTensors[4];
+    Matrix3<TFloat> deformationTensors[maxQuadraturePoints];
     TFloat pressures[4];
     GetDeformationTensorsAndPressures(deformationTensors, pressures);
     CBConstitutiveModel *constitutiveModel = Base::material_->GetConstitutiveModel();
     TFloat kappa = constitutiveModel->GetBulkModulus();
 
     TFloat energy = 0;
-    for (int q = 0; q < 4; q++) {
+    for (int q = 0; q < rule_->numPoints; q++) {
         TFloat isochoricEnergy;
         constitutiveModel->CalcIsochoricEnergy(deformationTensors[q], isochoricEnergy);
         TFloat J = deformationTensors[q].Det();
-        TFloat p = Interpolate(pressures, q);
+        TFloat p = Interpolate(rule_->points[q], pressures);
         // Volumetric part of the mixed energy; it equals kappa/2 (J-1)^2 wherever the constraint
         // holds pointwise, p = kappa (J-1).
-        energy += isochoricEnergy + p * (J - 1) - p * p / (2 * kappa);
+        energy += dV_[q] * (isochoricEnergy + p * (J - 1) - p * p / (2 * kappa));
     }
-    return 0.25 * initialVolume_ * energy;
+    return energy;
 }
 
 Matrix3<TFloat> CBElementSolidT10P1::GetPK2Stress() {
-    Matrix3<TFloat> deformationTensors[4];
+    Matrix3<TFloat> deformationTensors[maxQuadraturePoints];
     TFloat pressures[4];
     GetDeformationTensorsAndPressures(deformationTensors, pressures);
 
     Matrix3<TFloat> pk2Stress = {0, 0, 0, 0, 0, 0, 0, 0, 0};
-    for (int q = 0; q < 4; q++) {
+    for (int q = 0; q < rule_->numPoints; q++) {
         Matrix3<TFloat> isochoricStress;
         Base::material_->GetConstitutiveModel()->CalcIsochoricPK2Stress(deformationTensors[q], isochoricStress);
-        pk2Stress += isochoricStress + Interpolate(pressures, q) * JCInverse(deformationTensors[q]);
+        pk2Stress += rule_->weights[q] * (isochoricStress + Interpolate(rule_->points[q], pressures) * JCInverse(deformationTensors[q]));
     }
-    return pk2Stress / 4;
+    return pk2Stress;
 }
 
 CBStatus CBElementSolidT10P1::GetCauchyStress(Matrix3<TFloat> &cauchyStress) {
