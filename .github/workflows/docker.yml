@@ -77,7 +77,11 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
     steps:
+      - name: Run C++ unit tests
+        run: ctest --test-dir /CardioMechanics/_build/release --output-on-failure
+
       - name: Set up Python environment
+        if: ${{ !cancelled() }}
         run: |
           apt update
           apt install -y python3-venv
