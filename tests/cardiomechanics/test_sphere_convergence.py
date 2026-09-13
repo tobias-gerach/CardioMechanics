@@ -36,11 +36,7 @@ whose O(h^3) geometric error is at or below every expected order. The deformed p
 precision, which moves them by at most 1.2e-7, far below the finest error.
 
 The rates are asserted between the two finest levels of each family, because the coarsest mesh has
-only two elements across the wall. The displacement L2 rate is an xfail: the T6 surface element
-integrates the pressure over the four flat sub-triangles of each face, a traction error of O(h^2)
-on the curved inner surface that caps the rate at 2. Driving the inner surface to its exact deformed
-position instead of loading it gives the full P2P1 rates on the same meshes, so the elements are
-not what limits it.
+only two elements across the wall.
 
 Serial runtime, P2P1: 0.3 s, 1.6 s and 27 s at sizes 0.5, 0.25 and 0.125; the fourth level, in the
 slow family, takes about 20 min. T10 needs 87 s at size 0.125 and is slow as well.
@@ -66,10 +62,9 @@ KAPPA = float(re.search(r"<k>(.*?)</k>", FIXTURE.read_text()).group(1))
 SIZES = (0.5, 0.25, 0.125, 0.0625)         # gmsh element sizes of the mesh family
 # P2P1 orders: displacement O(h^3) in L2 and O(h^2) in H1, pressure O(h^2) in L2.
 ORDERS = {"displacement L2": 3, "displacement H1": 2, "pressure L2": 2}
-# Before the asymptotic range the rates fall short of the orders by up to 0.19 on the coarse family
-# and 0.14 on the fine one, and by 0.12 with the inner surface driven exactly. The tolerance still
-# fails the loss of half an order, as from a boundary or constraint error, and the loss of most of
-# an order under the T6 load (2.07 and 2.17 in displacement L2).
+# Before the asymptotic range the rates fall short of the orders by up to 0.24 on the coarse family
+# and 0.20 on the fine one, both in the pressure. The tolerance still fails the loss of half an order, as from a boundary,
+# constraint or load integration error.
 RATE_TOL = 0.3
 # The reference is not polynomial and the elements are curved, so no rule is exact. Against a
 # degree 10 rule the norms move by at most 2e-5 relative, far below the change between levels.
@@ -77,8 +72,6 @@ QUADRATURE = "Gauss6"
 COMPLEX_STEP = 1e-30
 # Faces of a T10: three vertices, then the mid-edge nodes of their edges in T6 order.
 T10_FACES = ((0, 1, 2, 4, 5, 6), (0, 1, 3, 4, 8, 7), (0, 2, 3, 6, 9, 7), (1, 2, 3, 5, 9, 8))
-T6_LOAD = pytest.mark.xfail(strict=True, reason="the T6 pressure load is not consistent on curved faces, "
-                            "see .scratch/solver-defects/issues/08-t6-pressure-load-on-curved-faces.md")
 
 
 def cauchy_stress(l_r, l_t, a, kappa):
@@ -292,7 +285,7 @@ def test_reference_approaches_lame_solution():
     np.testing.assert_allclose(radial_solution(pressure, SHEAR, kappa)(R)[0] - R, A * R + B / R ** 2, rtol=1e-5)
 
 
-@pytest.mark.parametrize("norm", [pytest.param("displacement L2", marks=T6_LOAD), "displacement H1", "pressure L2"])
+@pytest.mark.parametrize("norm", ["displacement L2", "displacement H1", "pressure L2"])
 @pytest.mark.parametrize("sizes", [SIZES[:3], pytest.param(SIZES[1:], marks=pytest.mark.slow)], ids=["coarse", "fine"])
 def test_p2p1_converges_at_expected_rate(errors_at, sizes, norm):
     """Asserted on the finest pair of levels; every rate is shown with -rP."""
