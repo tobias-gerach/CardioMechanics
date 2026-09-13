@@ -60,7 +60,7 @@ from scipy.optimize import brentq
 
 from helpers.box import T6_EDGES, T10_EDGES
 from helpers.compare import read_vtu_point_field, read_vtu_points
-from helpers.gmsh_tetgen import T10_FROM_GMSH, TETRAHEDRON4, TETRAHEDRON10
+from helpers.gmsh_tetgen import t10_quadrature
 from helpers.run import run_binary
 from helpers.sphere import CAVITY, INNER, OUTER, write_sphere_octant
 
@@ -125,25 +125,6 @@ def rivlin_inner_radius(pressure, a):
         l_outer = np.cbrt(OUTER ** 3 + INNER ** 3 * (l_inner ** 3 - 1)) / OUTER
         return 2 * a * sum(s * (1 / l + 1 / (4 * l ** 4)) for s, l in ((1, l_outer), (-1, l_inner)))
     return INNER * brentq(lambda l: load(l) - pressure, 1, 2, xtol=1e-15)
-
-
-def t10_quadrature(rule):
-    """gmsh's integration rule on the reference tetrahedron. Returns the weights (q), the T10 shape
-    functions (q, 10) and their reference gradients (q, 10, 3) in the CardioMechanics node order, and
-    the linear shape functions of the vertices (q, 4), all at the q points."""
-    import gmsh
-
-    gmsh.initialize(interruptible=False)
-    try:
-        points, weights = gmsh.model.mesh.getIntegrationPoints(TETRAHEDRON10, rule)
-        N = gmsh.model.mesh.getBasisFunctions(TETRAHEDRON10, points, "Lagrange")[1]
-        dN = gmsh.model.mesh.getBasisFunctions(TETRAHEDRON10, points, "GradLagrange")[1]
-        L = gmsh.model.mesh.getBasisFunctions(TETRAHEDRON4, points, "Lagrange")[1]
-    finally:
-        gmsh.finalize()
-    q = len(weights)
-    return (weights, N.reshape(q, 10)[:, T10_FROM_GMSH], dN.reshape(q, 10, 3)[:, T10_FROM_GMSH],
-            L.reshape(q, 4))
 
 
 def _read_mesh(directory):

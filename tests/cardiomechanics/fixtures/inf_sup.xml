@@ -1,0 +1,51 @@
+<settings>P2P1 system matrix at the reference state of a clamped body</settings>
+
+<General>
+    <LogFile>./Results/mesh.log</LogFile>
+</General>
+
+<Mesh>
+    <Type>T10P1</Type>
+    <Format>Tetgen</Format>
+    <Sorting>None</Sorting>
+
+    <Tetgen>
+        <Unit>1</Unit>
+        <Nodes>./tetgen/mesh.node</Nodes>
+        <Elements>./tetgen/mesh.ele</Elements>
+    </Tetgen>
+</Mesh>
+
+<Materials>
+    <Mat_30>
+        <Type>NeoHooke</Type>
+        <Density>1</Density>
+        <NeoHooke>
+            <a>1</a>
+            <k>1000</k>
+        </NeoHooke>
+        <TensionMax>0</TensionMax>
+    </Mat_30>
+</Materials>
+
+<Export>
+    <Format>VTK</Format>
+    <Prefix>./Results/mesh</Prefix>
+    <TimeStep>1</TimeStep>
+</Export>
+
+<Solver>
+    <!-- Preallocated entries per matrix row; the default of 2000 would take gigabytes on the finest meshes. -->
+    <NonZeros>400</NonZeros>
+    <DomainDecomposition>false</DomainDecomposition>
+    <Precision>1e-10</Precision>
+    <Epsilon>1e-7</Epsilon>
+
+    <Type>Static</Type>
+
+    <Formulation>TotalLagrangian</Formulation>
+
+    <StartTime>0</StartTime>
+    <StopTime>1</StopTime>
+    <TimeStep>1</TimeStep>
+</Solver>

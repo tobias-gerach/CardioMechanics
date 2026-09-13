@@ -1,7 +1,8 @@
 """Second-order tetrahedral meshes from gmsh, in the tetgen files and node order of CardioMechanics.
 
 gmsh places the mid-edge nodes of a second-order mesh on the model geometry, so a curved boundary
-is represented to the order of the element instead of by its chords. Requires gmsh.
+is represented to the order of the element instead of by its chords. The T10 basis functions at gmsh's
+quadrature points, in the same node order, integrate over such meshes. Requires gmsh.
 """
 import numpy as np
 
@@ -9,6 +10,25 @@ TETRAHEDRON4, TETRAHEDRON10, TRIANGLE6 = 4, 11, 9        # gmsh element types
 # CardioMechanics T10 local nodes 9 and 10 sit on the edges (2,4) and (3,4); gmsh numbers them the
 # other way round. Vertices, the other mid-edge nodes and six-node triangles agree.
 T10_FROM_GMSH = [0, 1, 2, 3, 4, 5, 6, 7, 9, 8]
+
+
+def t10_quadrature(rule):
+    """gmsh's integration rule on the reference tetrahedron. Returns the weights (q), the T10 shape
+    functions (q, 10) and their reference gradients (q, 10, 3) in the CardioMechanics node order, and
+    the linear shape functions of the vertices (q, 4), all at the q points."""
+    import gmsh
+
+    gmsh.initialize(interruptible=False)
+    try:
+        points, weights = gmsh.model.mesh.getIntegrationPoints(TETRAHEDRON10, rule)
+        N = gmsh.model.mesh.getBasisFunctions(TETRAHEDRON10, points, "Lagrange")[1]
+        dN = gmsh.model.mesh.getBasisFunctions(TETRAHEDRON10, points, "GradLagrange")[1]
+        L = gmsh.model.mesh.getBasisFunctions(TETRAHEDRON4, points, "Lagrange")[1]
+    finally:
+        gmsh.finalize()
+    q = len(weights)
+    return (weights, N.reshape(q, 10)[:, T10_FROM_GMSH], dN.reshape(q, 10, 3)[:, T10_FROM_GMSH],
+            L.reshape(q, 4))
 
 
 def write_tetgen(directory, stem, surfaces, fixations):

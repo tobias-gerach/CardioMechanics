@@ -76,6 +76,23 @@ def read_petsc_mat(path):
             "fro": float(np.sqrt((val ** 2).sum())), "vsum": float(val.sum())}
 
 
+def read_petsc_csr(path):
+    """A PETSc binary sparse matrix, in the format of read_petsc_mat, as a scipy CSR matrix. The file
+    must hold exactly one matrix."""
+    import scipy.sparse as sp
+
+    with open(str(path), "rb") as f:
+        classid, rows, cols, nnz = (int(x) for x in np.fromfile(f, dtype=">i4", count=4))
+        assert classid == 1211216, f"{path}: not a PETSc matrix (classid {classid})"
+        rowlen = np.fromfile(f, dtype=">i4", count=rows)
+        col = np.fromfile(f, dtype=">i4", count=nnz)
+        val = np.fromfile(f, dtype=">f8", count=nnz)
+        assert int(rowlen.sum()) == nnz and len(val) == nnz and not f.read(1), \
+            f"{path}: inconsistent, truncated, or more than one matrix"
+    return sp.csr_matrix((val.astype(float), col.astype(np.int64), np.concatenate([[0], np.cumsum(rowlen)])),
+                         shape=(rows, cols))
+
+
 def read_petsc_vec(path):
     """Invariants of a PETSc binary vector: dict(n, l2, vsum)."""
     with open(str(path), "rb") as f:
