@@ -600,6 +600,9 @@ void CBSolver::UpdateActiveStress(PetscScalar time) {
 }
 
 void CBSolver::Export(TFloat timeStep) {
+    // The previous frame is written on a thread that reads the model's export data, which the
+    // calls below overwrite, so it has to finish first or it writes a mix of both frames.
+    model_->GetExporter()->WaitForWriteToFile();
     UpdateGhostNodesAndLinkToAdapter();
     
     model_->SetCurrentTime(timeStep);

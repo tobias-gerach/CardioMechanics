@@ -120,13 +120,19 @@ void CBModelExporter::WriteToFile()
 {
     if(exportFilenamePrefix_ != "")
     {
-        if(writeToFileThread_ != 0)
-        {
-            writeToFileThread_->join();
-            delete writeToFileThread_;
-            writeToFileThread_ = 0;
-        }
+        WaitForWriteToFile();
         writeToFileThread_ = new std::thread(std::bind(&CBModelExporter::WriteToFileThreadFunction, this));
+    }
+}
+
+
+void CBModelExporter::WaitForWriteToFile()
+{
+    if(writeToFileThread_ != 0)
+    {
+        writeToFileThread_->join();
+        delete writeToFileThread_;
+        writeToFileThread_ = 0;
     }
 }
 

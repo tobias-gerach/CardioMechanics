@@ -45,6 +45,7 @@ public:
     
     bool GetExportOption(std::string str, bool defaultValue = false);
     void WriteToFile();
+    void WaitForWriteToFile();
     
 protected:
     virtual bool ExportModel() = 0;
