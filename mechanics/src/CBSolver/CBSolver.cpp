@@ -587,7 +587,7 @@ void CBSolver::UpdateActiveStress(PetscScalar time) {
     // it->GetMaterial()->GetConstitutiveModel()->SetTemplateForce(activeStressData_->Get(time, it->GetIndex(), it->GetMaterialIndex()));
     // active stress currently gets scaled by the constitutive model, but should rather be in ActiveStressModel
     
-    // todo: instead of setting this here to zero, it should be remove from CalcNodalForcesHelperFunction in CBElementT4, CBElementT10, (partially done) and so on...
+    // todo: instead of setting this here to zero, it should be removed from the element kernel (CBElementKernel)...
     // activeStressTensorComponents_[cnt]        =  activeStressData_->Get(time, it->GetIndex(), it->GetMaterialIndex() );
     // activeStressTensorComponentsIndices_[cnt] = it->GetLocalIndex() + activeStressLowerIndex_;
     // cnt++;
