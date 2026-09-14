@@ -426,13 +426,6 @@ TFloat CBElementSolidT10::CurrentTime() {
     return Base::adapter_->GetSolver()->GetTiming().GetCurrentTime();
 }
 
-CBStatus CBElementSolidT10::ReportCorruptElement(CBStatus rc) {
-    // print corrupt element messages from each processor
-    if (rc == CBStatus::CORRUPT_ELEMENT)
-        std::cout << "Solid" << GetType() << ": Element with index " << index_ << " is corrupt." << std::endl;
-    return rc;
-}
-
 void CBElementSolidT10::CalcT4ShapeFunctionsDerivatives() {
     TFloat nodesCoords[30];
     TInt   nodesCoordsIndices[30];

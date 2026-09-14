@@ -16,10 +16,7 @@
 
 namespace {
 
-using KernelT10  = CBElementKernel<CBQuadraticTetBasis, CBNoPressure>;
-using KernelP2P1 = CBElementKernel<CBQuadraticTetBasis, CBLinearVertexPressure>;
-constexpr int numCoords = 3 * CBQuadraticTetBasis::numNodes;
-using Coords            = std::array<TFloat, numCoords>;
+using Coords = std::array<TFloat, 3 * CBQuadraticTetBasis::numNodes>;
 
 // A curved T10: the vertices span an irregular tetrahedron and the mid-edge nodes lie off the edge
 // midpoints, so the Jacobian varies over the element and the two quadrature rules differ. With a
@@ -82,29 +79,35 @@ public:
 };
 
 // Parameterised by material law and number of quadrature points. The unknowns of a kernel are the
-// nodal coordinates followed by the vertex pressures, if it has any.
-template <class Kernel>
+// nodal coordinates followed by the vertex pressures, if it has any. Both displacement bases number
+// the vertices first, so a linear element is the vertices of the T10.
+template <class DisplacementBasis, class PressureBasis>
 class ElementKernelTest : public testing::TestWithParam<std::tuple<std::string, int>> {
 protected:
-    static constexpr int n = Kernel::numUnknowns;
-    using Unknowns         = std::array<TFloat, n>;
+    using Kernel                   = CBElementKernel<DisplacementBasis, PressureBasis>;
+    static constexpr int numCoords = 3 * Kernel::numNodes;
+    static constexpr int n         = Kernel::numUnknowns;
+    using Unknowns                 = std::array<TFloat, n>;
 
     void SetUp() override {
         law_      = MakeLaw(std::get<0>(GetParam()), parameters_);
-        geometry_ = CalcReferenceGeometry<CBQuadraticTetBasis>(X_.data(), Rule());
+        geometry_ = CalcReferenceGeometry<DisplacementBasis>(X_.data(), Rule());
         // A different fibre basis at each point, as the 4-point rule can have.
         for (int q = 0; q < geometry_.rule->numPoints; q++)
             bases_[q] = GetRotationZ(0.3 + 0.1 * q) * GetRotationY(0.5);
     }
 
-    const CBQuadratureRule &Rule() const { return std::get<1>(GetParam()) == 4 ? quadratureRule4 : quadratureRule14; }
+    const CBQuadratureRule &Rule() const {
+        const int points = std::get<1>(GetParam());
+        return points == 1 ? quadratureRule1 : points == 4 ? quadratureRule4 : quadratureRule14;
+    }
 
     Kernel MakeKernel(CBTensionModel &tension) { return Kernel(geometry_, bases_.data(), *law_, tension, 0.0); }
 
     // The reference configuration, where the pressures vanish.
     Unknowns ReferenceUnknowns() const {
         Unknowns u{};
-        std::copy(X_.begin(), X_.end(), u.begin());
+        std::copy_n(X_.begin(), numCoords, u.begin());
         return u;
     }
 
@@ -112,7 +115,7 @@ protected:
     Unknowns CurrentUnknowns() const {
         const Coords x = CurrentCoords(X_);
         Unknowns u;
-        std::copy(x.begin(), x.end(), u.begin());
+        std::copy_n(x.begin(), numCoords, u.begin());
         for (int a = 0; a < Kernel::numPressures; a++)
             u[numCoords + a] = 0.5 - 0.3 * a;
         return u;
@@ -152,7 +155,7 @@ protected:
         const Unknowns x        = CurrentUnknowns();
         const Matrix3<TFloat> Q = GetRotationZ(0.7) * GetRotationY(-0.4);
         Unknowns y              = x;
-        for (int a = 0; a < CBQuadraticTetBasis::numNodes; a++)
+        for (int a = 0; a < Kernel::numNodes; a++)
             for (int i = 0; i < 3; i++)
                 y[3 * a + i] = Q(i, 0) * x[3 * a] + Q(i, 1) * x[3 * a + 1] + Q(i, 2) * x[3 * a + 2];
 
@@ -163,7 +166,7 @@ protected:
         ASSERT_EQ(kernel.Energy(y.data(), rotatedEnergy), CBStatus::SUCCESS);
 
         EXPECT_NEAR(rotatedEnergy, energy, 1e-13);
-        for (int a = 0; a < CBQuadraticTetBasis::numNodes; a++)
+        for (int a = 0; a < Kernel::numNodes; a++)
             for (int i = 0; i < 3; i++)
                 EXPECT_NEAR(s[3 * a + i], Q(i, 0) * r[3 * a] + Q(i, 1) * r[3 * a + 1] + Q(i, 2) * r[3 * a + 2], 1e-12)
                     << "node " << a << ", component " << i;
@@ -205,22 +208,27 @@ protected:
     CBNoTension noTension_;
     ParameterMap parameters_;
     std::unique_ptr<CBConstitutiveModel> law_;
-    CBReferenceGeometry<CBQuadraticTetBasis> geometry_;
+    CBReferenceGeometry<DisplacementBasis> geometry_;
     std::array<Matrix3<TFloat>, CBQuadratureRule::maxPoints> bases_;
 };
 
-using ElementKernelT10  = ElementKernelTest<KernelT10>;
-using ElementKernelP2P1 = ElementKernelTest<KernelP2P1>;
+using ElementKernelT4   = ElementKernelTest<CBLinearTetBasis, CBNoPressure>;
+using ElementKernelT10  = ElementKernelTest<CBQuadraticTetBasis, CBNoPressure>;
+using ElementKernelP2P1 = ElementKernelTest<CBQuadraticTetBasis, CBLinearVertexPressure>;
 
+TEST_P(ElementKernelT4, ResidualVanishesInReferenceConfiguration) { ResidualVanishesInReferenceConfiguration(); }
 TEST_P(ElementKernelT10, ResidualVanishesInReferenceConfiguration) { ResidualVanishesInReferenceConfiguration(); }
 TEST_P(ElementKernelP2P1, ResidualVanishesInReferenceConfiguration) { ResidualVanishesInReferenceConfiguration(); }
 
+TEST_P(ElementKernelT4, ForcesAreEnergyGradient) { ForcesAreEnergyGradient(); }
 TEST_P(ElementKernelT10, ForcesAreEnergyGradient) { ForcesAreEnergyGradient(); }
 TEST_P(ElementKernelP2P1, ForcesAreEnergyGradient) { ForcesAreEnergyGradient(); }
 
+TEST_P(ElementKernelT4, RigidRotationRotatesForcesAndKeepsEnergy) { RigidRotationRotatesForcesAndKeepsEnergy(); }
 TEST_P(ElementKernelT10, RigidRotationRotatesForcesAndKeepsEnergy) { RigidRotationRotatesForcesAndKeepsEnergy(); }
 TEST_P(ElementKernelP2P1, RigidRotationRotatesForcesAndKeepsEnergy) { RigidRotationRotatesForcesAndKeepsEnergy(); }
 
+TEST_P(ElementKernelT4, TangentColumnIsDerivativeOfForcesWrtUnknown) { TangentColumnIsDerivativeOfForcesWrtUnknown(); }
 TEST_P(ElementKernelT10, TangentColumnIsDerivativeOfForcesWrtUnknown) { TangentColumnIsDerivativeOfForcesWrtUnknown(); }
 TEST_P(ElementKernelP2P1, TangentColumnIsDerivativeOfForcesWrtUnknown) { TangentColumnIsDerivativeOfForcesWrtUnknown(); }
 
@@ -252,11 +260,13 @@ TEST_P(ElementKernelP2P1, ElementMatrixIsSymmetricForHyperelasticLaw) {
             EXPECT_NEAR(tangent[n * i + j], tangent[n * j + i], 1e-6) << "entry " << i << ", " << j;
 }
 
-const auto lawsAndRules = testing::Combine(testing::Values(std::string("NeoHooke"), std::string("Holzapfel"), std::string("Guccione")),
-                                           testing::Values(4, 14));
+const auto laws         = testing::Values(std::string("NeoHooke"), std::string("Holzapfel"), std::string("Guccione"));
+const auto lawsAndRules = testing::Combine(laws, testing::Values(4, 14));
 const auto paramName    = [](const auto &info) {
     return std::get<0>(info.param) + "_" + std::to_string(std::get<1>(info.param)) + "Points";
 };
+// T4 uses the single-point rule only; its basis has storage for no more points.
+INSTANTIATE_TEST_SUITE_P(LawsAndRules, ElementKernelT4, testing::Combine(laws, testing::Values(1)), paramName);
 INSTANTIATE_TEST_SUITE_P(LawsAndRules, ElementKernelT10, lawsAndRules, paramName);
 INSTANTIATE_TEST_SUITE_P(LawsAndRules, ElementKernelP2P1, lawsAndRules, paramName);
 

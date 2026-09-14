@@ -81,8 +81,6 @@ protected:
             bases[q] = QuadraturePointBasis(q);
         return K(geometry_, bases, *Base::material_->GetConstitutiveModel(), *Base::tensionModel_, CurrentTime());
     }
-    //! Reports a corrupt element, which the status alone does not identify.
-    CBStatus ReportCorruptElement(CBStatus rc);
 
     std::array<TInt, 10> nodesIndices_;
     CBReferenceGeometry<CBQuadraticTetBasis> geometry_;  // under the rule selected by Mesh.QuadratureDegree in UpdateShapeFunctions

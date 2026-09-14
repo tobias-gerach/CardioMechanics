@@ -114,6 +114,9 @@ public:
     static void RepairDeformationTensorIfInverted(Matrix3<TFloat> &deformationTensor);
     
 protected:
+    //! Reports a corrupt element, which the status alone does not identify.
+    CBStatus ReportCorruptElement(CBStatus rc);
+
     TFloat initialVolume_;
     bool isDefect_ = false;
     Matrix3<TFloat> targetStrain = Matrix3<TFloat>::Identity();

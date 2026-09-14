@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cmath>
 
 #include "CBConstitutiveModel.h"
@@ -37,6 +38,9 @@ struct CBQuadratureRule {
     //! elements only.
     bool pointwiseVolume;
 };
+
+//! Degree 1, the centroid.
+inline const CBQuadratureRule quadratureRule1 = CBQuadratureRule{1, {{{0.25, 0.25, 0.25, 0.25}}}, {{1}}, false};
 
 //! Degree 2, the default. Point q lies at alpha on vertex q and at beta on the other three.
 inline const CBQuadratureRule quadratureRule4 = [] {
@@ -67,6 +71,7 @@ inline const CBQuadratureRule quadratureRule14 = [] {
 //! the edges (1,2), (2,3), (1,3), (1,4), (2,4), (3,4).
 struct CBQuadraticTetBasis {
     static constexpr int numNodes = 10;
+    static constexpr int maxQuadraturePoints = CBQuadratureRule::maxPoints;
 
     //! Derivatives dN_a/dX_j, stored at dNdX[3a+j], at barycentric coordinates l of the element with
     //! nodal coordinates X. Returns the Jacobian determinant, six times the volume of an affine element.
@@ -224,6 +229,55 @@ struct CBQuadraticTetBasis {
     }
 };
 
+//! Linear displacement basis of the 4-node tetrahedron. Its derivatives, and so the deformation
+//! gradient, are constant over the element, so the single-point rule integrates its forces and energy
+//! exactly. Its reference geometry holds that one point only, which keeps the per-element cache of
+//! large T4 meshes small.
+struct CBLinearTetBasis {
+    static constexpr int numNodes = 4;
+    static constexpr int maxQuadraturePoints = 1;
+
+    //! As CBQuadraticTetBasis::Derivatives; the derivatives do not depend on l.
+    static TFloat Derivatives(const std::array<TFloat, 4> &, const TFloat *X, TFloat *dNdX) {
+        TFloat z43 = (X[11] - X[8]);
+        TFloat z42 = (X[11] - X[5]);
+        TFloat z41 = (X[11] - X[2]);
+        TFloat z32 = (X[8] - X[5]);
+        TFloat z31 = (X[8] - X[2]);
+        TFloat z21 = (X[5] - X[2]);
+
+        TFloat y43 = (X[10] - X[7]);
+        TFloat y42 = (X[10] - X[4]);
+        TFloat y41 = (X[10] - X[1]);
+        TFloat y32 = (X[7] - X[4]);
+        TFloat y31 = (X[7] - X[1]);
+        TFloat y21 = (X[4] - X[1]);
+
+        TFloat x41 = (X[9] - X[0]);
+        TFloat x31 = (X[6] - X[0]);
+        TFloat x21 = (X[3] - X[0]);
+
+        TFloat detJ = x21 * (y31 * z41 - y41 * z31) + y21 * (x41 * z31 - x31 * z41) + z21 * (x31 * y41 - x41 * y31);
+
+        dNdX[0] = 1.0 / detJ *(X[4] * z43 - X[7] * z42 + X[10] * z32);
+        dNdX[3] = 1.0 / detJ *(-X[1] * z43 + X[7] * z41 - X[10] * z31);
+        dNdX[6] = 1.0 / detJ *(X[1] * z42 - X[4] * z41 + X[10] * z21);
+        dNdX[9] = 1.0 / detJ *(-X[1] * z32 + X[4] * z31 - X[7] * z21);
+
+        dNdX[1] = 1.0 / detJ *(-X[3] * z43 + X[6] * z42 - X[9] * z32);
+        dNdX[4] = 1.0 / detJ *(X[0] * z43 - X[6] * z41 + X[9] * z31);
+        dNdX[7] = 1.0 / detJ *(-X[0] * z42 + X[3] * z41 - X[9] * z21);
+        dNdX[10] = 1.0 / detJ *(X[0] * z32 - X[3] * z31 + X[6] * z21);
+
+        dNdX[2] = 1.0 / detJ *(X[3] * y43 - X[6] * y42 + X[9] * y32);
+        dNdX[5] = 1.0 / detJ *(-X[0] * y43 + X[6] * y41 - X[9] * y31);
+        dNdX[8] = 1.0 / detJ *(X[0] * y42 - X[3] * y41 + X[9] * y21);
+        dNdX[11] = 1.0 / detJ *(-X[0] * y32 + X[3] * y31 - X[6] * y21);
+
+        return detJ;
+    }
+};
+
 //! Element without a pressure field.
 struct CBNoPressure {
     static constexpr int numNodes = 0;
@@ -245,13 +299,14 @@ template <class Basis>
 struct CBReferenceGeometry {
     const CBQuadratureRule *rule = nullptr;
     //! dN_a/dX_j at quadrature point q is dNdX[3*(Basis::numNodes*q + a) + j].
-    std::array<TFloat, 3*Basis::numNodes*CBQuadratureRule::maxPoints> dNdX;
-    std::array<TFloat, CBQuadratureRule::maxPoints> dV;
+    std::array<TFloat, 3*Basis::numNodes*Basis::maxQuadraturePoints> dNdX;
+    std::array<TFloat, Basis::maxQuadraturePoints> dV;
 };
 
 //! Reference geometry of the element with reference nodal coordinates X under the given rule.
 template <class Basis>
 CBReferenceGeometry<Basis> CalcReferenceGeometry(const TFloat *X, const CBQuadratureRule &rule) {
+    assert(rule.numPoints <= Basis::maxQuadraturePoints);
     CBReferenceGeometry<Basis> geometry;
     geometry.rule = &rule;
     std::array<TFloat, 3*Basis::numNodes> dNdXCentroid;
@@ -275,6 +330,7 @@ public:
     static constexpr int numNodes     = DisplacementBasis::numNodes;
     static constexpr int numPressures = PressureBasis::numNodes;
     static constexpr int numUnknowns  = 3*numNodes + numPressures;
+    static constexpr int maxPoints    = DisplacementBasis::maxQuadraturePoints;
 
     //! fibreBases holds one basis per quadrature point; the stresses of both models are taken in it.
     CBElementKernel(const CBReferenceGeometry<DisplacementBasis> &geometry, const Matrix3<TFloat> *fibreBases,
@@ -291,8 +347,8 @@ public:
     //! condition, followed by the constraint residuals R_a = int N_a (J - 1 - p/kappa) dV of the
     //! pressures. boundaryConditions flags the displacement components.
     CBStatus Residual(const TFloat *x, const bool *boundaryConditions, TFloat *residual) const {
-        Matrix3<TFloat> F[CBQuadratureRule::maxPoints];
-        Matrix3<TFloat> S[CBQuadratureRule::maxPoints];
+        Matrix3<TFloat> F[maxPoints];
+        Matrix3<TFloat> S[maxPoints];
         DeformationGradients(x, F);
         std::fill(residual + 3*numNodes, residual + numUnknowns, 0.0);
         for (int q = 0; q < geometry_.rule->numPoints; q++) {
@@ -352,7 +408,7 @@ public:
     //! constraint holds pointwise, p = kappa (J - 1), and whose pressure derivatives are the
     //! constraint residuals.
     CBStatus Energy(const TFloat *x, TFloat &energy) const {
-        Matrix3<TFloat> F[CBQuadratureRule::maxPoints];
+        Matrix3<TFloat> F[maxPoints];
         DeformationGradients(x, F);
         energy = 0;
         for (int q = 0; q < geometry_.rule->numPoints; q++) {
@@ -377,7 +433,7 @@ private:
     //! Nodal forces f_ai = sum_q dV_q P_q^T dN_a/dX(q) of the PK2 stresses S, given in the fibre
     //! bases, zero on the components with a boundary condition.
     void Forces(const Matrix3<TFloat> *F, const Matrix3<TFloat> *S, const bool *boundaryConditions, TFloat *forces) const {
-        Matrix3<TFloat> P[CBQuadratureRule::maxPoints];
+        Matrix3<TFloat> P[maxPoints];
         for (int q = 0; q < geometry_.rule->numPoints; q++)
             // First Piola-Kirchhoff stress, transposed and taken back from the fibre basis
             P[q] = basisInverseTranspose_[q] * (F[q] * S[q]).GetTranspose() * basisTranspose_[q];
@@ -398,9 +454,9 @@ private:
     //! the derivative of constraint b with respect to the displacement, which keeps the tangent
     //! symmetric wherever the displacement block is.
     void PressureBlocks(const TFloat *x, const bool *boundaryConditions, TFloat *tangent) const {
-        Matrix3<TFloat> F[CBQuadratureRule::maxPoints];
-        Matrix3<TFloat> unitStress[CBQuadratureRule::maxPoints];
-        Matrix3<TFloat> S[CBQuadratureRule::maxPoints];
+        Matrix3<TFloat> F[maxPoints];
+        Matrix3<TFloat> unitStress[maxPoints];
+        Matrix3<TFloat> S[maxPoints];
         DeformationGradients(x, F);
         for (int q = 0; q < geometry_.rule->numPoints; q++)
             unitStress[q] = JCInverse(F[q]);
@@ -458,8 +514,8 @@ private:
     CBTensionModel &tensionModel_;
     TFloat time_;
     TFloat kappa_;  // bulk modulus, used only with a pressure field
-    std::array<Matrix3<TFloat>, CBQuadratureRule::maxPoints> basisTranspose_;
-    std::array<Matrix3<TFloat>, CBQuadratureRule::maxPoints> basisInverseTranspose_;
+    std::array<Matrix3<TFloat>, maxPoints> basisTranspose_;
+    std::array<Matrix3<TFloat>, maxPoints> basisInverseTranspose_;
 };
 
 #endif
