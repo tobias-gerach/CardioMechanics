@@ -16,6 +16,7 @@
 #define CB_ELEMENT_SOLID_T10_H
 
 #include "CBElementSolid.h"
+#include "CBElementKernel.h"
 #include <array>
 
 class CBElementSolidT10 : public CBElementSolid
@@ -63,33 +64,22 @@ public:
 protected:
     virtual void CalcShapeFunctionDerivatives(TFloat l1, TFloat l2, TFloat l3, TFloat l4, TFloat* dNdX, bool useReferenceNodes = 0);
     void CalcT4ShapeFunctionsDerivatives();
-    void CalcShapeFunctionDerivativesAtQuadraturePoints();
+    void CalcShapeFunctionDerivativesAtQuadraturePoints(const CBQuadratureRule& rule);
     virtual void CalcShapeFunctionDerivativesAtCentroid();
     virtual void CalcDeformationTensorsAtQuadraturePointsWithLocalBasis(const TFloat* nodesCoords, Matrix3<TFloat>* deformationTensors);
     void CalcDeformationTensorsAtQuadraturePointsWithGlobalBasis(const TFloat* nodesCoords, Matrix3<TFloat>* deformationTensors);
     virtual void CalcDeformationTensorsAtCentroidWithLocalBasis(const TFloat* nodesCoords, Matrix3<TFloat>& deformationTensors);
     virtual void CalcDeformationTensorsAtCentroidWithLocalBasisWithT4ShapeFunctions(const TFloat* nodesCoords, Matrix3<TFloat>& deformationTensors);
     void GetNodesCoordsIndices(TInt* nodesCoordsIndices);
-    virtual CBStatus CalcNodalForcesHelperFunction(const TFloat* nodesCoords, const bool* boundaryConditions, TFloat* forces);
     //! Integrates the PK2 stresses at the quadrature points, given in the local bases, into
     //! nodal forces. Overwrites stress.
     void CalcNodalForcesFromPK2Stresses(const Matrix3<TFloat>* deformationTensors, Matrix3<TFloat>* stress, const bool* boundaryConditions, TFloat* forces);
     
-    static constexpr int maxQuadraturePoints = 14;
-
-    //! Quadrature rule on the reference tetrahedron: barycentric coordinates of the points and
-    //! weights summing to one.
-    struct QuadratureRule {
-        int numPoints;
-        std::array<std::array<TFloat, 4>, maxQuadraturePoints> points;
-        std::array<TFloat, maxQuadraturePoints> weights;
-    };
+    static constexpr int maxQuadraturePoints = CBQuadratureRule::maxPoints;
 
     std::array<TInt, 10> nodesIndices_;
-    const QuadratureRule* rule_ = nullptr;  // selected by Mesh.QuadratureDegree in UpdateShapeFunctions
-    std::array<TFloat, 30*maxQuadraturePoints> dNdXW_;  // Derivatives of the shape functions at the quadrature points
+    CBReferenceGeometry<CBQuadraticTetBasis> geometry_;  // under the rule selected by Mesh.QuadratureDegree in UpdateShapeFunctions
     std::array<TFloat, 30> dNdXCentroid_;
-    std::array<TFloat, maxQuadraturePoints> dV_;         // Volume represented by each quadrature point
     std::array<TFloat, 12> dNdXt4_;
     TFloat detJ_ = 0;
     
@@ -97,8 +87,12 @@ private:
     typedef CBElement        Base;
     typedef CBElementSolid   Ancestor;
     
-    static const QuadratureRule rule4_;   // degree 2, the default
-    static const QuadratureRule rule14_;  // degree 5
+    typedef CBElementKernel<CBQuadraticTetBasis, CBNoPressure> Kernel;
+
+    //! Kernel of this element at the current time.
+    Kernel MakeKernel();
+    //! Reports a corrupt element, which the status alone does not identify.
+    CBStatus ReportCorruptElement(CBStatus rc);
     
     //! Fibre basis at quadrature point q.
     Matrix3<TFloat>& QuadraturePointBasis(int q);

@@ -65,7 +65,7 @@ CBStatus CBElementSolidT10P1::CalcResiduals(const TFloat *nodesCoords, const TFl
     CalcDeformationTensorsAtQuadraturePointsWithLocalBasis(nodesCoords, deformationTensors);
     std::fill(constraints, constraints + 4, 0.0);
 
-    for (int q = 0; q < rule_->numPoints; q++) {
+    for (int q = 0; q < geometry_.rule->numPoints; q++) {
         rc = constitutiveModel->CalcIsochoricPK2Stress(deformationTensors[q], stress[q]);
 
         if (rc == CBStatus::CORRUPT_ELEMENT) {
@@ -76,7 +76,7 @@ CBStatus CBElementSolidT10P1::CalcResiduals(const TFloat *nodesCoords, const TFl
         if (rc != CBStatus::SUCCESS)
             return rc;
 
-        const std::array<TFloat, 4> &l = rule_->points[q];
+        const std::array<TFloat, 4> &l = geometry_.rule->points[q];
         TFloat J = deformationTensors[q].Det();
         TFloat p = Interpolate(l, pressures);
 
@@ -85,7 +85,7 @@ CBStatus CBElementSolidT10P1::CalcResiduals(const TFloat *nodesCoords, const TFl
         stress[q] += p * JCInverse(deformationTensors[q]) + Base::tensionModel_->CalcActiveStress(deformationTensors[q], time);
 
         for (int a = 0; a < 4; a++)
-            constraints[a] += dV_[q] * l[a] * (J - 1 - p / kappa);
+            constraints[a] += geometry_.dV[q] * l[a] * (J - 1 - p / kappa);
     }
 
     CalcNodalForcesFromPK2Stresses(deformationTensors, stress, boundaryConditions, forces);
@@ -169,8 +169,8 @@ CBStatus CBElementSolidT10P1::CalcNodalForcesJacobian() {
     CalcDeformationTensorsAtQuadraturePointsWithLocalBasis(nodesCoords, deformationTensors);
     for (int b = 0; b < 4; b++) {
         Matrix3<TFloat> stress[maxQuadraturePoints];
-        for (int q = 0; q < rule_->numPoints; q++)
-            stress[q] = rule_->points[q][b] * JCInverse(deformationTensors[q]);
+        for (int q = 0; q < geometry_.rule->numPoints; q++)
+            stress[q] = geometry_.rule->points[q][b] * JCInverse(deformationTensors[q]);
 
         TFloat coupling[30];
         CalcNodalForcesFromPK2Stresses(deformationTensors, stress, boundaryConditions, coupling);
@@ -186,8 +186,8 @@ CBStatus CBElementSolidT10P1::CalcNodalForcesJacobian() {
     for (int a = 0; a < 4; a++)
         for (int b = 0; b < 4; b++) {
             TFloat m = 0;
-            for (int q = 0; q < rule_->numPoints; q++)
-                m += dV_[q] * rule_->points[q][a] * rule_->points[q][b];
+            for (int q = 0; q < geometry_.rule->numPoints; q++)
+                m += geometry_.dV[q] * geometry_.rule->points[q][a] * geometry_.rule->points[q][b];
             jacobian[34*(30 + a) + 30 + b] = -m / kappa;
         }
 
@@ -214,14 +214,14 @@ TFloat CBElementSolidT10P1::GetDeformationEnergy() {
     TFloat kappa = constitutiveModel->GetBulkModulus();
 
     TFloat energy = 0;
-    for (int q = 0; q < rule_->numPoints; q++) {
+    for (int q = 0; q < geometry_.rule->numPoints; q++) {
         TFloat isochoricEnergy;
         constitutiveModel->CalcIsochoricEnergy(deformationTensors[q], isochoricEnergy);
         TFloat J = deformationTensors[q].Det();
-        TFloat p = Interpolate(rule_->points[q], pressures);
+        TFloat p = Interpolate(geometry_.rule->points[q], pressures);
         // Volumetric part of the mixed energy; it equals kappa/2 (J-1)^2 wherever the constraint
         // holds pointwise, p = kappa (J-1).
-        energy += dV_[q] * (isochoricEnergy + p * (J - 1) - p * p / (2 * kappa));
+        energy += geometry_.dV[q] * (isochoricEnergy + p * (J - 1) - p * p / (2 * kappa));
     }
     return energy;
 }
@@ -232,10 +232,10 @@ Matrix3<TFloat> CBElementSolidT10P1::GetPK2Stress() {
     GetDeformationTensorsAndPressures(deformationTensors, pressures);
 
     Matrix3<TFloat> pk2Stress = {0, 0, 0, 0, 0, 0, 0, 0, 0};
-    for (int q = 0; q < rule_->numPoints; q++) {
+    for (int q = 0; q < geometry_.rule->numPoints; q++) {
         Matrix3<TFloat> isochoricStress;
         Base::material_->GetConstitutiveModel()->CalcIsochoricPK2Stress(deformationTensors[q], isochoricStress);
-        pk2Stress += rule_->weights[q] * (isochoricStress + Interpolate(rule_->points[q], pressures) * JCInverse(deformationTensors[q]));
+        pk2Stress += geometry_.rule->weights[q] * (isochoricStress + Interpolate(geometry_.rule->points[q], pressures) * JCInverse(deformationTensors[q]));
     }
     return pk2Stress;
 }
