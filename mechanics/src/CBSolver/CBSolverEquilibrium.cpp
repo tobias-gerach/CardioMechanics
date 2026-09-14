@@ -206,6 +206,15 @@ void CBSolverEquilibrium::InitPETScSolver() {
     }
     
     PCFactorSetMatSolverType(pc_, "mumps");
+    // Backtracking shortens the Newton step until the residual norm drops enough. On a bending,
+    // nearly incompressible body the full step can raise the norm by orders of magnitude although
+    // the next step converges quadratically, so backtracking creeps at steps of a few percent until
+    // the residual drops below the absolute tolerance, well short of the converged state. The
+    // secant line search minimises the norm along the Newton direction instead, and unlike full
+    // steps it still shortens a step that diverges. -snes_linesearch_type overrides this default.
+    SNESLineSearch lineSearch;
+    SNESGetLineSearch(snes_, &lineSearch);
+    SNESLineSearchSetType(lineSearch, SNESLINESEARCHSECANT);
     SNESSetFromOptions(snes_);
     KSPSetFromOptions(ksp_);
     PCSetFromOptions(pc_);
