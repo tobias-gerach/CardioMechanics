@@ -604,14 +604,14 @@ CBStatus CBElementSolidT10::CalcNodalForcesJacobian() {
         
         nodesCoords[i] = nodeCoord - epsilon;
         rc = CalcNodalForcesHelperFunction(nodesCoords, boundaryConditions, f2);
+        if (rc != CBStatus::SUCCESS)
+            return rc;
         
         nodesCoords[i] = nodeCoord;
         
-        for (int k = 0; k < 10; k++) {
-            forcesJacobian[30*i + 3*k + 0] = (f1[3*k + 0] - f2[3*k + 0]) / epsilon2;
-            forcesJacobian[30*i + 3*k + 1] = (f1[3*k + 1] - f2[3*k + 1]) / epsilon2;
-            forcesJacobian[30*i + 3*k + 2] = (f1[3*k + 2] - f2[3*k + 2]) / epsilon2;
-        }
+        // row-major as MatSetValues reads it: rows are residuals, columns unknowns
+        for (int k = 0; k < 30; k++)
+            forcesJacobian[30*k + i] = (f1[k] - f2[k]) / epsilon2;
     }
     
     Base::adapter_->AddNodalForcesJacobianEntries(30, indices, 30, indices, forcesJacobian);

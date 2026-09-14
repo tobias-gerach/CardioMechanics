@@ -334,6 +334,8 @@ CBStatus CBElementSolidT4::CalcNodalForcesJacobian() {
         
         nodesCoords[i] = nodeCoord - epsilon;
         rc = CalcNodalForcesHelperFunction(nodesCoords, boundaryConditions, f2);
+        if (rc != CBStatus::SUCCESS)
+            return rc;
         
         nodesCoords[i] = nodeCoord;
         
