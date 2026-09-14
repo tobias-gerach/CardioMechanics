@@ -42,10 +42,8 @@ public:
 
 private:
     typedef CBElement Base;
+    typedef CBElementKernel<CBQuadraticTetBasis, CBLinearVertexPressure> Kernel;
 
-    //! Nodal forces, and the constraint residuals R_a = int N_a (J - 1 - p/kappa) dV of the four
-    //! vertex pressures.
-    CBStatus CalcResiduals(const TFloat* nodesCoords, const TFloat* pressures, const bool* boundaryConditions, TFloat* forces, TFloat* constraints);
     void GetPressures(TInt* pressureIndices, TFloat* pressures);
     void GetDeformationTensorsAndPressures(Matrix3<TFloat>* deformationTensors, TFloat* pressures);
 

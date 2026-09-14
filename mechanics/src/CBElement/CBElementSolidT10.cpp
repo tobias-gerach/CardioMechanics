@@ -336,7 +336,7 @@ CBStatus CBElementSolidT10::CalcNodalForces() {
     Base::adapter_->GetNodesCoords(30, nodesCoordsIndices, nodesCoords);
     Base::adapter_->GetNodesComponentsBoundaryConditions(30, nodesCoordsIndices, boundaryConditions);
 
-    CBStatus rc = ReportCorruptElement(MakeKernel().Residual(nodesCoords, boundaryConditions, forces));
+    CBStatus rc = ReportCorruptElement(MakeKernel<Kernel>().Residual(nodesCoords, boundaryConditions, forces));
     if (rc != CBStatus::SUCCESS)
         return rc;
 
@@ -358,7 +358,7 @@ CBStatus CBElementSolidT10::CalcNodalForcesJacobian() {
     Base::adapter_->GetNodesCoords(30, nodesCoordsIndices, nodesCoords);
     Base::adapter_->GetNodesComponentsBoundaryConditions(30, nodesCoordsIndices, boundaryConditions);
 
-    CBStatus rc = ReportCorruptElement(MakeKernel().Tangent(nodesCoords, boundaryConditions,
+    CBStatus rc = ReportCorruptElement(MakeKernel<Kernel>().Tangent(nodesCoords, boundaryConditions,
                                                             Base::adapter_->GetFiniteDifferencesEpsilon(), forcesJacobian));
     if (rc != CBStatus::SUCCESS)
         return rc;
@@ -422,66 +422,16 @@ void CBElementSolidT10::CheckNodeSorting() {
     }
 } // CBElementSolidT10::CheckNodeSorting
 
-CBElementSolidT10::Kernel CBElementSolidT10::MakeKernel() {
-    Matrix3<TFloat> bases[maxQuadraturePoints];
-    for (int q = 0; q < geometry_.rule->numPoints; q++)
-        bases[q] = QuadraturePointBasis(q);
-    return Kernel(geometry_, bases, *Base::material_->GetConstitutiveModel(), *Base::tensionModel_,
-                  Base::adapter_->GetSolver()->GetTiming().GetCurrentTime());
+TFloat CBElementSolidT10::CurrentTime() {
+    return Base::adapter_->GetSolver()->GetTiming().GetCurrentTime();
 }
 
 CBStatus CBElementSolidT10::ReportCorruptElement(CBStatus rc) {
     // print corrupt element messages from each processor
     if (rc == CBStatus::CORRUPT_ELEMENT)
-        std::cout << "SolidT10: Element with index " << index_ << " is corrupt." << std::endl;
+        std::cout << "Solid" << GetType() << ": Element with index " << index_ << " is corrupt." << std::endl;
     return rc;
 }
-
-void CBElementSolidT10::CalcNodalForcesFromPK2Stresses(const Matrix3<TFloat> *deformationTensors, Matrix3<TFloat> *stress,
-                                                       const bool *boundaryConditions, TFloat *forces) {
-    for (int QPi = 0; QPi < geometry_.rule->numPoints; QPi++) {
-        // convert PK2 stress into nominal stress with respect to the local coordinate system aligned with the fibres
-        stress[QPi] = (deformationTensors[QPi] * stress[QPi]).GetTranspose();
-        
-        // transform  stress back into the global coordinate system
-        stress[QPi] = QuadraturePointBasis(QPi).GetInverse().GetTranspose() * stress[QPi] * QuadraturePointBasis(QPi).GetTranspose();
-    }
-    
-    // f_i = sum_j dV_j P_j^T dN_i/dX(j) over the quadrature points j
-    TFloat t[3];
-    for (int i = 0; i < 10; i++) { // for each node
-        t[0] = 0;
-        t[1] = 0;
-        t[2] = 0;
-        
-        for (int j = 0; j < geometry_.rule->numPoints; j++) { // for each QP
-            t[0] += geometry_.dV[j] * (geometry_.dNdX[30*j + 3*i+0] *
-            stress[j].Get(0, 0)  + geometry_.dNdX[30*j + 3*i+1] * stress[j].Get(1, 0) + geometry_.dNdX[30*j + 3*i+2] * stress[j].Get(2, 0));
-            t[1] += geometry_.dV[j] * (geometry_.dNdX[30*j + 3*i+0] *
-            stress[j].Get(0, 1)  + geometry_.dNdX[30*j + 3*i+1] * stress[j].Get(1, 1) + geometry_.dNdX[30*j + 3*i+2] * stress[j].Get(2, 1));
-            t[2] += geometry_.dV[j] * (geometry_.dNdX[30*j + 3*i+0] *
-            stress[j].Get(0, 2)  + geometry_.dNdX[30*j + 3*i+1] * stress[j].Get(1, 2) + geometry_.dNdX[30*j + 3*i+2] * stress[j].Get(2, 2));
-        }
-        
-        // check if node i has boundary Conditions in x direction
-        if (boundaryConditions[3*i] == 0)
-            forces[3*i] = t[0];
-        else
-            forces[3*i] = 0;
-        
-        // check if node has BC in y dir
-        if (boundaryConditions[3*i+1] == 0)
-            forces[3*i+1] = t[1];
-        else
-            forces[3*i+1] = 0;
-        
-        // check if node has BC in z dir
-        if (boundaryConditions[3*i+2] == 0)
-            forces[3*i+2] = t[2];
-        else
-            forces[3*i+2] = 0;
-    }
-} // CBElementSolidT10::CalcNodalForcesFromPK2Stresses
 
 void CBElementSolidT10::CalcT4ShapeFunctionsDerivatives() {
     TFloat nodesCoords[30];
@@ -595,7 +545,7 @@ TFloat CBElementSolidT10::GetDeformationEnergy() {
     // A corrupt element, or one whose energy is not finite, contributes NaN, so that the exported
     // total shows it instead of a plausible number.
     TFloat energy;
-    if (ReportCorruptElement(MakeKernel().Energy(nodesCoords, energy)) != CBStatus::SUCCESS)
+    if (ReportCorruptElement(MakeKernel<Kernel>().Energy(nodesCoords, energy)) != CBStatus::SUCCESS)
         return NAN;
     return energy;
 }

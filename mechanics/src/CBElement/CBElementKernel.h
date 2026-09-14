@@ -229,6 +229,16 @@ struct CBNoPressure {
     static constexpr int numNodes = 0;
 };
 
+//! Linear pressure field on the four vertex nodes of a tetrahedron. The shape function of vertex a
+//! is its barycentric coordinate l_a.
+struct CBLinearVertexPressure {
+    static constexpr int numNodes = 4;
+    static TFloat Value(const std::array<TFloat, 4> &l, int a) {return l[a];}
+};
+
+//! J C^-1, the PK2 stress of a unit pressure and the derivative of J with respect to E.
+inline Matrix3<TFloat> JCInverse(const Matrix3<TFloat> &F) {return F.Det() * (F.GetTranspose() * F).GetInverse();}
+
 //! Shape-function derivatives and volume at each quadrature point of an element's reference
 //! configuration.
 template <class Basis>
@@ -255,63 +265,69 @@ CBReferenceGeometry<Basis> CalcReferenceGeometry(const TFloat *X, const CBQuadra
 
 //! Element kernel: residual, tangent and energy of one solid element from its gathered
 //! configuration. Knows nothing of global index layout; the element's Adapter gathers and scatters.
+//!
+//! The unknowns are the current nodal coordinates followed by the nodal pressures. With a pressure
+//! field the material law contributes only its isochoric response, and the pressure is tied to the
+//! deformation by the perturbed incompressibility constraint J - 1 - p/kappa = 0 (ADR-0002).
 template <class DisplacementBasis, class PressureBasis>
 class CBElementKernel {
-    static_assert(PressureBasis::numNodes == 0, "only displacement-only elements are supported");
-
 public:
-    static constexpr int numNodes    = DisplacementBasis::numNodes;
-    static constexpr int numUnknowns = 3*numNodes + PressureBasis::numNodes;
+    static constexpr int numNodes     = DisplacementBasis::numNodes;
+    static constexpr int numPressures = PressureBasis::numNodes;
+    static constexpr int numUnknowns  = 3*numNodes + numPressures;
 
     //! fibreBases holds one basis per quadrature point; the stresses of both models are taken in it.
     CBElementKernel(const CBReferenceGeometry<DisplacementBasis> &geometry, const Matrix3<TFloat> *fibreBases,
                     CBConstitutiveModel &constitutiveModel, CBTensionModel &tensionModel, TFloat time)
-    : geometry_(geometry), constitutiveModel_(constitutiveModel), tensionModel_(tensionModel), time_(time) {
+    : geometry_(geometry), constitutiveModel_(constitutiveModel), tensionModel_(tensionModel), time_(time),
+      kappa_(numPressures ? constitutiveModel.GetBulkModulus() : 0) {
         for (int q = 0; q < geometry_.rule->numPoints; q++) {
             basisTranspose_[q]        = fibreBases[q].GetTranspose();
             basisInverseTranspose_[q] = fibreBases[q].GetInverse().GetTranspose();
         }
     }
 
-    //! Nodal forces at the current nodal coordinates x, zero on the components with a boundary
-    //! condition.
+    //! Residual at the unknowns x: the nodal forces, zero on the components with a boundary
+    //! condition, followed by the constraint residuals R_a = int N_a (J - 1 - p/kappa) dV of the
+    //! pressures. boundaryConditions flags the displacement components.
     CBStatus Residual(const TFloat *x, const bool *boundaryConditions, TFloat *residual) const {
         Matrix3<TFloat> F[CBQuadratureRule::maxPoints];
-        Matrix3<TFloat> P[CBQuadratureRule::maxPoints];
+        Matrix3<TFloat> S[CBQuadratureRule::maxPoints];
         DeformationGradients(x, F);
+        std::fill(residual + 3*numNodes, residual + numUnknowns, 0.0);
         for (int q = 0; q < geometry_.rule->numPoints; q++) {
-            Matrix3<TFloat> S;
-            CBStatus rc = constitutiveModel_.CalcPK2Stress(F[q], S);
-            if (rc != CBStatus::SUCCESS)
-                return rc;
-            S += tensionModel_.CalcActiveStress(F[q], time_);
-            // First Piola-Kirchhoff stress, transposed and taken back from the fibre basis
-            P[q] = basisInverseTranspose_[q] * (F[q] * S).GetTranspose() * basisTranspose_[q];
-        }
-
-        // f_ai = sum_q dV_q P_q^T dN_a/dX(q)
-        for (int a = 0; a < numNodes; a++)
-            for (int i = 0; i < 3; i++) {
-                TFloat f = 0;
-                for (int q = 0; q < geometry_.rule->numPoints; q++) {
-                    const TFloat *dNdX = &geometry_.dNdX[3*(numNodes*q + a)];
-                    f += geometry_.dV[q] * (dNdX[0] * P[q](0, i) + dNdX[1] * P[q](1, i) + dNdX[2] * P[q](2, i));
-                }
-                residual[3*a + i] = boundaryConditions[3*a + i] ? 0 : f;
+            if constexpr (numPressures == 0) {
+                CBStatus rc = constitutiveModel_.CalcPK2Stress(F[q], S[q]);
+                if (rc != CBStatus::SUCCESS)
+                    return rc;
+            } else {
+                CBStatus rc = constitutiveModel_.CalcIsochoricPK2Stress(F[q], S[q]);
+                if (rc != CBStatus::SUCCESS)
+                    return rc;
+                const TFloat p = Pressure(q, x);
+                S[q] += p * JCInverse(F[q]);
+                for (int a = 0; a < numPressures; a++)
+                    residual[3*numNodes + a] += geometry_.dV[q] * PressureShape(q, a) * (F[q].Det() - 1 - p / kappa_);
             }
+            // Active stress is added raw, also with a pressure field. Whether a mixed formulation
+            // should project it onto its deviatoric part is an open modelling question.
+            S[q] += tensionModel_.CalcActiveStress(F[q], time_);
+        }
+        Forces(F, S, boundaryConditions, residual);
         return CBStatus::SUCCESS;
     }
 
-    //! Derivative of the residual with respect to the unknowns at x, by central differences of step
-    //! epsilon: row-major, rows are residuals and columns unknowns. The columns of the unknowns with a
-    //! boundary condition are zero.
+    //! Derivative of the residual with respect to the unknowns at x: row-major, rows are residuals and
+    //! columns unknowns. The block of the forces and the displacement is taken by central differences
+    //! of step epsilon; the residual is linear in the pressures, so the blocks involving them are
+    //! exact. The columns of the displacement components with a boundary condition are zero.
     CBStatus Tangent(const TFloat *x, const bool *boundaryConditions, TFloat epsilon, TFloat *tangent) const {
         std::array<TFloat, numUnknowns> y;
         std::copy(x, x + numUnknowns, y.begin());
         std::fill(tangent, tangent + numUnknowns*numUnknowns, 0.0);
         TFloat plus[numUnknowns];
         TFloat minus[numUnknowns];
-        for (int j = 0; j < numUnknowns; j++) {
+        for (int j = 0; j < 3*numNodes; j++) {
             if (boundaryConditions[j])
                 continue;
             y[j] = x[j] + epsilon;
@@ -323,28 +339,105 @@ public:
             if (rc != CBStatus::SUCCESS)
                 return rc;
             y[j] = x[j];
-            for (int i = 0; i < numUnknowns; i++)
+            for (int i = 0; i < 3*numNodes; i++)
                 tangent[numUnknowns*i + j] = (plus[i] - minus[i]) / (2*epsilon);
         }
+        if constexpr (numPressures > 0)
+            PressureBlocks(x, boundaryConditions, tangent);
         return CBStatus::SUCCESS;
     }
 
-    //! Strain energy of the material law at the current nodal coordinates x.
+    //! Strain energy at the unknowns x. With a pressure field it is the isochoric energy plus the
+    //! mixed volumetric term p (J - 1) - p^2/(2 kappa), which equals kappa/2 (J - 1)^2 wherever the
+    //! constraint holds pointwise, p = kappa (J - 1), and whose pressure derivatives are the
+    //! constraint residuals.
     CBStatus Energy(const TFloat *x, TFloat &energy) const {
         Matrix3<TFloat> F[CBQuadratureRule::maxPoints];
         DeformationGradients(x, F);
         energy = 0;
         for (int q = 0; q < geometry_.rule->numPoints; q++) {
             TFloat e;
-            CBStatus rc = constitutiveModel_.CalcEnergy(F[q], e);
-            if (rc != CBStatus::SUCCESS)
-                return rc;
+            if constexpr (numPressures == 0) {
+                CBStatus rc = constitutiveModel_.CalcEnergy(F[q], e);
+                if (rc != CBStatus::SUCCESS)
+                    return rc;
+            } else {
+                CBStatus rc = constitutiveModel_.CalcIsochoricEnergy(F[q], e);
+                if (rc != CBStatus::SUCCESS)
+                    return rc;
+                const TFloat p = Pressure(q, x);
+                e += p * (F[q].Det() - 1) - p * p / (2 * kappa_);
+            }
             energy += geometry_.dV[q] * e;
         }
         return CBStatus::SUCCESS;
     }
 
 private:
+    //! Nodal forces f_ai = sum_q dV_q P_q^T dN_a/dX(q) of the PK2 stresses S, given in the fibre
+    //! bases, zero on the components with a boundary condition.
+    void Forces(const Matrix3<TFloat> *F, const Matrix3<TFloat> *S, const bool *boundaryConditions, TFloat *forces) const {
+        Matrix3<TFloat> P[CBQuadratureRule::maxPoints];
+        for (int q = 0; q < geometry_.rule->numPoints; q++)
+            // First Piola-Kirchhoff stress, transposed and taken back from the fibre basis
+            P[q] = basisInverseTranspose_[q] * (F[q] * S[q]).GetTranspose() * basisTranspose_[q];
+
+        for (int a = 0; a < numNodes; a++)
+            for (int i = 0; i < 3; i++) {
+                TFloat f = 0;
+                for (int q = 0; q < geometry_.rule->numPoints; q++) {
+                    const TFloat *dNdX = &geometry_.dNdX[3*(numNodes*q + a)];
+                    f += geometry_.dV[q] * (dNdX[0] * P[q](0, i) + dNdX[1] * P[q](1, i) + dNdX[2] * P[q](2, i));
+                }
+                forces[3*a + i] = boundaryConditions[3*a + i] ? 0 : f;
+            }
+    }
+
+    //! Writes the tangent blocks of the pressure rows and columns. The forces of the stress N_b J C^-1
+    //! are the derivative of the forces with respect to pressure b. Since dJ/dF = J F^-T, they are also
+    //! the derivative of constraint b with respect to the displacement, which keeps the tangent
+    //! symmetric wherever the displacement block is.
+    void PressureBlocks(const TFloat *x, const bool *boundaryConditions, TFloat *tangent) const {
+        Matrix3<TFloat> F[CBQuadratureRule::maxPoints];
+        Matrix3<TFloat> unitStress[CBQuadratureRule::maxPoints];
+        Matrix3<TFloat> S[CBQuadratureRule::maxPoints];
+        DeformationGradients(x, F);
+        for (int q = 0; q < geometry_.rule->numPoints; q++)
+            unitStress[q] = JCInverse(F[q]);
+
+        for (int b = 0; b < numPressures; b++) {
+            for (int q = 0; q < geometry_.rule->numPoints; q++)
+                S[q] = PressureShape(q, b) * unitStress[q];
+            TFloat coupling[3*numNodes];
+            Forces(F, S, boundaryConditions, coupling);
+            for (int k = 0; k < 3*numNodes; k++) {
+                tangent[numUnknowns*k + 3*numNodes + b]   = coupling[k];
+                tangent[numUnknowns*(3*numNodes + b) + k] = coupling[k];
+            }
+        }
+
+        // -1/kappa times the pressure mass matrix, the block that keeps the saddle-point system
+        // non-singular (ADR-0002).
+        for (int a = 0; a < numPressures; a++)
+            for (int b = 0; b < numPressures; b++) {
+                TFloat m = 0;
+                for (int q = 0; q < geometry_.rule->numPoints; q++)
+                    m += geometry_.dV[q] * PressureShape(q, a) * PressureShape(q, b);
+                tangent[numUnknowns*(3*numNodes + a) + 3*numNodes + b] = -m / kappa_;
+            }
+    }
+
+    //! Pressure shape function a at quadrature point q.
+    TFloat PressureShape(int q, int a) const {return PressureBasis::Value(geometry_.rule->points[q], a);}
+
+    //! Pressure at quadrature point q from the nodal pressures in the unknowns x.
+    TFloat Pressure(int q, const TFloat *x) const {
+        TFloat p = 0;
+        for (int a = 0; a < numPressures; a++)
+            p += PressureShape(q, a) * x[3*numNodes + a];
+        return p;
+    }
+
     //! Deformation gradient at each quadrature point, in the fibre basis there.
     void DeformationGradients(const TFloat *x, Matrix3<TFloat> *F) const {
         for (int q = 0; q < geometry_.rule->numPoints; q++) {
@@ -364,6 +457,7 @@ private:
     CBConstitutiveModel &constitutiveModel_;
     CBTensionModel &tensionModel_;
     TFloat time_;
+    TFloat kappa_;  // bulk modulus, used only with a pressure field
     std::array<Matrix3<TFloat>, CBQuadratureRule::maxPoints> basisTranspose_;
     std::array<Matrix3<TFloat>, CBQuadratureRule::maxPoints> basisInverseTranspose_;
 };
