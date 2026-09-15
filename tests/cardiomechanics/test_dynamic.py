@@ -44,7 +44,7 @@ DEFORM_RTOL, DEFORM_ATOL = 1e-4, 1e-8      # coordinates in m
 
 # Trapezoidal Newmark and generalized-alpha at RhoInf=1 are distinct second-order
 # schemes, so they agree only to their own truncation error, not to round-off.
-# 1e-6 m is 0.016% of the 6.4 mm peak displacement this fixture reaches.
+# 1e-6 m is 0.016% of the 6.1 mm peak displacement this fixture reaches.
 EQUIV_RTOL, EQUIV_ATOL = 1e-4, 1e-6
 
 CREEP_BETA = 0.3           # s; Rayleigh Beta of the creep fixtures, which have no Alpha

@@ -21,11 +21,11 @@
 
     <Surfaces>
         <!-- Endo -->
-        <Surface_1><Type>T3</Type></Surface_1>
+        <Surface_1><Type>T6</Type></Surface_1>
         <!-- Epi -->
-        <Surface_2><Type>T3</Type></Surface_2>
+        <Surface_2><Type>T6</Type></Surface_2>
         <!-- Base -->
-        <Surface_3><Type>T3</Type></Surface_3>
+        <Surface_3><Type>T6</Type></Surface_3>
     </Surfaces>
 </Mesh>
 

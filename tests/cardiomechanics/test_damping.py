@@ -52,8 +52,8 @@ LF_MAX = 400.0             # Hz; the physical response has died out by here
 HF_MIN = 1000.0            # Hz; omega*dt > 0.6 here, well into the damped range
 
 # Observed on this fixture, whose runs reproduce bit-for-bit: at RhoInf=1 the high
-# band holds 1.4e-4 of the bulk, each 0.2 drop in RhoInf costs it at least 1.47x,
-# and the ends of the sweep differ by 140x. The margins below are wide enough to
+# band holds 1.9e-4 of the bulk, each 0.2 drop in RhoInf costs it at least 1.37x,
+# and the ends of the sweep differ by 200x. The margins below are wide enough to
 # absorb platform drift while still failing on a scheme that has stopped damping.
 MIN_HF_FRACTION = 5e-5     # high-band energy over low-band energy, at RhoInf=1
 MIN_HF_DECAY = 1.2         # per sweep step
