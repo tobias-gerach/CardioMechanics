@@ -19,6 +19,7 @@
 #include <array>
 #include <cassert>
 #include <cmath>
+#include <numeric>
 
 #include "CBConstitutiveModel.h"
 #include "CBStatus.h"
@@ -278,6 +279,28 @@ struct CBLinearTetBasis {
     }
 };
 
+//! MINI displacement basis: the linear basis of the 4-node tetrahedron, then the bubble
+//! b = 256 l1 l2 l3 l4 as a fifth node. The bubble vanishes on the element boundary, so its
+//! "coordinates" are displacement amplitudes, zero in the reference configuration, and the geometry
+//! is the affine map of the vertices alone.
+struct CBMiniBasis {
+    static constexpr int numNodes = 5;
+    static constexpr int maxQuadraturePoints = CBQuadratureRule::maxPoints;
+
+    //! As CBQuadraticTetBasis::Derivatives; only the vertices of X are read.
+    static TFloat Derivatives(const std::array<TFloat, 4> &l, const TFloat *X, TFloat *dNdX) {
+        const TFloat detJ = CBLinearTetBasis::Derivatives(l, X, dNdX);
+        // grad b = 256 sum_a (product of the other three l) grad l_a
+        for (int j = 0; j < 3; j++) {
+            TFloat g = 0;
+            for (int a = 0; a < 4; a++)
+                g += l[(a+1)%4] * l[(a+2)%4] * l[(a+3)%4] * dNdX[3*a + j];
+            dNdX[12 + j] = 256 * g;
+        }
+        return detJ;
+    }
+};
+
 //! Element without a pressure field.
 struct CBNoPressure {
     static constexpr int numNodes = 0;
@@ -516,6 +539,145 @@ private:
     TFloat kappa_;  // bulk modulus, used only with a pressure field
     std::array<Matrix3<TFloat>, maxPoints> basisTranspose_;
     std::array<Matrix3<TFloat>, maxPoints> basisInverseTranspose_;
+};
+
+//! Element kernel with its internal unknowns, the last numInternal displacement components of the
+//! Inner kernel such as the MINI bubble, condensed statically (ADR-0005). It has the interface of
+//! Inner over the remaining unknowns. Every evaluation solves the internal rows of the inner residual
+//! from zero, so no state is kept between calls, and the internal unknowns carry no boundary
+//! condition.
+template <class Inner, int numInternal>
+class CBCondensedKernel {
+    static_assert(numInternal == 3, "the local solve inverts a Matrix3");
+    static constexpr int numInner      = Inner::numUnknowns;
+    static constexpr int firstInternal = 3*Inner::numNodes - numInternal;  // index in the Inner unknowns
+
+public:
+    static constexpr int numNodes     = Inner::numNodes - numInternal/3;
+    static constexpr int numPressures = Inner::numPressures;
+    static constexpr int numUnknowns  = numInner - numInternal;
+
+    //! As the Inner kernel. Templated on the basis because Inner does not name its own.
+    template <class Basis>
+    CBCondensedKernel(const CBReferenceGeometry<Basis> &geometry, const Matrix3<TFloat> *fibreBases,
+                      CBConstitutiveModel &constitutiveModel, CBTensionModel &tensionModel, TFloat time)
+    : inner_(geometry, fibreBases, constitutiveModel, tensionModel, time),
+      length_(std::cbrt(std::accumulate(geometry.dV.begin(), geometry.dV.begin() + geometry.rule->numPoints, TFloat(0)))) {
+        // A bubble's gradient vanishes at the centroid, so under the single-point rule its block is singular.
+        assert(geometry.rule->numPoints > 1);
+    }
+
+    //! As Inner::Residual, at the internal unknowns that solve their rows.
+    CBStatus Residual(const TFloat *x, const bool *boundaryConditions, TFloat *residual) const {
+        TFloat y[numInner], r[numInner];
+        CBStatus rc = SolveInternal(x, y, r);
+        if (rc != CBStatus::SUCCESS)
+            return rc;
+        for (int i = 0; i < numUnknowns; i++)
+            residual[i] = i < firstInternal && boundaryConditions[i] ? 0 : r[InnerIndex(i)];
+        return CBStatus::SUCCESS;
+    }
+
+    //! As Inner::Tangent: the Schur complement K_ee - K_ei K_ii^-1 K_ie of the inner tangent at the
+    //! internal unknowns that solve their rows, e being the remaining unknowns and i the internal
+    //! ones. This is the exact derivative of the condensed residual. It differences the inner residual
+    //! at fixed internal unknowns, so the tolerance of the local solve does not enter the difference
+    //! quotients, as it would in differences of the condensed residual with the solvers' small step.
+    CBStatus Tangent(const TFloat *x, const bool *boundaryConditions, TFloat epsilon, TFloat *tangent) const {
+        TFloat y[numInner], r[numInner];
+        CBStatus rc = SolveInternal(x, y, r);
+        if (rc != CBStatus::SUCCESS)
+            return rc;
+        bool innerBoundaryConditions[3*Inner::numNodes] = {};
+        std::copy_n(boundaryConditions, firstInternal, innerBoundaryConditions);
+        std::array<TFloat, numInner*numInner> K;
+        rc = inner_.Tangent(y, innerBoundaryConditions, epsilon, K.data());
+        if (rc != CBStatus::SUCCESS)
+            return rc;
+
+        const Matrix3<TFloat> internalInverse = InternalBlock(K.data()).GetInverse();
+        for (int j = 0; j < numUnknowns; j++) {
+            const TFloat *column = &K[numInner*firstInternal + InnerIndex(j)];
+            // K_ii^-1 K_ij, the change of the internal unknowns with unknown j
+            const Vector3<TFloat> d = internalInverse * Vector3<TFloat>(column[0], column[numInner], column[2*numInner]);
+            for (int i = 0; i < numUnknowns; i++) {
+                const TFloat *row = &K[numInner*InnerIndex(i)];
+                tangent[numUnknowns*i + j] = row[InnerIndex(j)] - Vector3<TFloat>(row + firstInternal) * d;
+            }
+        }
+        return CBStatus::SUCCESS;
+    }
+
+    //! As Inner::Energy, at the internal unknowns that solve their rows.
+    CBStatus Energy(const TFloat *x, TFloat &energy) const {
+        TFloat y[numInner], r[numInner];
+        CBStatus rc = SolveInternal(x, y, r);
+        if (rc != CBStatus::SUCCESS)
+            return rc;
+        return inner_.Energy(y, energy);
+    }
+
+    //! The unknowns y of the Inner kernel at x, with the internal unknowns solving their rows by
+    //! Newton iteration from zero, and the inner residual r there, without boundary conditions. A solve
+    //! that does not converge is a corrupt element.
+    CBStatus SolveInternal(const TFloat *x, TFloat *y, TFloat *r) const {
+        std::copy_n(x, firstInternal, y);
+        std::fill_n(y + firstInternal, numInternal, 0.0);
+        std::copy(x + firstInternal, x + numUnknowns, y + firstInternal + numInternal);
+        const bool noBoundaryConditions[3*Inner::numNodes] = {};
+        CBStatus rc = inner_.Residual(y, noBoundaryConditions, r);
+        if (rc != CBStatus::SUCCESS)
+            return rc;
+
+        // Flagging every other displacement component restricts the inner kernel's central
+        // differences to the internal columns.
+        bool allButInternal[3*Inner::numNodes] = {};
+        std::fill_n(allButInternal, firstInternal, true);
+        std::array<TFloat, numInner*numInner> K;
+        for (int iteration = 0; iteration < maxIterations; iteration++) {
+            rc = inner_.Tangent(y, allButInternal, localStep * length_, K.data());
+            if (rc != CBStatus::SUCCESS)
+                return rc;
+            const Vector3<TFloat> step = InternalBlock(K.data()).GetInverse() * Vector3<TFloat>(r + firstInternal);
+            for (int k = 0; k < numInternal; k++)
+                y[firstInternal + k] -= step(k);
+            rc = inner_.Residual(y, noBoundaryConditions, r);
+            if (rc != CBStatus::SUCCESS)
+                return rc;
+            // Written so that a step that is not a number does not converge.
+            if (step.Norm() <= stepTolerance * length_)
+                return CBStatus::SUCCESS;
+        }
+        return CBStatus::CORRUPT_ELEMENT;
+    }
+
+private:
+    // Convergence is judged by the Newton step, not by the internal rows: at rest the forces and the
+    // internal rows are both rounding noise, so no tolerance relative to the forces can be met. Both
+    // constants are relative to the element size, so they hold in any length unit. The local tangent,
+    // a central difference of step localStep, is accurate to about 1e-10, so each iteration reduces
+    // the error by at least that factor, and the error left after a step below stepTolerance is at
+    // rounding level. The rounding floor of the step is 1e-16 times the magnitude of the coordinates,
+    // so stepTolerance stays attainable up to a million element sizes from the origin. Twenty
+    // iterations are ample from zero; a solve that has not converged by then is diverging.
+    static constexpr TFloat localStep = 1e-6;
+    static constexpr TFloat stepTolerance = 1e-10;
+    static constexpr int maxIterations = 20;
+
+    //! Index in the Inner unknowns of condensed unknown i.
+    static int InnerIndex(int i) {return i < firstInternal ? i : i + numInternal;}
+
+    //! K_ii, the block of the internal rows and columns of an Inner tangent.
+    static Matrix3<TFloat> InternalBlock(const TFloat *K) {
+        Matrix3<TFloat> block;
+        for (int k = 0; k < numInternal; k++)
+            for (int l = 0; l < numInternal; l++)
+                block(k, l) = K[numInner*(firstInternal + k) + firstInternal + l];
+        return block;
+    }
+
+    Inner inner_;
+    TFloat length_;  // cube root of the reference volume
 };
 
 #endif
