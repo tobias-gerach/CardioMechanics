@@ -38,7 +38,7 @@ from scipy.sparse import csr_matrix
 from scipy.sparse.linalg import LinearOperator, lobpcg, splu
 
 from helpers.compare import read_petsc_csr
-from helpers.gmsh_tetgen import t10_quadrature, write_tetgen
+from helpers.gmsh_tetgen import tetrahedron_quadrature, write_tetgen
 from helpers.run import run_binary
 
 # An eigenvalue LOBPCG has not converged is no measurement of beta_h.
@@ -125,7 +125,7 @@ def assemble(X, elements, rule):
     """The scalar P2 Laplacian over all nodes and the P1 mass matrix over the vertex nodes, numbered in
     node order, by the quadrature rule over the (curved) elements. Returns them with the mesh size
     (volume / elements)^(1/3)."""
-    weights, _, dN, L = t10_quadrature(rule)
+    weights, _, dN, L = tetrahedron_quadrature(rule, 2)
     dX = np.einsum("qnk,end->eqdk", dN, X[elements])
     dV = weights * np.linalg.det(dX)
     grad = np.einsum("qnk,eqkd->eqnd", dN, np.linalg.inv(dX))
