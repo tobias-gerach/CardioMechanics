@@ -52,18 +52,18 @@ public:
     /// elements carry the volumetric response in their own pressure field and must not receive it
     /// a second time from the material law.
     virtual CBStatus CalcIsochoricPK2Stress(const Matrix3<TFloat> &deformationTensor, Matrix3<TFloat> &pk2Stress) {
-        throw std::runtime_error("Material law " + GetType() + " provides no isochoric stress, which the T10P1 element requires");
+        throw std::runtime_error("Material law " + GetType() + " provides no isochoric stress, which elements with a pressure field require");
     }
 
     /// Energy of the volume-preserving part of the deformation alone, the counterpart of
     /// CalcIsochoricPK2Stress.
     virtual CBStatus CalcIsochoricEnergy(const Matrix3<TFloat> &deformationTensor, TFloat &energy) {
-        throw std::runtime_error("Material law " + GetType() + " provides no isochoric energy, which the T10P1 element requires");
+        throw std::runtime_error("Material law " + GetType() + " provides no isochoric energy, which elements with a pressure field require");
     }
 
     /// Bulk modulus kappa, the coefficient of the volumetric response.
     virtual TFloat GetBulkModulus() {
-        throw std::runtime_error("Material law " + GetType() + " provides no bulk modulus, which the T10P1 element requires");
+        throw std::runtime_error("Material law " + GetType() + " provides no bulk modulus, which elements with a pressure field require");
     }
 
     TInt GetModelIndex() {return modelIndex_; }

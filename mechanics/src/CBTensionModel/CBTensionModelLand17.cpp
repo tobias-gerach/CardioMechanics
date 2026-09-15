@@ -260,7 +260,7 @@ TFloat CBTensionModelLand17::CaExternal(TFloat t) {
 TFloat CBTensionModelLand17::CaElphy(TFloat t) {
     // Method to process calcium from electrophysiology
     TFloat calcium = 0;
-    if (e_->GetType() == "T4")
+    if (e_->GetType() == "T4" || e_->GetType() == "T4MINI")
         calcium = caiQP_[0];
     // even though we have calcium at QPs, there is currently only one tension model initialized per element
     // therefore, we use the centroid value as well in case of T10 and T10P1
@@ -560,7 +560,7 @@ inline void CBTensionModelLand17::ReadExternalCai(std::string filename) {
 }
 
 CBStatus CBTensionModelLand17::SetActiveTensionAtQuadraturePoint(TInt indexQP, TFloat Cai) {
-    if (e_->GetType() == "T4") {
+    if (e_->GetType() == "T4" || e_->GetType() == "T4MINI") {
         if (indexQP == 0) {
             caiQP_[indexQP] = Cai;
         } else {

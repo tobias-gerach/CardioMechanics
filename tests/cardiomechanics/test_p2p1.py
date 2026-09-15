@@ -49,15 +49,18 @@ def _run(binary, cm_env, wd, element_type="T10P1", kappa=100, material="NeoHooke
          env=None, check=True, ranks=None, fixture=FIXTURE, replace=()):
     """Stage mesh and settings into wd, run on ranks MPI ranks (serially if None), return (process, vtu directory).
     solver replaces the Static solver of the fixture; None keeps the fixture's own. replace holds further
-    (old, new) substitutions of the settings text."""
+    (old, new) substitutions of the settings text. The linear element types get the linear mesh."""
+    linear = element_type in ("T4", "T4MINI")
     (wd / "tetgen").mkdir()
-    write_mesh(wd / "tetgen")
+    write_mesh(wd / "tetgen", linear=linear)
     (wd / "Results").mkdir()
     text, n = re.subn(r"<NeoHooke>.*?</NeoHooke>", MATERIALS[material].format(kappa=kappa),
                       fixture.read_text(), flags=re.DOTALL)
     assert n == 1, f"{fixture.name}: cannot substitute the NeoHooke parameters"
     substitutions = [("<Type>T10P1</Type>", f"<Type>{element_type}</Type>"),
                      ("<Type>NeoHooke</Type>", f"<Type>{material}</Type>")]
+    if linear:
+        substitutions.append(("<Surface_130><Type>T6</Type></Surface_130>", "<Surface_130><Type>T3</Type></Surface_130>"))
     if solver:
         substitutions.append(("<Type>Static</Type>", f"<Type>{solver}</Type>"))
     substitutions += replace

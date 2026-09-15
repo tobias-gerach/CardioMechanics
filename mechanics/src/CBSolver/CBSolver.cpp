@@ -231,23 +231,27 @@ void CBSolver::Init(ParameterMap *parameters, CBModel *model) {
     LoadMesh();
 
     if (model_->GetNumberOfPressureNodes() > 0) {
-        if (!SupportsPressureField()) {
-            const auto &elements = model_->GetElements();
-            auto mixed = std::find_if(elements.begin(), elements.end(), [](CBElement *e) {
-                auto *solid = dynamic_cast<CBElementSolid *>(e);
-                return solid && solid->GetNumberOfPressureNodesIndices() > 0;
-            });
-            assert(mixed != elements.end());
-            throw std::runtime_error("CBSolver::Init(): Solver [" + GetType() + "] does not support " + (*mixed)->GetType() + " elements");
-        }
+        const auto &elements = model_->GetElements();
+        auto mixed = std::find_if(elements.begin(), elements.end(), [](CBElement *e) {
+            auto *solid = dynamic_cast<CBElementSolid *>(e);
+            return solid && solid->GetNumberOfPressureNodesIndices() > 0;
+        });
+        assert(mixed != elements.end());
+        const std::string mixedType = (*mixed)->GetType();
+        if (!SupportsPressureField())
+            throw std::runtime_error("CBSolver::Init(): Solver [" + GetType() + "] does not support " + mixedType + " elements");
         // Evaluated once in the reference configuration, so that a material law without a mixed
         // formulation fails here rather than inside the first solve.
-        for (auto &it : materials_) {
-            Matrix3<TFloat> stress;
-            TFloat energy;
-            it.second->GetConstitutiveModel()->CalcIsochoricPK2Stress(Matrix3<TFloat>::Identity(), stress);
-            it.second->GetConstitutiveModel()->CalcIsochoricEnergy(Matrix3<TFloat>::Identity(), energy);
-            it.second->GetConstitutiveModel()->GetBulkModulus();
+        try {
+            for (auto &it : materials_) {
+                Matrix3<TFloat> stress;
+                TFloat energy;
+                it.second->GetConstitutiveModel()->CalcIsochoricPK2Stress(Matrix3<TFloat>::Identity(), stress);
+                it.second->GetConstitutiveModel()->CalcIsochoricEnergy(Matrix3<TFloat>::Identity(), energy);
+                it.second->GetConstitutiveModel()->GetBulkModulus();
+            }
+        } catch (const std::runtime_error &e) {
+            throw std::runtime_error("CBSolver::Init(): " + mixedType + " elements: " + e.what());
         }
     }
     
