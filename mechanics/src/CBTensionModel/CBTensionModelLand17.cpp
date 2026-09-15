@@ -266,6 +266,8 @@ TFloat CBTensionModelLand17::CaElphy(TFloat t) {
     // therefore, we use the centroid value as well in case of T10 and T10P1
     else if (e_->GetType() == "T10" || e_->GetType() == "T10P1")
         calcium = caiQP_[0];
+    else
+        throw std::runtime_error("CBTensionModelLand17::CaElphy: no calcium for element type [" + e_->GetType() + "].");
     return calcium;
 }
 
@@ -558,8 +560,6 @@ inline void CBTensionModelLand17::ReadExternalCai(std::string filename) {
 }
 
 CBStatus CBTensionModelLand17::SetActiveTensionAtQuadraturePoint(TInt indexQP, TFloat Cai) {
-    CBStatus rc = CBStatus::SUCCESS;
-    
     if (e_->GetType() == "T4") {
         if (indexQP == 0) {
             caiQP_[indexQP] = Cai;
@@ -573,8 +573,8 @@ CBStatus CBTensionModelLand17::SetActiveTensionAtQuadraturePoint(TInt indexQP, T
             throw std::runtime_error("CBTensionModelLand17::SetActiveTensionAtQuadraturePoint: try to access a not existing quadrature point for T10 elements.");
         }
     } else {
-        rc = CBStatus::FAILED;
+        throw std::runtime_error("CBTensionModelLand17::SetActiveTensionAtQuadraturePoint: no quadrature points for element type [" + e_->GetType() + "].");
     }
-    
-    return rc;
+
+    return CBStatus::SUCCESS;
 }

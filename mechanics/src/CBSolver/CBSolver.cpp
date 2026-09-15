@@ -19,6 +19,8 @@
 #include "CBRuntimeEstimator.h"
 #include "CBModelLoader.h"
 #include "CBModelLoaderTetgen.h"
+#include <algorithm>
+#include <cassert>
 #include <iostream>
 #include <fstream>
 
@@ -229,8 +231,15 @@ void CBSolver::Init(ParameterMap *parameters, CBModel *model) {
     LoadMesh();
 
     if (model_->GetNumberOfPressureNodes() > 0) {
-        if (!SupportsPressureField())
-            throw std::runtime_error("CBSolver::Init(): Solver [" + GetType() + "] does not support T10P1 elements");
+        if (!SupportsPressureField()) {
+            const auto &elements = model_->GetElements();
+            auto mixed = std::find_if(elements.begin(), elements.end(), [](CBElement *e) {
+                auto *solid = dynamic_cast<CBElementSolid *>(e);
+                return solid && solid->GetNumberOfPressureNodesIndices() > 0;
+            });
+            assert(mixed != elements.end());
+            throw std::runtime_error("CBSolver::Init(): Solver [" + GetType() + "] does not support " + (*mixed)->GetType() + " elements");
+        }
         // Evaluated once in the reference configuration, so that a material law without a mixed
         // formulation fails here rather than inside the first solve.
         for (auto &it : materials_) {
