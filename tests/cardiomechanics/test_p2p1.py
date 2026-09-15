@@ -288,7 +288,7 @@ DEFORM_RTOL, DEFORM_ATOL = 1e-4, 1e-8     # as for the benchmark goldens
 PRESSURE_RTOL = 1e-4                      # absolute tolerance scaled by the peak pressure
 
 
-def _assert_parallel_matches_serial(binary, cm_env, tmp_path, fixture):
+def _assert_parallel_matches_serial(binary, cm_env, tmp_path, fixture, element_type="T10P1"):
     """Run fixture serially and at NP ranks, assert the final shapes and pressures agree, return the
     serial vtu directory."""
     pytest.importorskip("meshio")
@@ -298,7 +298,7 @@ def _assert_parallel_matches_serial(binary, cm_env, tmp_path, fixture):
     for ranks in (None, NP):
         wd = tmp_path / f"np{ranks or 1}"
         wd.mkdir(parents=True)
-        proc, vtu_dirs[ranks] = _run(binary, cm_env, wd, ranks=ranks, fixture=fixture)
+        proc, vtu_dirs[ranks] = _run(binary, cm_env, wd, element_type=element_type, ranks=ranks, fixture=fixture)
         assert_no_petsc_error(proc.stdout + proc.stderr)
         points[ranks] = _final_points(vtu_dirs[ranks])
 

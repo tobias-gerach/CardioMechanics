@@ -6,7 +6,7 @@ import pytest
 
 from helpers.compare import read_vtu_points
 from helpers.run import assert_no_petsc_error, assert_refused
-from test_p2p1 import DYNAMIC_FIXTURE, DYNAMIC_STEPS, _last_vtu, _run
+from test_p2p1 import DYNAMIC_FIXTURE, DYNAMIC_STEPS, FIXTURE, _assert_parallel_matches_serial, _last_vtu, _run
 
 STEPS = 4       # StopTime / TimeStep of the static fixture, one export per step
 
@@ -58,6 +58,16 @@ def test_t4mini_static_run_converges_and_exports_pressure(binary, cm_env, tmp_pa
     assert deflection > 1e-2, f"cantilever barely moved: max displacement {deflection:.3e}"
     p = np.asarray(meshio.read(str(last)).point_data["Pressure"]).ravel()
     assert np.abs(p).max() > 0, "exported pressure is zero everywhere"
+
+
+@pytest.mark.mpi
+@pytest.mark.parametrize("fixture", [FIXTURE, DYNAMIC_FIXTURE], ids=["static", "generalized_alpha"])
+def test_t4mini_parallel_matches_serial(binary, cm_env, tmp_path, fixture):
+    """Every node carries a pressure, unlike on P2P1, so each rank's pressure block spans all its
+    nodes and a rank shifts its displacement unknowns by every node of the ranks before it. An
+    offset, or a translation of the node-wise mass and damping matrices, that counts only some
+    nodes as carrying a pressure departs from the serial run."""
+    _assert_parallel_matches_serial(binary, cm_env, tmp_path, fixture, element_type="T4MINI")
 
 
 @pytest.mark.parametrize("consistent_mass", ["true", "false"], ids=["consistent_mass", "lumped_mass"])
