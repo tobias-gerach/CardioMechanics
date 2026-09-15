@@ -283,6 +283,45 @@ TEST_P(ElementKernelMini, LocalSolveThatDoesNotConvergeIsCorruptElement) {
     EXPECT_EQ(kernel.Energy(x.data(), energy), CBStatus::CORRUPT_ELEMENT);
 }
 
+// Holzapfel with the hard fibre and sheet switch (k = 0) and the parameters of the EM01 example, near
+// the reference configuration, where every fibre sits at the switch. A fibre stretch of 1e-7 and the
+// bubble the vertex pressures drive keep the quadrature points within a difference step of it, as at
+// the onset of contraction, so the residual of the local solve has a kink next to its root, where
+// central differences average the slopes on either side.
+class MiniKernelAtHardSwitch : public testing::TestWithParam<int> {};
+
+TEST_P(MiniKernelAtHardSwitch, LocalSolveConverges) {
+    ParameterMap parameters;
+    for (const auto &[key, value] : {std::pair<std::string, double>{"a", 330}, {"b", 9.242}, {"af", 18535}, {"bf", 15.972},
+                                     {"as", 2564}, {"bs", 10.446}, {"afs", 417}, {"bfs", 11.602}, {"k", 0}, {"kappa", 1e6}})
+        parameters.Set("Materials.Mat_1.Holzapfel." + key, value);
+    CBConstitutiveModelHolzapfel law;
+    law.Init(&parameters, 1);
+
+    const Coords X      = ReferenceCoords();
+    const auto geometry = CalcReferenceGeometry<CBMiniBasis>(X.data(), GetParam() == 4 ? quadratureRule4 : quadratureRule14);
+    std::array<Matrix3<TFloat>, CBQuadratureRule::maxPoints> bases;
+    bases.fill(Matrix3<TFloat>::Identity());
+    CBNoTension noTension;
+    const CBCondensedKernel<MiniKernel, 3> kernel(geometry, bases.data(), law, noTension, 0.0);
+
+    const bool free[3 * CBLinearTetBasis::numNodes] = {};
+    for (TFloat stretch : {-1e-7, 0.0, 1e-7})
+        for (TFloat scale : {1e-9, 1e-7, 1e-5, 1e-3, 1e-1, 1e1, 1e3}) {
+            std::array<TFloat, decltype(kernel)::numUnknowns> x;
+            for (int a = 0; a < 4; a++) {
+                x[3 * a]     = (1 + stretch) * X[3 * a];
+                x[3 * a + 1] = X[3 * a + 1];
+                x[3 * a + 2] = X[3 * a + 2];
+                x[3 * CBLinearTetBasis::numNodes + a] = scale * (0.5 - 0.3 * a);
+            }
+            TFloat r[decltype(kernel)::numUnknowns];
+            EXPECT_EQ(kernel.Residual(x.data(), free, r), CBStatus::SUCCESS) << "fibre stretch " << stretch << ", pressure scale " << scale;
+        }
+}
+
+INSTANTIATE_TEST_SUITE_P(Rules, MiniKernelAtHardSwitch, testing::Values(4, 14));
+
 // On a straight-edged element the pressure mass matrix int N_a N_b dV is V (1 + delta_ab) / 20, and
 // both rules integrate it exactly.
 TEST_P(ElementKernelP2P1, PressureBlockIsPressureMassMatrix) {

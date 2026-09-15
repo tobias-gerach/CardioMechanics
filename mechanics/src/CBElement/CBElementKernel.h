@@ -654,13 +654,18 @@ public:
 private:
     // Convergence is judged by the Newton step, not by the internal rows: at rest the forces and the
     // internal rows are both rounding noise, so no tolerance relative to the forces can be met. Both
-    // constants are relative to the element size, so they hold in any length unit. The local tangent,
-    // a central difference of step localStep, is accurate to about 1e-10, so each iteration reduces
-    // the error by at least that factor, and the error left after a step below stepTolerance is at
-    // rounding level. The rounding floor of the step is 1e-16 times the magnitude of the coordinates,
-    // so stepTolerance stays attainable up to a million element sizes from the origin. Twenty
+    // constants are relative to the element size, so they hold in any length unit. The local tangent
+    // is a central difference of step localStep. A law with a hard switch, such as Holzapfel's fibre
+    // term with k = 0 or a tension clipped at zero, has a kink there, and at the onset of contraction
+    // the root lies next to it. A difference straddling the kink averages the slopes on either side,
+    // and the iteration then converges only linearly, at rates that can approach one. The step is
+    // therefore small, so that it straddles a kink only once the iterate is within 1e-8 element sizes
+    // of it, where little is left to converge. Its rounding error relative to the tangent is 1e-8
+    // times the distance from the origin in element sizes, so each iteration still reduces the error
+    // a hundredfold a million element sizes from the origin. The rounding floor of the step is 1e-16
+    // times the magnitude of the coordinates, so stepTolerance stays attainable there too. Twenty
     // iterations are ample from zero; a solve that has not converged by then is diverging.
-    static constexpr TFloat localStep = 1e-6;
+    static constexpr TFloat localStep = 1e-8;
     static constexpr TFloat stepTolerance = 1e-10;
     static constexpr int maxIterations = 20;
 
