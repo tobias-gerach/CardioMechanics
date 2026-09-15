@@ -295,7 +295,8 @@ def _assert_parallel_matches_serial(binary, cm_env, tmp_path, fixture):
     for ranks in (None, NP):
         wd = tmp_path / f"np{ranks or 1}"
         wd.mkdir(parents=True)
-        _, vtu_dirs[ranks] = _run(binary, cm_env, wd, ranks=ranks, fixture=fixture)
+        proc, vtu_dirs[ranks] = _run(binary, cm_env, wd, ranks=ranks, fixture=fixture)
+        assert_no_petsc_error(proc.stdout + proc.stderr)
         points[ranks] = _final_points(vtu_dirs[ranks])
 
     (pid, serial), (pid_parallel, parallel) = points[None], points[NP]

@@ -290,17 +290,8 @@ void CBSolverGeneralizedAlpha::InitDampingMatrix() {
     if ((globalRayleighAlpha_ != 0) || (globalRayleighBeta_ != 0)) {
         // Calculate nodes forces jacobian and initialize the damping matrix
         
-        if (DCCtrl::IsParallel()) {
-            MatCreateAIJ(
-                         DCPetsc::Comm(), 3 * numLocalNodes_, 3 * numLocalNodes_, PETSC_DETERMINE, PETSC_DETERMINE, 0,
-                         model_->GetNodeNeighborsForNnz().data() + localNodesFrom_*3, 0,
-                         model_->GetNodeNeighborsForNnz().data() + localNodesFrom_*3, &dampingMatrix_);
-            MatSetLocalToGlobalMapping(dampingMatrix_, NodesComponentsMapping(), NodesComponentsMapping());
-        } else {
-            MatCreateSeqAIJ(DCPetsc::Comm(), 3 * Base::numNodes_, 3 * Base::numNodes_, 0,
-                            model_->GetNodeNeighborsForNnz().data(), &dampingMatrix_);
-            MatSetLocalToGlobalMapping(dampingMatrix_, NodesComponentsMapping(), NodesComponentsMapping());
-        }
+        dampingMatrix_ = CreatePreallocatedMatrix(3 * numLocalNodes_, model_->GetNodeNeighborsForNnz().data() + localNodesFrom_*3);
+        MatSetLocalToGlobalMapping(dampingMatrix_, NodesComponentsMapping(), NodesComponentsMapping());
         
         UpdateGhostNodesAndLinkToAdapter();
         
@@ -637,17 +628,8 @@ CBStatus CBSolverGeneralizedAlpha::CalcDampingMatrix() {
 }  // CBSolverGeneralizedAlpha::CalcDampingMatrix
 
 void CBSolverGeneralizedAlpha::InitMassMatrixLumped() {
-    if (DCCtrl::IsParallel()) {
-        MatCreateAIJ(
-                     DCPetsc::Comm(), 3 * Base::numLocalNodes_, 3 * Base::numLocalNodes_, PETSC_DETERMINE, PETSC_DETERMINE, 0,
-                     model_->GetNodeNeighborsForNnz().data() + localNodesFrom_*3, 0,
-                     model_->GetNodeNeighborsForNnz().data() + localNodesFrom_*3, &massMatrix_);
-        MatSetLocalToGlobalMapping(massMatrix_, NodesComponentsMapping(), NodesComponentsMapping());
-    } else {
-        MatCreateSeqAIJ(DCPetsc::Comm(), 3 * Base::numNodes_, 3 * Base::numNodes_, 0,
-                        model_->GetNodeNeighborsForNnz().data(), &massMatrix_);
-        MatSetLocalToGlobalMapping(massMatrix_, NodesComponentsMapping(), NodesComponentsMapping());
-    }
+    massMatrix_ = CreatePreallocatedMatrix(3 * numLocalNodes_, model_->GetNodeNeighborsForNnz().data() + localNodesFrom_*3);
+    MatSetLocalToGlobalMapping(massMatrix_, NodesComponentsMapping(), NodesComponentsMapping());
     
     Base::adapter_->LinkMassMatrix(massMatrix_);
     
@@ -677,17 +659,8 @@ void CBSolverGeneralizedAlpha::InitMassMatrixLumped() {
 }  // CBSolverGeneralizedAlpha::InitMassMatrixLumped
 
 void CBSolverGeneralizedAlpha::InitMassMatrixConsistent() {
-    if (DCCtrl::IsParallel()) {
-        MatCreateAIJ(
-                     DCPetsc::Comm(), 3 * Base::numLocalNodes_, 3 * Base::numLocalNodes_, PETSC_DETERMINE, PETSC_DETERMINE, 0,
-                     model_->GetNodeNeighborsForNnz().data() + localNodesFrom_*3, 0,
-                     model_->GetNodeNeighborsForNnz().data() + localNodesFrom_*3, &massMatrix_);
-        MatSetLocalToGlobalMapping(massMatrix_, NodesComponentsMapping(), NodesComponentsMapping());
-    } else {
-        MatCreateSeqAIJ(DCPetsc::Comm(), 3 * Base::numNodes_, 3 * Base::numNodes_, 0,
-                        model_->GetNodeNeighborsForNnz().data(), &massMatrix_);
-        MatSetLocalToGlobalMapping(massMatrix_, NodesComponentsMapping(), NodesComponentsMapping());
-    }
+    massMatrix_ = CreatePreallocatedMatrix(3 * numLocalNodes_, model_->GetNodeNeighborsForNnz().data() + localNodesFrom_*3);
+    MatSetLocalToGlobalMapping(massMatrix_, NodesComponentsMapping(), NodesComponentsMapping());
     
     Base::adapter_->LinkMassMatrix(massMatrix_);
     
