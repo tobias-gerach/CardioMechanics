@@ -200,12 +200,6 @@ void CBSolverEquilibrium::InitPETScSolver() {
     SNESGetKSP(snes_, &ksp_);
     KSPGetPC(ksp_, &pc_);
     
-    if (Base::parameters_->Get<bool>("Solver.LU", true)) {
-        PCSetType(pc_, PCLU);
-        KSPSetType(ksp_, "preonly");
-    }
-    
-    PCFactorSetMatSolverType(pc_, "mumps");
     // Backtracking shortens the Newton step until the residual norm drops enough. On a bending,
     // nearly incompressible body the full step can raise the norm by orders of magnitude although
     // the next step converges quadratically, so backtracking creeps at steps of a few percent until
@@ -215,9 +209,7 @@ void CBSolverEquilibrium::InitPETScSolver() {
     SNESLineSearch lineSearch;
     SNESGetLineSearch(snes_, &lineSearch);
     SNESLineSearchSetType(lineSearch, SNESLINESEARCHSECANT);
-    SNESSetFromOptions(snes_);
-    KSPSetFromOptions(ksp_);
-    PCSetFromOptions(pc_);
+    Base::InitLinearSolver(snes_, "mumps");
 }
 
 void CBSolverEquilibrium::InitVectors() {
