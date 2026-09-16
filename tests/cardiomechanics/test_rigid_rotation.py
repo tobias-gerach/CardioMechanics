@@ -12,8 +12,8 @@ should use C, or linearised kinematics. Either error is of the order of the rota
 leaves no component of the motion trivially zero, and the centre makes it a rotation plus a
 translation.
 
-Holzapfel and Guccione run with their fibre, sheet and sheet-normal directions along the box axes;
-under C = I every fibre invariant sits at its stress-free value whatever the basis.
+The body runs under NeoHooke. Holzapfel and Guccione are checked at the constitutive-law level, by
+the GoogleTests of mechanics/tests/ConstitutiveModelTest.cpp, which do not cover large rotations.
 """
 import re
 from pathlib import Path
@@ -23,15 +23,14 @@ import pytest
 
 from helpers.box import write_box
 from helpers.compare import read_vtu_cell_field, read_vtu_point_field, read_vtu_points
-from helpers.materials import LAWS, material_block
 from helpers.run import run_binary
 
 FIXTURE = Path(__file__).parent / "fixtures" / "rigid_rotation_box.xml"
 STOP_TIME = float(re.search(r"<StopTime>(.*?)</StopTime>", FIXTURE.read_text()).group(1))
+# Nearly incompressible, where the kappa term is stiffest and a spurious volume change costs most.
+KAPPA = float(re.search(r"<k>(.*?)</k>", FIXTURE.read_text()).group(1))
 STEPS = 4                                  # StopTime / TimeStep of the fixture, one export per step
 ELEMENTS = ("T4", "T10", "T10P1")
-# Nearly incompressible, where the kappa term is stiffest and a spurious volume change costs most.
-KAPPA = 1000
 ANGLE = np.pi / 2                          # at the stop time
 AXIS = np.array([1, 2, 3]) / np.sqrt(14)
 CENTRE = np.full(3, 0.5)
@@ -41,11 +40,10 @@ CENTRE = np.full(3, 0.5)
 POSITION_TOL = 1e-6
 # Strain, stress and pressure are written in double precision, so only the solver Precision of
 # 1e-12 on the residual limits them. The strain carries the stopping error of the iteration, observed
-# at most 7e-12. A rotation handled as anything but rigid would give a strain of order 1e-1 or more.
+# at most 1.7e-13. A rotation handled as anything but rigid would give a strain of order 1e-1 or more.
 STRAIN_TOL = 1e-10
 # The bulk modulus turns a volumetric strain error into a stress and pressure error KAPPA times as
-# large. Observed at most 3.3e-10 in the stress, under Guccione's stiff fibre exponent, and 1.5e-11
-# in the pressure.
+# large. Observed at most 2.7e-12 in the stress and 3.9e-13 in the pressure.
 STRESS_TOL = PRESSURE_TOL = KAPPA * STRAIN_TOL
 
 
@@ -72,30 +70,26 @@ def write_rotation(directory, driven):
             f.write(f"{k / STEPS * STOP_TIME} {dat}\n")
 
 
-@pytest.fixture(scope="module", params=[(e, law) for e in ELEMENTS for law in LAWS], ids="-".join)
+@pytest.fixture(scope="module", params=ELEMENTS)
 def solution(request, binary, cm_env, tmp_path_factory):
-    """Run the box under one element type and law. Returns (label, fields), where fields[k] holds
-    the exported PointID, points, CellID, strain, stress and pressure (or None) of step k."""
+    """Run the box under one element type. Returns (label, fields), where fields[k] holds the
+    exported PointID, points, CellID, strain, stress and pressure (or None) of step k."""
     pytest.importorskip("meshio")
-    element_type, law = request.param
-    label = f"{element_type} {law}"
-    wd = tmp_path_factory.mktemp(f"{element_type}_{law}")
+    label = element_type = request.param
+    wd = tmp_path_factory.mktemp(element_type)
     tetgen = wd / "tetgen"
     tetgen.mkdir()
     (wd / "Results").mkdir()
-    write_box(tetgen, quadratic=element_type != "T4", basis=np.eye(3), symmetry_planes=False)
+    write_box(tetgen, quadratic=element_type != "T4", symmetry_planes=False)
     # Rows of index, x, y, z and fixation. The jitter keeps every face node within its face, so the
     # nodes of the face x_0 = 0 have x written as exactly 0.
     nodes = np.loadtxt(tetgen / "box.node", skiprows=1)
     write_rotation(tetgen, nodes[nodes[:, 1] == 0, :4])
 
-    text, n = re.subn(r"<NeoHooke>.*?</NeoHooke>", material_block(law, KAPPA), FIXTURE.read_text(), flags=re.DOTALL)
-    assert n == 1, f"{FIXTURE.name}: cannot substitute the NeoHooke parameters"
-    for old, new in [("<Type>T10P1</Type>", f"<Type>{element_type}</Type>"),
-                     ("<Type>NeoHooke</Type>", f"<Type>{law}</Type>")]:
-        assert text.count(old) == 1, f"{FIXTURE.name}: cannot substitute {old}"
-        text = text.replace(old, new)
-    (wd / FIXTURE.name).write_text(text)
+    text = FIXTURE.read_text()
+    old = "<Type>T10P1</Type>"
+    assert text.count(old) == 1, f"{FIXTURE.name}: cannot substitute {old}"
+    (wd / FIXTURE.name).write_text(text.replace(old, f"<Type>{element_type}</Type>"))
     proc = run_binary(binary("CardioMechanics"), ["-settings", FIXTURE.name], cwd=wd, env=cm_env, timeout=600)
     assert "SIMULATION FAILED" not in proc.stdout, proc.stdout[-2000:]
 

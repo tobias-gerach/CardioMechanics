@@ -14,7 +14,6 @@
         <Unit>1</Unit>
         <Nodes>./tetgen/box.node</Nodes>
         <Elements>./tetgen/box.ele</Elements>
-        <Bases>./tetgen/box.bases</Bases>
     </Tetgen>
 </Mesh>
 
