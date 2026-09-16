@@ -218,7 +218,9 @@
     <DomainDecomposition>false</DomainDecomposition>
     <Precision>1e-6</Precision>
     <Verbose>true</Verbose>
-    <LU>true</LU>
+    <LinearSolver>
+        <Preset>direct-superlu</Preset>
+    </LinearSolver>
     <Type>NewmarkBeta</Type>
     <NewmarkBeta>
         <!-- Dissipation of higher frequencies for Gamma >= 0.5 -->
@@ -226,7 +228,6 @@
         <Beta>0.3</Beta>
         <Gamma>0.6</Gamma>
         <ConsistentMassMatrix>true</ConsistentMassMatrix>
-        <Type>superlu</Type>
     </NewmarkBeta>
     <Formulation>TotalLagrangian</Formulation>
     <StartTime>0</StartTime>

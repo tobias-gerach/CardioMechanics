@@ -68,7 +68,6 @@
     <DomainDecomposition>false</DomainDecomposition>
     <Precision>1e-8</Precision>
     <Verbose>true</Verbose>
-    <LU>true</LU>
 
     <Type>NewmarkBeta</Type>
     <NewmarkBeta>

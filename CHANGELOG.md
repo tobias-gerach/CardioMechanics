@@ -22,14 +22,19 @@
 - The pressure of mixed elements is exported as the point field `Pressure`.
 - `Mesh.QuadratureDegree` selects the 4-point (`2`, the default) or 14-point (`5`) rule for T10, T10P1 and T4MINI elements.
 - Manual sections covering mixed elements (supported combinations, the path from a T4 mesh, the pressure output), the generalized-alpha solver, and their formulations in "Mathematical Model".
+- `Solver.LinearSolver` chooses the linear solver of the mechanics Newton iterations: `Preset` names a compiled-in set of PETSc options (`direct`, the default, is `preonly` with MUMPS LU; `direct-superlu` uses SuperLU, `superlu_dist` in parallel) and `Options` adds PETSc options. Command-line options override `Options`, which override the preset. With `T10P1` or `T4MINI` elements, a preconditioner other than `lu` or `fieldsplit` is refused at setup.
 
 ### Changed
+- The `Static`, `NewmarkBeta` and `GeneralizedAlpha` solvers read PETSc options under the prefix `mech_`, so options for them cannot change the acCELLerate solve of a coupled run. Unprefixed `-ksp_*`, `-pc_*` and `-snes_*` options no longer affect these solvers; use `-mech_ksp_*` and so on. `Solver.LinearSolver.Options` accepts only prefixed options.
 - Land17 raises an error naming the element type for element types it does not know, instead of returning zero calcium.
 - The manual marks the `Mesh.Transform` tags as not implemented; they never had an effect.
 - The manual documents the optional surface-file argument of `ConvertT4toT10`.
 - Corrected the statement in the manual that two solver classes are available, which no longer held once `ActiveStressEstimator` was added.
 - `docs/BUILD.md` and the CI PETSc image now recommend and use OpenBLAS (`--download-openblas`) instead of reference BLAS. Results are unaffected; the inverse problem is roughly 7x faster, pure mechanics roughly 2x, and EP-dominated runs largely unchanged.
 - `tools/python/VTK2tetgen.py` rewritten to be Python 3 compatible and importable: the CLI and conversion moved into `main()` under a `__main__` guard and the `vtk` import is deferred, so the geometry helpers can be imported without VTK. Mesh output is unchanged; `.bases` differs only in whitespace between the row index and the values.
+
+### Deleted
+- `Solver.LU`, `Solver.NewmarkBeta.Type` and `Solver.GeneralizedAlpha.Type`. They raise an error naming `Solver.LinearSolver.Preset`; `Type` `superlu` becomes the preset `direct-superlu`.
 
 ### Fixed
 - The isochoric/volumetric split of NeoHooke and Holzapfel had no effect: integer division made the exponents of `J^(-2/3)` and `I3^(-1/3)` zero. The split now applies, which changes results of both laws wherever `J != 1`.

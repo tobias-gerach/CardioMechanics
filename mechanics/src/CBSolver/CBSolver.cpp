@@ -19,6 +19,7 @@
 #include "CBRuntimeEstimator.h"
 #include "CBModelLoader.h"
 #include "CBModelLoaderTetgen.h"
+#include "CBLinearSolverOptions.h"
 #include <algorithm>
 #include <cassert>
 #include <iostream>
@@ -1708,28 +1709,31 @@ Mat CBSolver::CreatePreallocatedMatrix(PetscInt numLocalRows, const PetscInt *nn
     return matrix;
 }
 
-void CBSolver::InitLinearSolver(SNES snes, const std::string &factorSolverType) {
+void CBSolver::InitLinearSolver(SNES snes) {
+    RejectRemovedLinearSolverKeys(*parameters_);
+    const std::string preset = parameters_->Get<std::string>("Solver.LinearSolver.Preset", "direct");
+    InsertLinearSolverOptions(nullptr, LinearSolverPresetOptions(preset, DCCtrl::IsParallel()),
+                              parameters_->Get<std::string>("Solver.LinearSolver.Options", ""));
+    
     KSP ksp;
     PC  pc;
     SNESGetKSP(snes, &ksp);
     KSPGetPC(ksp, &pc);
-    
-    if (parameters_->Get<bool>("Solver.LU", true)) {
-        PCSetType(pc, PCLU);
-        KSPSetType(ksp, KSPPREONLY);
-    }
-    
-    if (factorSolverType == "mumps")
-        PCFactorSetMatSolverType(pc, MATSOLVERMUMPS);
-    else if (factorSolverType == "superlu")
-        PCFactorSetMatSolverType(pc, DCCtrl::IsParallel() ? MATSOLVERSUPERLU_DIST : MATSOLVERSUPERLU);
-    else
-        throw std::runtime_error("CBSolver::InitLinearSolver(): unknown solver type " + factorSolverType +
-                                 ". Choose either mumps or superlu.");
-    
+    SNESSetOptionsPrefix(snes, "mech_");
     SNESSetFromOptions(snes);
     KSPSetFromOptions(ksp);
     PCSetFromOptions(pc);
+    
+    // A pressure field makes the system an indefinite saddle-point problem. Preconditioners other than LU or a
+    // field split do not converge on it, so they are refused before the first solve.
+    PetscBool supported;
+    PetscObjectTypeCompareAny((PetscObject)pc, &supported, PCLU, PCFIELDSPLIT, "");
+    if (model_->GetNumberOfPressureNodes() > 0 && !supported) {
+        PCType type;
+        PCGetType(pc, &type);
+        throw std::runtime_error(std::string("CBSolver::InitLinearSolver(): preconditioner ") + type +
+                                 " is not supported with a pressure field; use lu or fieldsplit");
+    }
 }
 
 void CBSolver::CreateNodesJacobianAndLinkToAdapter() {

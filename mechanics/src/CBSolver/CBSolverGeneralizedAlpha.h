@@ -122,7 +122,6 @@ private:
     bool        isInitDampingParametersDone_;
     bool        isInitMassMatrixDone_;
     bool        updateJacobian_ = true;
-    std::string solverType_ = "mumps";
     
     PetscInt    snesIts_ = 0;
 }; // class CBSolverGeneralizedAlpha
