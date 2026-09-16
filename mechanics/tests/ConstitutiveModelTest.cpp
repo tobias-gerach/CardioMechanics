@@ -1,3 +1,4 @@
+#include <array>
 #include <cmath>
 #include <ostream>
 #include <string>
@@ -29,21 +30,23 @@ TFloat EnergyAtGreenStrain(CBConstitutiveModel &law, const Matrix3<TFloat> &E) {
 
 }  // namespace
 
-// The strain energy functions of Holzapfel (exponential isotropic, fibre and sheet terms behind a
-// logistic switch in I4, kappa/4 (J^2 - 1 - 2 ln J)) and Guccione (C/2 (exp(Q) - 1) in the isochoric
-// Green strain, K/2 (J - 1)^2), evaluated independently of the code at diagonal stretches along
-// fibre, sheet and sheet normal by tools/python/verification/holzapfel_guccione_energy.py, which
-// prints these values. Holzapfel's fibre is stretched in the first case and compressed in the other
-// two, its sheet compressed in the first and third, so each switch is evaluated below and above I4 = 1.
+// The strain energy functions of Holzapfel (exponential isotropic and fibre-sheet terms, fibre and
+// sheet terms behind a logistic switch in I4, kappa/4 (J^2 - 1 - 2 ln J)) and Guccione
+// (C/2 (exp(Q) - 1) in the isochoric Green strain, K/2 (J - 1)^2), evaluated independently of the
+// code by tools/python/verification/holzapfel_guccione_energy.py, which prints these values. In the
+// diagonal deformations Holzapfel's fibre is stretched in the first and compressed in the other two,
+// its sheet compressed in the first and third, so each switch is evaluated below and above I4 = 1.
+// The last deformation shears every pair of axes, so every coupling term contributes.
 struct EnergyReference {
-    std::string law;
-    TFloat      stretches[3];
-    TFloat      energy;
+    std::string           law;
+    std::array<TFloat, 9> F;  // row by row
+    TFloat                energy;
 };
 
 void PrintTo(const EnergyReference &reference, std::ostream *os) {
-    *os << reference.law << " at stretches (" << reference.stretches[0] << ", " << reference.stretches[1] << ", "
-        << reference.stretches[2] << ")";
+    *os << reference.law << " at F = (";
+    for (int i = 0; i < 9; ++i)
+        *os << reference.F[i] << (i < 8 ? ", " : ")");
 }
 
 class LawEnergy : public testing::TestWithParam<EnergyReference> {};
@@ -52,19 +55,25 @@ TEST_P(LawEnergy, MatchesStrainEnergyFunction) {
     const EnergyReference &reference = GetParam();
     ParameterMap parameters;
     const auto law = MakeLaw(reference.law, parameters);
-    const Matrix3<TFloat> F(reference.stretches[0], 0, 0, 0, reference.stretches[1], 0, 0, 0, reference.stretches[2]);
-    TFloat energy = NAN;
-    ASSERT_EQ(law->CalcEnergy(F, energy), CBStatus::SUCCESS);
+    TFloat energy  = NAN;
+    ASSERT_EQ(law->CalcEnergy(Matrix3<TFloat>(reference.F.data()), energy), CBStatus::SUCCESS);
     EXPECT_NEAR(energy, reference.energy, 1e-12);
 }
 
+const std::array<TFloat, 9> stretchedFibre{1.12, 0, 0, 0, 0.93, 0, 0, 0, 0.97};
+const std::array<TFloat, 9> stretchedSheet{0.90, 0, 0, 0, 1.08, 0, 0, 0, 1.02};
+const std::array<TFloat, 9> compressed{0.95, 0, 0, 0, 0.97, 0, 0, 0, 1.10};
+const std::array<TFloat, 9> sheared{1.05, 0.12, 0.04, 0.03, 0.96, 0.08, -0.05, 0.06, 1.02};
+
 INSTANTIATE_TEST_SUITE_P(Reference, LawEnergy,
-                         testing::Values(EnergyReference{"Holzapfel", {1.12, 0.93, 0.97}, 0.052497307836820294},
-                                         EnergyReference{"Holzapfel", {0.90, 1.08, 1.02}, 0.026024680701041816},
-                                         EnergyReference{"Holzapfel", {0.95, 0.97, 1.10}, 0.015679866120770346},
-                                         EnergyReference{"Guccione", {1.12, 0.93, 0.97}, 0.071628040076660987},
-                                         EnergyReference{"Guccione", {0.90, 1.08, 1.02}, 0.044595977761871061},
-                                         EnergyReference{"Guccione", {0.95, 0.97, 1.10}, 0.023640652394328176}),
+                         testing::Values(EnergyReference{"Holzapfel", stretchedFibre, 0.052497307836820294},
+                                         EnergyReference{"Holzapfel", stretchedSheet, 0.026024680701041816},
+                                         EnergyReference{"Holzapfel", compressed, 0.015679866120770325},
+                                         EnergyReference{"Holzapfel", sheared, 0.03656478222504627},
+                                         EnergyReference{"Guccione", stretchedFibre, 0.071628040076660987},
+                                         EnergyReference{"Guccione", stretchedSheet, 0.044595977761871061},
+                                         EnergyReference{"Guccione", compressed, 0.023640652394328145},
+                                         EnergyReference{"Guccione", sheared, 0.046267635831757067}),
                          [](const testing::TestParamInfo<EnergyReference> &info) {
                              return info.param.law + std::to_string(info.index);
                          });
