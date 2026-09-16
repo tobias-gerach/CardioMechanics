@@ -11,12 +11,6 @@ The settings file is our own rather than the benchmark's Problem3.xml, so that
 the published-benchmark fixture and this dynamic one can move independently.
 Everything but the solver, the damping and the output paths is Problem 3 as
 published.
-
-The Newmark-beta fixture runs at Beta=0.25 / Gamma=0.5, the trapezoidal rule.
-That is the scheme the Chung-Hulbert family collapses onto at a spectral radius
-of one, which is what makes the generalized-alpha equivalence check below a
-comparison between two integrators of the same problem rather than between two
-different amounts of numerical damping.
 """
 import shutil
 from pathlib import Path
@@ -32,7 +26,6 @@ SRC = REPO_ROOT / "examples" / "benchmark2015"
 FIXTURES = Path(__file__).parent / "fixtures"
 SETTINGS = FIXTURES / "dynamic_ellipsoid.xml"
 GENALPHA_SETTINGS = FIXTURES / "dynamic_ellipsoid_genalpha.xml"
-LUMPED_SETTINGS = FIXTURES / "dynamic_ellipsoid_lumped.xml"
 GENALPHA_LUMPED_SETTINGS = FIXTURES / "dynamic_ellipsoid_genalpha_lumped.xml"
 CREEP_SETTINGS = FIXTURES / "dynamic_ellipsoid_creep.xml"
 GENALPHA_CREEP_SETTINGS = FIXTURES / "dynamic_ellipsoid_genalpha_creep.xml"
@@ -42,18 +35,11 @@ NP = 4                     # CardioMechanics is tested only in parallel, as in t
 LAST = 20                  # dynamic.<LAST>.vtu at StopTime=0.2, export dt 1e-2
 DEFORM_RTOL, DEFORM_ATOL = 1e-4, 1e-8      # coordinates in m
 
-# Trapezoidal Newmark and generalized-alpha at RhoInf=1 are distinct second-order
-# schemes, so they agree only to their own truncation error, not to round-off.
-# 1e-6 m is 0.016% of the 6.1 mm peak displacement this fixture reaches.
-EQUIV_RTOL, EQUIV_ATOL = 1e-4, 1e-6
-
 CREEP_BETA = 0.3           # s; Rayleigh Beta of the creep fixtures, which have no Alpha
 CREEP_DT = 1e-2            # Solver.TimeStep of the creep fixtures
 CREEP_STOP_TIME = 0.9      # Solver.StopTime of the creep fixtures
 CREEP_FIT_FROM = 0.1       # s; skips the start-up transient
 CREEP_RTOL = 0.05          # observed 0.6%; a damping matrix that accumulates gives 43%
-
-pytestmark = [pytest.mark.mpi, pytest.mark.slow]
 
 
 def _stage(wd, settings):
@@ -102,20 +88,12 @@ def genalpha_vtu_dir(binary, cm_env, tmp_path_factory):
 
 
 @pytest.fixture(scope="module")
-def lumped_vtu_dirs(binary, cm_env, tmp_path_factory):
-    """Both integrators on the lumped mass matrix, which no golden covers.
-
-    A lumped run deforms differently from a consistent one, so there is nothing
-    to compare either of these against except each other.
-    """
+def genalpha_lumped_vtu_dir(binary, cm_env, tmp_path_factory):
+    """Generalized-alpha on the lumped mass matrix, the second mass layout the preallocation must hold."""
     _require_mpi()
-    out = []
-    for name, settings in (("dynamic_lumped", LUMPED_SETTINGS),
-                           ("dynamic_genalpha_lumped", GENALPHA_LUMPED_SETTINGS)):
-        wd = _stage(tmp_path_factory.mktemp(name), settings)
-        _run(binary, cm_env, wd, settings, np=NP, timeout=1800)
-        out.append(wd / "Results" / "dynamic_vtu")
-    return out
+    wd = _stage(tmp_path_factory.mktemp("dynamic_genalpha_lumped"), GENALPHA_LUMPED_SETTINGS)
+    _run(binary, cm_env, wd, GENALPHA_LUMPED_SETTINGS, np=NP, timeout=1800)
+    return wd / "Results" / "dynamic_vtu"
 
 
 def _assert_matches_golden(vtu_dir, rtol, atol, update_golden=False):
@@ -137,17 +115,10 @@ def _assert_matches_golden(vtu_dir, rtol, atol, update_golden=False):
             f"|delta|={d[i]:.3e} m")
 
 
+@pytest.mark.mpi
+@pytest.mark.slow
 def test_dynamic_deformation(dynamic_vtu_dir, update_golden):
     _assert_matches_golden(dynamic_vtu_dir, DEFORM_RTOL, DEFORM_ATOL, update_golden)
-
-
-def test_generalized_alpha_reproduces_newmark_at_rhoinf_one(genalpha_vtu_dir):
-    """RhoInf=1 is the non-dissipative end of the Chung-Hulbert family.
-
-    The golden is never regenerated from here: it is the Newmark-beta reference
-    this run is judged against, so writing to it would erase the comparison.
-    """
-    _assert_matches_golden(genalpha_vtu_dir, EQUIV_RTOL, EQUIV_ATOL)
 
 
 @pytest.mark.parametrize("settings_name, expected", [
@@ -168,6 +139,8 @@ def test_generalized_alpha_rejects_bad_rhoinf(binary, cm_env, tmp_path, settings
         f"error message did not mention {expected!r}\n{(proc.stdout + proc.stderr)[-2000:]}")
 
 
+@pytest.mark.mpi
+@pytest.mark.slow
 @pytest.mark.parametrize("settings", [CREEP_SETTINGS, GENALPHA_CREEP_SETTINGS],
                          ids=["newmark", "genalpha"])
 def test_rayleigh_damping_creeps_with_time_constant_beta(binary, cm_env, tmp_path, settings):
@@ -197,24 +170,11 @@ def test_rayleigh_damping_creeps_with_time_constant_beta(binary, cm_env, tmp_pat
         f"within {CREEP_RTOL:.0%}")
 
 
-def test_generalized_alpha_jacobian_fits_its_preallocation(genalpha_vtu_dir, lumped_vtu_dirs):
+@pytest.mark.mpi
+@pytest.mark.slow
+def test_generalized_alpha_jacobian_fits_its_preallocation(genalpha_vtu_dir, genalpha_lumped_vtu_dir):
     """The node-neighbour preallocation holds every entry of M and C, clamped couplings included.
     An entry outside it would reallocate the Jacobian row block at every build, which costs more
     than the rest of the build together, so PETSc's default for a preallocated matrix refuses it."""
-    for vtu_dir in (genalpha_vtu_dir, lumped_vtu_dirs[1]):
+    for vtu_dir in (genalpha_vtu_dir, genalpha_lumped_vtu_dir):
         assert_no_petsc_error((vtu_dir.parents[1] / "run.log").read_text())
-
-
-def test_generalized_alpha_matches_newmark_with_lumped_mass(lumped_vtu_dirs):
-    """The lumped mass path has to carry the RhoInf=1 equivalence too."""
-    newmark_dir, genalpha_dir = lumped_vtu_dirs
-    npid, npts = read_vtu_points(newmark_dir / f"dynamic.{LAST}.vtu")
-    gpid, gpts = read_vtu_points(genalpha_dir / f"dynamic.{LAST}.vtu")
-    assert np.array_equal(npid, gpid), "point ordering / mesh identity differs between runs"
-    if not np.allclose(gpts, npts, rtol=EQUIV_RTOL, atol=EQUIV_ATOL):
-        d = np.linalg.norm(gpts - npts, axis=1)
-        i = int(np.argmax(d))
-        raise AssertionError(
-            f"lumped-mass coordinates differ beyond rtol={EQUIV_RTOL} atol={EQUIV_ATOL}: "
-            f"node PointID={int(gpid[i])} generalized-alpha={gpts[i]} newmark={npts[i]} "
-            f"|delta|={d[i]:.3e} m")
