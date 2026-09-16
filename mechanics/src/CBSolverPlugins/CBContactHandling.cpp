@@ -169,16 +169,8 @@ void CBContactHandling::Init() {
             slaveElementsSurfaceIndices_.push_back(it->GetSurfaceIndex());
         }
         
-        std::vector<TInt> tmp(9*slaveElements_.size());
-        for (int i = 0; i < 3*slaveElements_.size(); i++) {
-            tmp[3*i]   = 3*indices[i];
-            tmp[3*i+1] = 3*indices[i]+1;
-            tmp[3*i+2] = 3*indices[i]+2;
-        }
-        adapter_->ApplyLocalToGlobalMapping(&tmp[0], 9*slaveElements_.size());
-        
         for (int i = 0; i < 3*slaveElements_.size(); i++)
-            slaveElementsNodesIndicesGlobal_.push_back(tmp[3*i] / 3);
+            slaveElementsNodesIndicesGlobal_.push_back(adapter_->GlobalNodeIndex(indices[i]));
         
         
         DCPetsc::GatherToZero(slaveElementsNodesIndicesGlobal_);
@@ -385,7 +377,6 @@ void CBContactHandling::ApplyToNodalForces() {
     for (int i = 0; i < masterElements_.size(); i++) {
         auto e = masterElements_.at(i);
         
-        TInt pos[18];
         bool bc[18]            = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
         TFloat nodalForces[18] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
         TFloat distances[3]    = {0, 0, 0};
@@ -414,20 +405,13 @@ void CBContactHandling::ApplyToNodalForces() {
             masterContactForces_.at(i)    += Vector3<TFloat>(nodalForces[3*j], nodalForces[3*j+1], nodalForces[3*j+2]);
             masterContactDistances_.at(i) += Vector3<TFloat>(distances[0], distances[1], distances[2]);
             
-            for (int k = 0; k < 3; k++) {
-                pos[3*k]   = 3.0 * e->GetNodeIndex(k);
-                pos[3*k+1] = 3.0 * e->GetNodeIndex(k) + 1;
-                pos[3*k+2] = 3.0 * e->GetNodeIndex(k) + 2;
-            }
-            adapter_->ApplyLocalToGlobalMapping(pos, 9);
+            TInt nodes[6];
+            for (int k = 0; k < 3; k++)
+                nodes[k] = adapter_->GlobalNodeIndex(e->GetNodeIndex(k));
+            for (int k = 3; k < 6; k++)
+                nodes[k] = slaveElementsNodesIndicesGlobal_.at(3*slave+(k-3));
             
-            for (int k = 3; k < 6; k++) {
-                pos[3*k]   = 3 * slaveElementsNodesIndicesGlobal_.at(3*slave+(k-3));
-                pos[3*k+1] = 3 * slaveElementsNodesIndicesGlobal_.at(3*slave+(k-3)) + 1;
-                pos[3*k+2] = 3 * slaveElementsNodesIndicesGlobal_.at(3*slave+(k-3)) + 2;
-            }
-            
-            GetAdapter()->GetNodesComponentsBoundaryConditionsGlobal(18, pos, bc);
+            GetAdapter()->GetNodesComponentsBoundaryConditionsForGlobalNodes(6, nodes, bc);
             
             for (int k = 0; k < 6; k++) {
                 if (bc[3*k] != 0)
@@ -438,7 +422,7 @@ void CBContactHandling::ApplyToNodalForces() {
                     nodalForces[3*k+2] = 0;
             }
             
-            Base::GetAdapter()->AddNodalForcesComponentsGlobal(18, pos, nodalForces);
+            Base::GetAdapter()->AddNodalForcesComponentsGlobal(6, nodes, nodalForces);
         }
         
         if (slaveNormal.Norm() != 0)
@@ -527,21 +511,14 @@ void CBContactHandling::ApplyToNodalForcesJacobian() {
             
             CalcContributionToContactForceAtGaussPoint(masterTriangle, slaveTriangle, i, nodalForces, distances, scaling);
             
-            for (int j = 0; j < 3; j++) {
-                pos[3*j]   = 3.0 * e->GetNodeIndex(j);
-                pos[3*j+1] = 3.0 * e->GetNodeIndex(j) + 1;
-                pos[3*j+2] = 3.0 * e->GetNodeIndex(j) + 2;
-            }
+            TInt nodes[6];
+            for (int j = 0; j < 3; j++)
+                nodes[j] = adapter_->GlobalNodeIndex(e->GetNodeIndex(j));
+            for (int j = 3; j < 6; j++)
+                nodes[j] = slaveElementsNodesIndicesGlobal_[3*slave+(j-3)];
             
-            adapter_->ApplyLocalToGlobalMapping(pos, 9);
-            
-            for (int j = 3; j < 6; j++) {
-                pos[3*j]   = 3 * slaveElementsNodesIndicesGlobal_[3*slave+(j-3)];
-                pos[3*j+1] = 3 * slaveElementsNodesIndicesGlobal_[3*slave+(j-3)] + 1;
-                pos[3*j+2] = 3 * slaveElementsNodesIndicesGlobal_[3*slave+(j-3)] + 2;
-            }
-            
-            GetAdapter()->GetNodesComponentsBoundaryConditionsGlobal(18, pos, bc);
+            adapter_->GetGlobalDofIndices(6, nodes, pos);
+            GetAdapter()->GetNodesComponentsBoundaryConditionsForGlobalNodes(6, nodes, bc);
             
             
             TFloat epsilon = Base::GetAdapter()->GetFiniteDifferencesEpsilon();

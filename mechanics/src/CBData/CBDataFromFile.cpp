@@ -112,9 +112,12 @@ bool CBDataFromFile::LoadDataSet(TFloat time) {
     // within the currently loaded interval
     if ((time < timeDataBegin_) || (time >= timeDataEnd_) || (dataBegin_.size() == 0) || (dataEnd_.size() == 0)) {
         std::vector<std::pair<TFloat, std::string>>::iterator it = fileList_.begin();
-        while (time >= it->first && it != fileList_.end()) {
+        while (it != fileList_.end() && time >= it->first) {
             it++;
         }
+        // The last listed time closes the last interval, so it has data although no time follows it.
+        if (it == fileList_.end() && !fileList_.empty() && time == fileList_.back().first)
+            it--;
         
         if (it != fileList_.end()) {
             std::ifstream file;
@@ -164,14 +167,15 @@ bool CBDataFromFile::LoadDataSet(TFloat time) {
 TFloat CBDataFromFile::Get(TFloat time, TInt index) {
     TFloat t = time - startTime_;
     
-    if ((t < 0) || (index >= dataBegin_.size())) {
+    if (t < 0) {
         return 0.0;
     } else {
         t = fmod(t, period_);
         
-        if ((t <= timeDataBegin_) || (t > timeDataEnd_) )
+        // A query past the last listed time empties the data but keeps the interval bounds.
+        if ((t <= timeDataBegin_) || (t > timeDataEnd_) || (dataBegin_.size() == 0))
             LoadDataSet(t);
-        if ((dataEnd_.size() == 0) || (dataBegin_.size() == 0)) {
+        if ((dataEnd_.size() == 0) || (index >= dataBegin_.size())) {
             return 0;
         } else if (timeDataBegin_ == timeDataEnd_) {
             return dataBegin_[index];

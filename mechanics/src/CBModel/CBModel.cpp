@@ -40,17 +40,41 @@ void CBModel::InitMapping() {
     }
 }
 
+void CBModel::InitPressureIndices() {
+    pressureIndices_.assign(nodes_.size(), -1);
+    for (auto &ele : elements_) {
+        CBElementSolid *solid = dynamic_cast<CBElementSolid *>(ele);
+        if (solid)
+            for (unsigned int i = 0; i < solid->GetNumberOfPressureNodesIndices(); ++i)
+                pressureIndices_.at(solid->GetNodeIndex(i)) = 0;
+    }
+
+    // Numbering in node order gives each rank a contiguous range of pressure indices, because
+    // ranks own contiguous ranges of nodes.
+    numPressureNodes_ = 0;
+    for (auto &p : pressureIndices_)
+        if (p == 0)
+            p = numPressureNodes_++;
+}
+
 void CBModel::CalcNonZeroes() {
     nodeNeighborsNnz_.assign(nodes_.size()*3, 1);
+    std::vector<PetscInt> pressureColumns(nodes_.size(), 0); // pressure columns in a node's displacement rows
+    pressureNeighborsNnz_.assign(numPressureNodes_, 1);
     std::map<TInt, std::set<TInt>> SurIndexMap;
     for (auto &ele : elements_) {
         CBElementSurface *sele = dynamic_cast<CBElementSurface *>(ele);
+        CBElementSolid *solid = dynamic_cast<CBElementSolid *>(ele);
+        unsigned int numPressureNodes = solid ? solid->GetNumberOfPressureNodesIndices() : 0;
         
         for (unsigned int i = 0; i < ele->GetNumberOfNodesIndices(); ++i) {
             TInt n = ele->GetNodeIndex(i);
             nodeNeighborsNnz_.at(n*3) += ele->GetNumberOfNodesIndices() - 1;
             nodeNeighborsNnz_.at(n*3+1) += ele->GetNumberOfNodesIndices() - 1;
             nodeNeighborsNnz_.at(n*3+2) += ele->GetNumberOfNodesIndices() - 1;
+            pressureColumns.at(n) += numPressureNodes;
+            if (i < numPressureNodes)
+                pressureNeighborsNnz_.at(pressureIndices_.at(n)) +=3 * ele->GetNumberOfNodesIndices() + numPressureNodes - 1;
             if (sele) {
                 if (sele->GetType() == "CAVITY") {
                     SurIndexMap[sele->GetSurfaceIndex()].insert(n);
@@ -78,8 +102,12 @@ void CBModel::CalcNonZeroes() {
     
     for (int i = 0; i < nodeNeighborsNnz_.size(); i++) {
         nodeNeighborsNnz_[i] *= 3;
+        nodeNeighborsNnz_[i] += pressureColumns[i/3];
         nodeNeighborsNnz_[i] = nodeNeighborsNnz_[i] > maxNnz_ ? maxNnz_ : nodeNeighborsNnz_[i];
     }
+
+    for (auto &nnz : pressureNeighborsNnz_)
+        nnz = nnz > maxNnz_ ? maxNnz_ : nnz;
 } // CBModel::CalcNonZeroes
 
 void CBModel::InitNodesComponentsBoundaryConditions() {

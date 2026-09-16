@@ -36,7 +36,11 @@ public:
     {}
     
     virtual ~CBElementAdapter(){fdEpsilon_ = 0;
-        solver_    = 0; }
+        solver_    = 0;
+        ISDestroy(&displacementDofs_);
+        ISDestroy(&pressureDofs_);
+        ISLocalToGlobalMappingDestroy(&nodesComponentsMapping_);
+        ISLocalToGlobalMappingDestroy(&pressureMapping_); }
     
     virtual void Init(){}
     void SetSolver(CBSolver* solver){solver_ = solver; }
@@ -90,7 +94,9 @@ public:
     
     void GetNodalForcesComponents(PetscInt numNodalForcesComponents, const PetscInt* nodalForcesComponentsIndices, PetscScalar* nodalForcesComponents);
     
-    void AddNodalForcesComponentsGlobal(PetscInt numNodalForcesComponents, const PetscInt* nodalForcesComponentsIndices, const PetscScalar* nodalForcesComponents);
+    //! Adds three force components per global node. The nodal forces vector is indexed by node
+    //! component, not by the unknown layout, so it takes nodes rather than degree-of-freedom indices.
+    void AddNodalForcesComponentsGlobal(PetscInt numNodes, const PetscInt* globalNodes, const PetscScalar* nodalForcesComponents);
     
     void InsertNodalForcesComponentsGlobal(PetscInt numNodalForcesComponents, const PetscInt* nodalForcesComponentsIndices, const PetscScalar* nodalForcesComponents);
     
@@ -111,6 +117,52 @@ public:
     void AddLaplacianEntriesGlobal(PetscInt numRows, const PetscInt* rowsIndices, PetscInt numCols, const PetscInt* colsIndices, PetscScalar* laplacianEntries);
     void GetNodesComponentsBoundaryConditions(PetscInt numNodesCoords, const PetscInt* nodesCoordsIndices, bool* nodesComponentsBoundaryConditions);
     void GetNodesComponentsBoundaryConditionsGlobal(PetscInt numNodesCoords, const PetscInt* nodesCoordsIndices, bool* globalNodesComponentsBoundaryConditions);
+    void GetNodesComponentsBoundaryConditionsForGlobalNodes(PetscInt numNodes, const PetscInt* globalNodes, bool* nodesComponentsBoundaryConditions);
+    //! Degree-of-freedom layout, see ADR-0001. Each MPI rank owns one contiguous block of the
+    //! global unknown vector, so a global vector or matrix index depends on which rank owns the
+    //! node and must never be derived from the global node index by hand.
+    void InitNodesIndicesMapping();
+    ISLocalToGlobalMapping GetLocalToGlobalMapping(){return nodesIndicesMapping_; }
+    ISLocalToGlobalMapping GetLocalToGlobalMappingNonGhosted(){return nodesIndicesMappingNonGhosted_; }
+    //! Maps local node components to the node-component indices of vectors laid out like the
+    //! nodes, such as the nodal forces, which do not follow the unknown layout.
+    ISLocalToGlobalMapping GetNodesComponentsLocalToGlobalMapping(){return nodesComponentsMapping_; }
+
+    PetscInt GlobalNodeIndex(PetscInt localNode);
+    PetscInt GlobalDofIndex(PetscInt globalNode, PetscInt component);
+
+    //! Fills 3 * numNodes vector and matrix indices, three consecutive components per node.
+    void GetGlobalDofIndices(PetscInt numNodes, const PetscInt* globalNodes, PetscInt* dofIndices);
+
+    //! Adds alpha times the owned rows of a matrix laid out like the nodes, such as the mass or
+    //! damping matrix, to the displacement block of dofMatrix, a matrix in the unknown layout.
+    //! dofMatrix has to accept new nonzeros, and be assembled afterwards.
+    void AddToDisplacementBlock(Mat dofMatrix, PetscScalar alpha, Mat nodesMatrix);
+
+    //! Vector and matrix index of the pressure unknown of a vertex node.
+    PetscInt GlobalPressureDofIndex(PetscInt globalNode);
+    void GetGlobalPressureDofIndices(PetscInt numNodes, const PetscInt* globalNodes, PetscInt* dofIndices);
+    PetscInt GetNumberOfLocalPressureDofs();
+    PetscInt GetNumberOfLocalDofs();
+    //! Jacobian non-zeros per row of this rank's unknowns, for preallocation.
+    std::vector<PetscInt> GetLocalDofsNnz();
+
+    //! The displacement and the pressure block of this rank's unknowns, for extracting either
+    //! field from the unknown vector and for a future fieldsplit preconditioner (ADR-0004).
+    IS GetDisplacementDofs(){return displacementDofs_; }
+    IS GetPressureDofs(){return pressureDofs_; }
+
+    //! Pressure field, indexed by local pressure indices: the vertices this rank owns, then the
+    //! vertices it ghosts. Global pressure indices are those of the model's pressure index map.
+    void LinkPressures(Vec localPressures){pressures_ = localPressures; }
+    void LinkPressureResiduals(Vec pressureResiduals){pressureResiduals_ = pressureResiduals; }
+    const std::vector<PetscInt>& GetGhostPressureIndices(){return ghostPressureIndices_; }
+    ISLocalToGlobalMapping GetPressureLocalToGlobalMapping(){return pressureMapping_; }
+    void GetLocalPressureIndices(PetscInt numNodes, const PetscInt* localNodes, PetscInt* pressureIndices);
+    void GetPressures(PetscInt numPressures, const PetscInt* pressureIndices, PetscScalar* pressures){VecGetValues(pressures_, numPressures, pressureIndices, pressures); }
+    //! Added through the pressure mapping, so that the residuals of ghost vertices reach the owning rank.
+    void AddPressureResiduals(PetscInt numPressures, const PetscInt* pressureIndices, const PetscScalar* residuals){VecSetValuesLocal(pressureResiduals_, numPressures, pressureIndices, residuals, ADD_VALUES); }
+
     void ApplyLocalToGlobalMapping(PetscInt* nodesCoordsIndices, PetscInt numIndices){ISLocalToGlobalMappingApply(nodesIndicesMapping_, numIndices, nodesCoordsIndices, nodesCoordsIndices); }
     void ApplyGlobalToLocalMapping(PetscInt* nodesCoordsIndices, PetscInt numIndices) { ISGlobalToLocalMappingApply(nodesIndicesMapping_, IS_GTOLM_MASK, numIndices, nodesCoordsIndices, &numIndices, nodesCoordsIndices); } // index is -1 if not on local process
     void ApplyGlobalToLocalMappingNonGhosted(PetscInt* nodesCoordsIndices, PetscInt numIndices) { ISGlobalToLocalMappingApply(nodesIndicesMappingNonGhosted_, IS_GTOLM_MASK, numIndices, nodesCoordsIndices, &numIndices, nodesCoordsIndices); } // index is -1 if not on local process
@@ -128,9 +180,6 @@ public:
     void LinkNodalForcesActiveStressTensorAndFiberOrientationJacobian(Mat nodalForcesActiveStressTensorAndFiberOrientationJacobian){nodalForcesActiveStressTensorAndFiberOrientationJacobian_ = nodalForcesActiveStressTensorAndFiberOrientationJacobian; }
     void LinkActiveStress(Vec activeStressTensor, PetscInt numActiveStressTensorComponents, PetscInt* activeStressTensorComponentsIndices);
     void LinkLaplacian(Mat laplacian){laplacian_ = laplacian; }
-    
-    void LinkLocalToGlobalMapping(ISLocalToGlobalMapping nodesIndicesMapping){nodesIndicesMapping_ = nodesIndicesMapping; }
-    void LinkLocalToGlobalMappingNonGhosted(ISLocalToGlobalMapping nodesIndicesMapping){nodesIndicesMappingNonGhosted_ = nodesIndicesMapping; }
     
     void ActivateBoundaryConditions(){areBoundaryConditionsActive_=true;}
     void DeactivateBoundaryConditions(){areBoundaryConditionsActive_=false;}
@@ -170,6 +219,17 @@ private:
     bool                   areBoundaryConditionsActive_;
     ISLocalToGlobalMapping nodesIndicesMapping_;
     ISLocalToGlobalMapping nodesIndicesMappingNonGhosted_;
+    ISLocalToGlobalMapping nodesComponentsMapping_ = 0;
+    ISLocalToGlobalMapping pressureMapping_ = 0;
+    std::vector<PetscInt>  localPressureIndices_; // per local node, -1 for nodes without pressure
+    std::vector<PetscInt>  ghostPressureIndices_;
+    std::vector<PetscInt>  nodesRanges_;
+    std::vector<PetscInt>  dofOffsets_;
+    std::vector<PetscInt>  pressureRanges_;
+    IS                     displacementDofs_ = 0;
+    IS                     pressureDofs_ = 0;
+    Vec                    pressures_ = 0;
+    Vec                    pressureResiduals_ = 0;
 };
 
 #endif

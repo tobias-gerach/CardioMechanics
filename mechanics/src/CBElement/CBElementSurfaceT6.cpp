@@ -14,7 +14,6 @@
 
 #include "CBElementSurfaceT6.h"
 #include "CBElementAdapter.h"
-#include <functional>
 
 
 CBElementSurfaceT6::CBElementSurfaceT6(CBElementSurfaceT6& other) : CBElementCavity(other) {
@@ -88,38 +87,6 @@ Vector3<TFloat> CBElementSurfaceT6::GetCentroid()
                            1.0/3.0 * (nodesCoords[2] + nodesCoords[5] + nodesCoords[8])));
 }
 
-
-Matrix3<TFloat> CBElementSurfaceT6::GetNormalVectorAtQuadraturePoints(const TFloat* nodesCoords)
-{
-    const TFloat* p = nodesCoords;
-    
-    Vector3<TFloat> n1(&p[0]);
-    Vector3<TFloat> n2(&p[3]);
-    Vector3<TFloat> n3(&p[6]);
-    Vector3<TFloat> n4(&p[9]);
-    Vector3<TFloat> n5(&p[12]);
-    Vector3<TFloat> n6(&p[15]);
-    Vector3<TFloat> n7(&p[18]);
-    
-    Triangle<TFloat> t1(n1,n4,n6);
-    Triangle<TFloat> t2(n4,n5,n6);
-    Triangle<TFloat> t3(n4,n2,n5);
-    Triangle<TFloat> t4(n6,n5,n3);
-    
-    Matrix3<TFloat> normalVectors;
-    
-    Vector3<TFloat> nv1 = t1.GetNormalVector()+t2.GetNormalVector();
-    nv1.Normalize();
-    Vector3<TFloat> nv2 = t3.GetNormalVector()+t2.GetNormalVector();
-    nv2.Normalize();
-    Vector3<TFloat> nv3 = t4.GetNormalVector()+t2.GetNormalVector();
-    nv3.Normalize();
-    
-    normalVectors.SetCol(0, nv1);
-    normalVectors.SetCol(1, nv2);
-    normalVectors.SetCol(2, nv3);
-    return normalVectors;
-}
 
 TFloat CBElementSurfaceT6::GetArea()
 {
@@ -251,36 +218,53 @@ void CBElementSurfaceT6::CalcForcesDueToPressure(TFloat pressure, const TInt* no
     bool bc[18];
     Base::adapter_->GetNodesComponentsBoundaryConditions(18, nodesCoordsIndices, bc);
     
-    TFloat area = GetArea(nodesCoords);
-    Matrix3<TFloat> normalVectors = GetNormalVectorAtQuadraturePoints(nodesCoords);
+    // The force on node i is the integral of -p N_i n dA over the isoparametric face. With xi = l2
+    // and eta = l3, n dA = (x_,xi x x_,eta) dxi deta, which is quadratic like N_i, so the degree 4
+    // rule of Dunavant (1985) integrates it exactly, on curved faces as well as flat ones.
+    const TFloat a = 0.44594849091596489, b = 0.091576213509770743;
+    const TFloat wa = 0.22338158967801147, wb = 0.10995174365532187;
+    const TFloat points[6][3] = {{1-2*a, a, a}, {a, 1-2*a, a}, {a, a, 1-2*a},
+                                 {1-2*b, b, b}, {b, 1-2*b, b}, {b, b, 1-2*b}};
+    const TFloat weights[6] = {wa, wa, wa, wb, wb, wb};
     
-    std::function<double (double,double,double)> Ni[6];
-    
-    Ni[0] = [](double l1,double l2, double l3){return l1*(2*l1 - 1);};
-    Ni[1] = [](double l1,double l2, double l3){return l2*(2*l2 - 1);};
-    Ni[2] = [](double l1,double l2, double l3){return l3*(2*l3 - 1);};
-    Ni[3] = [](double l1,double l2, double l3){return 4*l1*l2;};
-    Ni[4] = [](double l1,double l2, double l3){return 4*l1*l3;};
-    Ni[5] = [](double l1,double l2, double l3){return 4*l2*l3;};
+    Vector3<TFloat> f[6];
+    for(unsigned int q = 0; q < 6; q++)
+    {
+        const TFloat* l = points[q];
+        // Local nodes 4, 5 and 6 sit on the edges (1,2), (2,3) and (3,1).
+        const TFloat N[6]      = {l[0]*(2*l[0] - 1), l[1]*(2*l[1] - 1), l[2]*(2*l[2] - 1), 4*l[0]*l[1], 4*l[1]*l[2], 4*l[2]*l[0]};
+        const TFloat dNdxi[6]  = {1 - 4*l[0], 4*l[1] - 1, 0, 4*(l[0] - l[1]), 4*l[2], -4*l[2]};
+        const TFloat dNdeta[6] = {1 - 4*l[0], 0, 4*l[2] - 1, -4*l[1], 4*l[1], 4*(l[0] - l[2])};
+        
+        Vector3<TFloat> dxdxi, dxdeta;
+        for(unsigned int i = 0; i < 6; i++)
+        {
+            const Vector3<TFloat> x(&nodesCoords[3 * i]);
+            dxdxi  += dNdxi[i]  * x;
+            dxdeta += dNdeta[i] * x;
+        }
+        // The reference triangle has area 1/2, which the weights, summing to 1, leave out.
+        const Vector3<TFloat> areaVector = 0.5 * weights[q] * CrossProduct(dxdxi, dxdeta);
+        for(unsigned int i = 0; i < 6; i++)
+            f[i] += -pressure * N[i] * areaVector;
+    }
     
     for(unsigned int i = 0; i < 6; i++)
     {
-        Vector3<TFloat> f = -area * pressure * 1.0/3.0 * (Ni[i](2.0/3.0,1.0/6.0,1.0/6.0)*normalVectors.GetCol(0) + Ni[i](1.0/6.0,2.0/3.0,1.0/6.0)*normalVectors.GetCol(1) + Ni[i](1.0/6.0,1.0/6.0,2.0/3.0)*normalVectors.GetCol(2));
-        
         if (bc[3*i+0] !=0)
             forces[3 * i + 0] = 0;
         else
-            forces[3 * i + 0] = f.X();
+            forces[3 * i + 0] = f[i].X();
         
         if (bc[3*i+1] !=0)
             forces[3 * i + 1] = 0;
         else
-            forces[3 * i + 1] = f.Y();
+            forces[3 * i + 1] = f[i].Y();
         
         if (bc[3*i+2] !=0)
             forces[3 * i + 2] = 0;
         else
-            forces[3 * i + 2] = f.Z();
+            forces[3 * i + 2] = f[i].Z();
     }
 }
 

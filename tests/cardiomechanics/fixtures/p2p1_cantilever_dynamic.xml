@@ -1,0 +1,105 @@
+<settings>P2P1 cantilever, generalized-alpha with active contraction</settings>
+
+<General>
+    <LogFile>./Results/cantilever.log</LogFile>
+</General>
+
+<Mesh>
+    <Type>T10P1</Type>
+    <Format>Tetgen</Format>
+    <Sorting>None</Sorting>
+
+    <Tetgen>
+        <Unit>1</Unit>
+        <Nodes>./tetgen/cantilever.node</Nodes>
+        <Elements>./tetgen/cantilever.ele</Elements>
+        <Surfaces>./tetgen/cantilever.sur</Surfaces>
+    </Tetgen>
+
+    <Surfaces>
+        <Surface_130><Type>T6</Type></Surface_130>
+        <Surface_131><Type>T3</Type></Surface_131> <!-- free end, unloaded -->
+    </Surfaces>
+</Mesh>
+
+<Materials>
+    <Global>
+        <Damping>
+            <Type>Rayleigh</Type>
+            <Rayleigh>
+                <Alpha>0.1</Alpha>
+                <Beta>0.1</Beta>
+            </Rayleigh>
+        </Damping>
+    </Global>
+    <Mat_30>
+        <Type>NeoHooke</Type>
+        <Density>1</Density>
+        <NeoHooke>
+            <a>1</a>
+            <k>100</k>
+        </NeoHooke>
+        <!-- Along x, the fibre direction when no bases are given, so the beam shortens. -->
+        <TensionMax>0.05</TensionMax>
+        <TensionModel>FromFunction</TensionModel>
+        <FromFunction>
+            <Type>Linear</Type>
+            <StartTime>0.0</StartTime>
+            <StopTime>1.0</StopTime>
+        </FromFunction>
+    </Mat_30>
+</Materials>
+
+<Export>
+    <Format>VTK</Format>
+    <Prefix>./Results/cantilever</Prefix>
+    <!-- Every step, so that consecutive frames bracket each intermediate configuration. -->
+    <TimeStep>0.25</TimeStep>
+</Export>
+
+<Solver>
+    <NonZeros>2000</NonZeros>
+    <DomainDecomposition>false</DomainDecomposition>
+    <Precision>1e-10</Precision>
+    <!-- Coordinates are O(1) here, so the default finite-difference step of 1e-12 would sit
+         at round-off; 1e-7 is the square root of machine precision for unit-sized values. -->
+    <Epsilon>1e-7</Epsilon>
+    <LU>true</LU>
+
+    <Type>GeneralizedAlpha</Type>
+    <GeneralizedAlpha>
+        <RhoInf>0.5</RhoInf>
+        <ConsistentMassMatrix>true</ConsistentMassMatrix>
+    </GeneralizedAlpha>
+
+    <Formulation>TotalLagrangian</Formulation>
+
+    <StartTime>0</StartTime>
+    <StopTime>1</StopTime>
+    <TimeStep>0.25</TimeStep>
+
+    <Plugins>
+        <ApplyPressureFromFunction>true</ApplyPressureFromFunction>
+    </Plugins>
+</Solver>
+
+<Plugins>
+    <ApplyPressureFromFunction>
+        <ExportFile>./Results/Pressure.dat</ExportFile>
+        <Groups>
+            <Top>
+                <Surfaces>130</Surfaces>
+                <Intervals>
+                    <Interval_1>
+                        <Type>Linear</Type>
+                        <Invert>false</Invert>
+                        <StartTime>0.0</StartTime>
+                        <StopTime>1.0</StopTime>
+                        <Offset>0</Offset>
+                        <Amplitude>0.003</Amplitude>
+                    </Interval_1>
+                </Intervals>
+            </Top>
+        </Groups>
+    </ApplyPressureFromFunction>
+</Plugins>

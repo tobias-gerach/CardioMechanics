@@ -1,0 +1,114 @@
+<settings>Overdamped creep fixture: benchmark 2015 Problem 3 geometry, step endocardial pressure, stiffness-proportional Rayleigh damping only, GeneralizedAlpha at RhoInf=1.</settings>
+
+<General>
+    <LogFile>Results/dynamic.log</LogFile>
+</General>
+
+<Mesh>
+    <Type>T10</Type>
+    <Format>Tetgen</Format>
+    <Sorting>PCA</Sorting>
+
+    <Tetgen>
+        <Unit>1e-3</Unit>
+        <Nodes>./tetgen/ellipsoid.node</Nodes>
+        <Elements>./tetgen/ellipsoid.ele</Elements>
+        <Surfaces>./tetgen/ellipsoid.sur</Surfaces>
+        <Bases>./tetgen/ellipsoid.bases</Bases>
+        <DetermineNeighbors>true</DetermineNeighbors>
+        <EnforceOrthonormalBases>true</EnforceOrthonormalBases>
+    </Tetgen>
+
+    <Surfaces>
+        <!-- Endo -->
+        <Surface_1><Type>T6</Type></Surface_1>
+        <!-- Epi -->
+        <Surface_2><Type>T6</Type></Surface_2>
+        <!-- Base -->
+        <Surface_3><Type>T6</Type></Surface_3>
+    </Surfaces>
+</Mesh>
+
+<Materials>
+    <Global>
+        <Damping>
+            <Type>Rayleigh</Type>
+            <!-- Beta alone, and large enough to overdamp every mode: the cavity volume then
+                 creeps with time constant Beta. See test_dynamic.py. -->
+            <Rayleigh>
+                <Alpha>0</Alpha>
+                <Beta>0.3</Beta>
+            </Rayleigh>
+        </Damping>
+    </Global>
+    <Mat_30>
+        <IgnoreCorruptElements>false</IgnoreCorruptElements>
+        <Type>Guccione</Type>
+        <Density>1082</Density>
+        <Guccione>
+            <C>2000.0</C>
+            <bf>8.</bf>
+            <bt>2.</bt>
+            <bfs>4.</bfs>
+            <K>1e6</K>
+        </Guccione>
+    </Mat_30>
+</Materials>
+
+<Export>
+    <Format>VTK</Format>
+    <Prefix>Results/dynamic</Prefix>
+    <!-- The measured signal is the cavity volume, which ApplyPressureFromFunction
+         writes every time step; nothing reads the VTUs. -->
+    <TimeStep>0.9</TimeStep>
+</Export>
+
+<Solver>
+    <NonZeros>2000</NonZeros>
+    <DomainDecomposition>false</DomainDecomposition>
+    <Precision>1e-8</Precision>
+    <Verbose>true</Verbose>
+    <LU>true</LU>
+
+    <Type>GeneralizedAlpha</Type>
+    <GeneralizedAlpha>
+        <RhoInf>1.0</RhoInf>
+    </GeneralizedAlpha>
+
+    <Formulation>TotalLagrangian</Formulation>
+
+    <StartTime>0</StartTime>
+    <StopTime>0.9</StopTime>
+    <!-- MinTimeStep pinned to TimeStep: the trace is fitted on a uniform grid, so a
+         Newton failure has to abort the run rather than silently sub-step. -->
+    <TimeStep>1e-2</TimeStep>
+    <MinTimeStep>1e-2</MinTimeStep>
+
+    <Plugins>
+        <ApplyPressureFromFunction>true</ApplyPressureFromFunction>
+    </Plugins>
+</Solver>
+
+<Plugins>
+    <ApplyPressureFromFunction>
+        <ExportFile>Results/Pressure.dat</ExportFile>
+        <Groups>
+            <Step>
+                <!-- 20 Pa switched on at t = 0 and held exactly constant (Amplitude = 0). Kept
+                     small because the follower-pressure stiffness enters the relaxation but not
+                     C = Beta K, which stretches the time constant in proportion to the load:
+                     by 0.6% here, by 6.5% at 200 Pa. -->
+                <Surfaces>1</Surfaces>
+                <Intervals>
+                    <Interval_1>
+                        <Type>Linear</Type>
+                        <StartTime>0.0</StartTime>
+                        <StopTime>0.9</StopTime>
+                        <Offset>-20</Offset>
+                        <Amplitude>0</Amplitude>
+                    </Interval_1>
+                </Intervals>
+            </Step>
+        </Groups>
+    </ApplyPressureFromFunction>
+</Plugins>

@@ -263,6 +263,9 @@ void CBSolverNewmarkBeta::InitDampingMatrix() {
                 MatScale(dampingMatrix_, globalRayleighBeta_);
             }
         } else {
+            // A copy into a new pattern scales the target first, which needs it assembled, if empty.
+            MatAssemblyBegin(dampingMatrix_, MAT_FINAL_ASSEMBLY);
+            MatAssemblyEnd(dampingMatrix_, MAT_FINAL_ASSEMBLY);
             MatCopy(massMatrix_, dampingMatrix_, DIFFERENT_NONZERO_PATTERN);
             MatScale(dampingMatrix_, globalRayleighAlpha_);
         }
@@ -270,6 +273,9 @@ void CBSolverNewmarkBeta::InitDampingMatrix() {
         MatSetLocalToGlobalMapping(dampingMatrix_, Base::nodesIndicesMapping_, Base::nodesIndicesMapping_);
         MatAssemblyBegin(dampingMatrix_, MAT_FINAL_ASSEMBLY);
         MatAssemblyEnd(dampingMatrix_, MAT_FINAL_ASSEMBLY);
+        // C now holds the nonzeros of every term it is built from, M and K, and each update
+        // refills them in place. A nonzero outside them would reallocate C, so it is an error.
+        MatSetOption(dampingMatrix_, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_TRUE);
     }
 }  // CBSolverNewmarkBeta::InitDampingMatrix
 
@@ -658,7 +664,11 @@ CBStatus CBSolverNewmarkBeta::CalcDampingMatrix() {
     if ((globalRayleighAlpha_ != 0) || (globalRayleighBeta_ != 0)) {
         CBStatus rc = CBStatus::FAILED;
         
+        // Every term below fits the nonzeros InitDampingMatrix gave C, so C is filled in place.
         if (globalRayleighBeta_ != 0) {
+            // The elements add their stiffness to what the matrix holds, so C of the previous
+            // state has to go first or it would carry over into this one.
+            MatZeroEntries(dampingMatrix_);
             Base::adapter_->LinkNodalForcesJacobian(dampingMatrix_);
             rc = Base::formulation_->CalcNodalForcesJacobian();
             
@@ -672,7 +682,7 @@ CBStatus CBSolverNewmarkBeta::CalcDampingMatrix() {
                 // MatAXPY(dampingMatrix_, globalRayleighAlpha_/globalRayleighBeta_, massMatrix_, DIFFERENT_NONZERO_PATTERN);
                 // dampingMatrix_ *= globalRayleighBeta_ * dampingMatrix_
                 MatScale(dampingMatrix_, globalRayleighBeta_);
-                MatAXPY(dampingMatrix_, globalRayleighAlpha_, massMatrix_, DIFFERENT_NONZERO_PATTERN);
+                MatAXPY(dampingMatrix_, globalRayleighAlpha_, massMatrix_, SUBSET_NONZERO_PATTERN);
                 
                 // dampingMatrix_ *= globalRayleighBeta_ * (K + (globalRayleighAlpha_/globalRayleighBeta_) * massMatrix_)
                 //                  - K*beta + alpha*M
@@ -686,7 +696,7 @@ CBStatus CBSolverNewmarkBeta::CalcDampingMatrix() {
             }
             rc = CBStatus::SUCCESS;
         } else {
-            MatCopy(massMatrix_, dampingMatrix_, DIFFERENT_NONZERO_PATTERN);
+            MatCopy(massMatrix_, dampingMatrix_, SAME_NONZERO_PATTERN);
             MatScale(dampingMatrix_, globalRayleighAlpha_);
             rc = CBStatus::SUCCESS;
         }

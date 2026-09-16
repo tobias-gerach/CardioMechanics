@@ -18,6 +18,7 @@ We recommend using a package manager (e.g. [Homebrew](https://brew.sh) on macOS 
 * [VTK](https://vtk.org) ≥ 9
 * [Open MPI](https://www.open-mpi.org)
 * [Python3](https://www.python.org) (optional, for the tools in `tools/python/`)
+* [GoogleTest](https://github.com/google/googletest) (optional, for the C++ unit tests; `brew install googletest` or `apt install libgtest-dev`)
 
 The `docker/` directory contains the Dockerfiles used by CI: `Dockerfile-thirdparty-petsc` source-builds PETSc with the tested version, while Open MPI and VTK are installed from apt (`libopenmpi-dev`, `libvtk9-dev`). They can serve as a reference for building dependencies manually.
 
@@ -89,6 +90,17 @@ Add the binaries and Python tools to your PATH:
 ```sh
 export PATH="$PATH:/path/to/CardioMechanics/_build/release/bin"
 export PATH="$PATH:/path/to/CardioMechanics/tools/python"
+```
+
+### C++ unit tests (optional)
+
+The in-process unit tests of the mechanics core are built only when `BUILD_TESTING` is on,
+which requires GoogleTest. They run through ctest, separately from the pytest suite in `tests/`:
+
+```sh
+cmake --preset release -DBUILD_TESTING=ON
+cmake --build --preset release -j
+ctest --test-dir _build/release --output-on-failure
 ```
 
 ### Installing to a separate location (optional)

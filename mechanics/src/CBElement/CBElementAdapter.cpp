@@ -12,6 +12,10 @@
  */
 
 
+#include <algorithm>
+#include <cassert>
+#include <numeric>
+
 #include "CBSolver.h"
 #include "CBElementAdapter.h"
 
@@ -37,15 +41,188 @@ void CBElementAdapter::LinkNodesComponentsBoundaryConditionsGlobal(bool* nodesCo
     
     for(PetscInt i = 0; i <  numTotalNodes; i++)
     {
-        int n[3]={3*i,3*i+1,3*i+2};
-        ISLocalToGlobalMappingApply(nodesIndicesMapping_, 3, n, n);
-        nodesComponentsBoundaryConditionsLocal_[3*i]   = nodesComponentsBoundaryConditionsGlobal[n[0]];
-        nodesComponentsBoundaryConditionsLocal_[3*i+1] = nodesComponentsBoundaryConditionsGlobal[n[1]];
-        nodesComponentsBoundaryConditionsLocal_[3*i+2] = nodesComponentsBoundaryConditionsGlobal[n[2]];
+        PetscInt n = GlobalNodeIndex(i);
+        for(PetscInt c = 0; c < 3; c++)
+            nodesComponentsBoundaryConditionsLocal_[3*i+c] = nodesComponentsBoundaryConditionsGlobal[3*n+c];
     }
     
     areBoundaryConditionsActive_=true;
     solver_->SetNodesComponentsBoundaryConditionsGlobal(nodesComponentsBoundaryConditionsGlobal);
+}
+
+// --------------------------- Degree of freedom layout ----------------
+
+void CBElementAdapter::InitNodesIndicesMapping()
+{
+    nodesRanges_ = solver_->GetNodesRanges();
+    
+    // Each rank owns one contiguous block of the global unknown vector: its displacement unknowns,
+    // then the pressure unknowns of its vertex nodes. A block starts where the preceding ranks'
+    // unknowns end. Pressure indices number vertex nodes in node order, so a rank's pressure
+    // indices form a contiguous range too.
+    const std::vector<TInt>& pressureIndices = solver_->GetModel()->GetPressureIndices();
+    dofOffsets_.assign(nodesRanges_.size(), 0);
+    pressureRanges_.assign(nodesRanges_.size(), 0);
+    for(std::size_t r = 0; r + 1 < nodesRanges_.size(); r++)
+    {
+        pressureRanges_[r+1] = pressureRanges_[r] + std::count_if(pressureIndices.begin() + nodesRanges_[r],
+                                                                  pressureIndices.begin() + nodesRanges_[r+1],
+                                                                  [](TInt p){return p >= 0; });
+        PetscInt numPressureDofs = pressureRanges_[r+1] - pressureRanges_[r];
+        dofOffsets_[r+1] = dofOffsets_[r] + 3 * (nodesRanges_[r+1] - nodesRanges_[r]) + numPressureDofs;
+    }
+    
+    PetscInt numLocalNodes = solver_->GetNumberOfLocalNodes();
+    PetscInt numTotalNodes = numLocalNodes + solver_->GetNumberOfGhostNodes();
+    
+    std::vector<PetscInt> dofIndices(3 * numTotalNodes);
+    std::vector<PetscInt> nodesComponents(3 * numTotalNodes);
+    for(PetscInt i = 0; i < numTotalNodes; i++)
+    {
+        PetscInt n = GlobalNodeIndex(i);
+        for(PetscInt c = 0; c < 3; c++)
+        {
+            dofIndices[3*i+c]      = GlobalDofIndex(n, c);
+            nodesComponents[3*i+c] = 3*n+c;
+        }
+    }
+    
+    ISLocalToGlobalMappingCreate(DCPetsc::Comm(), 1, 3 * numTotalNodes, dofIndices.data(), PETSC_COPY_VALUES,
+                                 &nodesIndicesMapping_);
+    ISLocalToGlobalMappingCreate(DCPetsc::Comm(), 1, 3 * numLocalNodes, dofIndices.data(), PETSC_COPY_VALUES,
+                                 &nodesIndicesMappingNonGhosted_);
+    ISLocalToGlobalMappingCreate(DCPetsc::Comm(), 1, 3 * numTotalNodes, nodesComponents.data(), PETSC_COPY_VALUES,
+                                 &nodesComponentsMapping_);
+
+    PetscInt rank = DCCtrl::GetProcessID();
+
+    // A rank reads the pressures of every vertex of its elements, including the vertices it ghosts,
+    // since the partitioner ghosts every node of an owned element.
+    PetscInt numLocalPressures = GetNumberOfLocalPressureDofs();
+    std::vector<PetscInt> localToGlobalPressures(numLocalPressures);
+    std::iota(localToGlobalPressures.begin(), localToGlobalPressures.end(), pressureRanges_[rank]);
+    localPressureIndices_.assign(numTotalNodes, -1);
+    ghostPressureIndices_.clear();
+    for(PetscInt i = 0; i < numTotalNodes; i++)
+    {
+        PetscInt p = pressureIndices.at(GlobalNodeIndex(i));
+        if(p < 0)
+            continue;
+        if(i < numLocalNodes)
+            localPressureIndices_[i] = p - pressureRanges_[rank];
+        else
+        {
+            localPressureIndices_[i] = numLocalPressures + ghostPressureIndices_.size();
+            ghostPressureIndices_.push_back(p);
+        }
+    }
+    localToGlobalPressures.insert(localToGlobalPressures.end(), ghostPressureIndices_.begin(), ghostPressureIndices_.end());
+    ISLocalToGlobalMappingCreate(DCPetsc::Comm(), 1, localToGlobalPressures.size(), localToGlobalPressures.data(),
+                                 PETSC_COPY_VALUES, &pressureMapping_);
+
+    ISCreateStride(DCPetsc::Comm(), 3 * numLocalNodes, dofOffsets_[rank], 1, &displacementDofs_);
+    ISCreateStride(DCPetsc::Comm(), numLocalPressures, dofOffsets_[rank] + 3 * numLocalNodes, 1,
+                   &pressureDofs_);
+}
+
+PetscInt CBElementAdapter::GetNumberOfLocalPressureDofs()
+{
+    PetscInt rank = DCCtrl::GetProcessID();
+    return pressureRanges_[rank+1] - pressureRanges_[rank];
+}
+
+PetscInt CBElementAdapter::GetNumberOfLocalDofs()
+{
+    return 3 * solver_->GetNumberOfLocalNodes() + GetNumberOfLocalPressureDofs();
+}
+
+std::vector<PetscInt> CBElementAdapter::GetLocalDofsNnz()
+{
+    std::vector<PetscInt> nodesNnz    = solver_->GetModel()->GetNodeNeighborsForNnz();
+    std::vector<PetscInt> pressureNnz = solver_->GetModel()->GetPressureNeighborsForNnz();
+    PetscInt rank = DCCtrl::GetProcessID();
+
+    std::vector<PetscInt> nnz(nodesNnz.begin() + 3 * nodesRanges_[rank], nodesNnz.begin() + 3 * nodesRanges_[rank+1]);
+    nnz.insert(nnz.end(), pressureNnz.begin() + pressureRanges_[rank], pressureNnz.begin() + pressureRanges_[rank+1]);
+    return nnz;
+}
+
+PetscInt CBElementAdapter::GlobalPressureDofIndex(PetscInt globalNode)
+{
+    PetscInt p = solver_->GetModel()->GetPressureIndices().at(globalNode);
+    assert(p >= 0 && "node carries no pressure degree of freedom");
+
+    PetscInt owner = std::upper_bound(nodesRanges_.begin(), nodesRanges_.end(), globalNode) - nodesRanges_.begin() - 1;
+    return dofOffsets_[owner] + 3 * (nodesRanges_[owner+1] - nodesRanges_[owner]) + p - pressureRanges_[owner];
+}
+
+void CBElementAdapter::GetGlobalPressureDofIndices(PetscInt numNodes, const PetscInt* globalNodes, PetscInt* dofIndices)
+{
+    for(PetscInt i = 0; i < numNodes; i++)
+        dofIndices[i] = GlobalPressureDofIndex(globalNodes[i]);
+}
+
+void CBElementAdapter::GetLocalPressureIndices(PetscInt numNodes, const PetscInt* localNodes, PetscInt* pressureIndices)
+{
+    for(PetscInt i = 0; i < numNodes; i++)
+    {
+        pressureIndices[i] = localPressureIndices_.at(localNodes[i]);
+        assert(pressureIndices[i] >= 0 && "node carries no pressure degree of freedom");
+    }
+}
+
+PetscInt CBElementAdapter::GlobalNodeIndex(PetscInt localNode)
+{
+    PetscInt numLocalNodes = solver_->GetNumberOfLocalNodes();
+    if(localNode < numLocalNodes)
+        return solver_->GetLocalNodesFrom() + localNode;
+    
+    assert(localNode - numLocalNodes < solver_->GetNumberOfGhostNodes());
+    return solver_->GetGhostNodes()[localNode - numLocalNodes];
+}
+
+PetscInt CBElementAdapter::GlobalDofIndex(PetscInt globalNode, PetscInt component)
+{
+    assert(component >= 0 && component < 3);
+    assert(!dofOffsets_.empty() && "CBElementAdapter::InitNodesIndicesMapping() has to be run first");
+    assert(globalNode >= 0 && globalNode < nodesRanges_.back());
+    
+    PetscInt owner = std::upper_bound(nodesRanges_.begin(), nodesRanges_.end(), globalNode) - nodesRanges_.begin() - 1;
+    return dofOffsets_[owner] + 3 * (globalNode - nodesRanges_[owner]) + component;
+}
+
+void CBElementAdapter::GetGlobalDofIndices(PetscInt numNodes, const PetscInt* globalNodes, PetscInt* dofIndices)
+{
+    for(PetscInt i = 0; i < numNodes; i++)
+        for(PetscInt c = 0; c < 3; c++)
+            dofIndices[3*i+c] = GlobalDofIndex(globalNodes[i], c);
+}
+
+void CBElementAdapter::AddToDisplacementBlock(Mat dofMatrix, PetscScalar alpha, Mat nodesMatrix)
+{
+    PetscInt from, to;
+    MatGetOwnershipRange(nodesMatrix, &from, &to);
+    std::vector<PetscInt>    dofs;
+    std::vector<PetscScalar> values;
+    for(PetscInt row = from; row < to; row++)
+    {
+        PetscInt           numCols;
+        const PetscInt*    cols;
+        const PetscScalar* vals;
+        MatGetRow(nodesMatrix, row, &numCols, &cols, &vals);
+        dofs.resize(numCols);
+        values.resize(numCols);
+        for(PetscInt k = 0; k < numCols; k++)
+        {
+            dofs[k]   = GlobalDofIndex(cols[k] / 3, cols[k] % 3);
+            values[k] = alpha * vals[k];
+        }
+        PetscInt rowDof = GlobalDofIndex(row / 3, row % 3);
+        // A matrix refusing an entry outside its preallocation drops it, and solving on with it
+        // missing would go unnoticed.
+        PetscCallAbort(PETSC_COMM_SELF, MatSetValues(dofMatrix, 1, &rowDof, numCols, dofs.data(), values.data(), ADD_VALUES));
+        MatRestoreRow(nodesMatrix, row, &numCols, &cols, &vals);
+    }
 }
 
 const std::vector<CBElement*>& CBElementAdapter::GetElementVector() {
@@ -119,6 +296,16 @@ void CBElementAdapter::GetNodesComponentsBoundaryConditionsGlobal(PetscInt numNo
 }
 
 
+void CBElementAdapter::GetNodesComponentsBoundaryConditionsForGlobalNodes(PetscInt numNodes, const PetscInt* globalNodes, bool* nodesComponentsBoundaryConditions)
+{
+    // The boundary condition array is indexed by node component, not by degree of freedom, and is
+    // therefore unaffected by the rank-dependent unknown layout.
+    for(PetscInt i = 0; i < numNodes; i++)
+        for(PetscInt c = 0; c < 3; c++)
+            nodesComponentsBoundaryConditions[3*i+c] = areBoundaryConditionsActive_ ?
+            nodesComponentsBoundaryConditionsGlobal_[3*globalNodes[i]+c] : false;
+}
+
 
 // --------------------------- Nodal Forces ----------------------------
 
@@ -150,9 +337,13 @@ void CBElementAdapter::GetNodalForcesComponents(PetscInt numNodalForcesComponent
     VecGetValues(nodalForces_, numNodalForcesComponents, nodalForcesComponentsIndices, nodalForcesComponents);
 }
 
-void CBElementAdapter::AddNodalForcesComponentsGlobal(PetscInt numNodalForcesComponents, const PetscInt* nodalForcesComponentsIndices, const PetscScalar* nodalForcesComponents)
+void CBElementAdapter::AddNodalForcesComponentsGlobal(PetscInt numNodes, const PetscInt* globalNodes, const PetscScalar* nodalForcesComponents)
 {
-    VecSetValues(nodalForces_, numNodalForcesComponents, nodalForcesComponentsIndices, nodalForcesComponents, ADD_VALUES);
+    std::vector<PetscInt> indices(3 * numNodes);
+    for(PetscInt i = 0; i < numNodes; i++)
+        for(PetscInt c = 0; c < 3; c++)
+            indices[3*i+c] = 3*globalNodes[i]+c;
+    VecSetValues(nodalForces_, 3 * numNodes, indices.data(), nodalForcesComponents, ADD_VALUES);
 }
 
 

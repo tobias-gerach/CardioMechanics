@@ -1,0 +1,108 @@
+<settings>Cantilever ringing down in its first bending mode after a smooth pressure pulse, no damping</settings>
+
+<General>
+    <LogFile>./Results/cantilever.log</LogFile>
+</General>
+
+<Mesh>
+    <Type>T10</Type>
+    <Format>Tetgen</Format>
+    <Sorting>None</Sorting>
+
+    <Tetgen>
+        <Unit>1</Unit>
+        <Nodes>./tetgen/cantilever.node</Nodes>
+        <Elements>./tetgen/cantilever.ele</Elements>
+        <Surfaces>./tetgen/cantilever.sur</Surfaces>
+    </Tetgen>
+
+    <Surfaces>
+        <Surface_130><Type>T6</Type></Surface_130>
+        <Surface_131><Type>T3</Type></Surface_131> <!-- free end, unloaded -->
+    </Surfaces>
+</Mesh>
+
+<Materials>
+    <!-- No Damping block: the only dissipation is numerical. -->
+    <Mat_30>
+        <Type>NeoHooke</Type>
+        <!-- Puts the first bending mode near omega = 0.6, a period of about 10.5. -->
+        <Density>0.01</Density>
+        <NeoHooke>
+            <a>1</a>
+            <k>100</k>
+        </NeoHooke>
+    </Mat_30>
+</Materials>
+
+<Export>
+    <Format>VTK</Format>
+    <Prefix>./Results/cantilever</Prefix>
+    <!-- The coarsest time step, so that every run is sampled at the same times. -->
+    <TimeStep>0.8</TimeStep>
+</Export>
+
+<Solver>
+    <NonZeros>2000</NonZeros>
+    <DomainDecomposition>false</DomainDecomposition>
+    <!-- The forces are of order 1e-6, so each step is solved far below the time discretization
+         error of the finest step. 1e-14 is not reached in the preparation step. -->
+    <Precision>1e-12</Precision>
+    <Epsilon>1e-7</Epsilon>
+    <LU>true</LU>
+
+    <Type>GeneralizedAlpha</Type>
+    <GeneralizedAlpha>
+        <RhoInf>1.0</RhoInf>
+    </GeneralizedAlpha>
+    <!-- The trapezoidal rule, the defaults, stated because the closed form depends on them. -->
+    <NewmarkBeta>
+        <Beta>0.25</Beta>
+        <Gamma>0.5</Gamma>
+    </NewmarkBeta>
+
+    <Formulation>TotalLagrangian</Formulation>
+
+    <StartTime>0</StartTime>
+    <StopTime>105.6</StopTime>
+    <!-- MinTimeStep pinned to TimeStep: an accuracy test is only meaningful at the step it
+         states, so a Newton failure has to abort the run rather than silently sub-step. -->
+    <TimeStep>0.8</TimeStep><MinTimeStep>0.8</MinTimeStep>
+
+    <Plugins>
+        <ApplyPressureFromFunction>true</ApplyPressureFromFunction>
+    </Plugins>
+</Solver>
+
+<Plugins>
+    <ApplyPressureFromFunction>
+        <ExportFile>./Results/Pressure.dat</ExportFile>
+        <Groups>
+            <Top>
+                <Surfaces>130</Surfaces>
+                <Intervals>
+                    <!-- 0.5 - 0.5 cos(2 pi t / 9.6) over [0, 9.6]: on and off with zero slope,
+                         so the load has no kink for the integrators to resolve. -->
+                    <Interval_1>
+                        <Type>Sinus</Type>
+                        <StartTime>0.0</StartTime>
+                        <StopTime>9.6</StopTime>
+                        <Sinus><Omega>0.6544984694978736</Omega></Sinus>
+                        <Offset>0</Offset>
+                        <Amplitude>1e-5</Amplitude>
+                    </Interval_1>
+                    <!-- Holds the pressure at exactly zero. Without it the plugin keeps the last
+                         value it computed, which generalized-alpha samples alphaF dt before the
+                         end of the pulse, where it is not zero. -->
+                    <Interval_2>
+                        <Type>Linear</Type>
+                        <StartTime>9.6</StartTime>
+                        <StopTime>105.6</StopTime>
+                        <Offset>0</Offset>
+                        <Amplitude>0</Amplitude>
+                    </Interval_2>
+                </Intervals>
+            </Top>
+        </Groups>
+    </ApplyPressureFromFunction>
+</Plugins>

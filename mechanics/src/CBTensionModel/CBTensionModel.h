@@ -37,18 +37,22 @@ public:
     virtual math_pack::Matrix3<double> CalcActiveStress(const math_pack::Matrix3<double> &deformation,
                                                         const double time) {
         double activeStress = CalcActiveTension(deformation, time);
-        
+        if (pk2ActiveTension_)
+            return activeStress * stressCoefficients_;
+
         double I4_f = deformation.GetCol(0) * deformation.GetCol(0);
         double I4_s = deformation.GetCol(1) * deformation.GetCol(1);
         double I4_n = deformation.GetCol(2) * deformation.GetCol(2);
         
         return activeStress *
         Matrix3<TFloat> {1./sqrt(I4_f), 0, 0,  0, 1./sqrt(I4_s), 0,  0, 0, 1./sqrt(I4_n)} *stressCoefficients_;
-
-        // For benchmark problems/examples to be correct
-        // return activeStress * Matrix3<TFloat> {1, 0, 0, 0, 0, 0, 0, 0, 0};
     }
-    
+
+    /// By default the tension is nominal, force per reference cross-section, which is what muscle
+    /// measurements and cell models provide. The Land et al. 2015 benchmark instead prescribes it as
+    /// a constant second Piola-Kirchhoff stress.
+    void SetPK2ActiveTension(bool pk2ActiveTension) { pk2ActiveTension_ = pk2ActiveTension; }
+
     virtual CBStatus SetActiveTensionAtQuadraturePoint(int indexQP, TFloat activeTension) {
         return CBStatus::SUCCESS;
     }
@@ -101,6 +105,7 @@ private:
     /// contains local activation time and lat-offset (from lat-reader)
     TFloat activationTime_ = 0.0;
     Matrix3<TFloat> stressCoefficients_ = {1, 0, 0, 0, 0, 0, 0, 0, 0};
+    bool pk2ActiveTension_ = false;
 };
 
 /// A simple class that produces no tension at all. Needed as default case.

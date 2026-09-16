@@ -18,6 +18,7 @@
 #include "CBElementSolid.h"
 #include "CBElementSolidT4.h"
 #include "CBElementSolidT10.h"
+#include "CBElementSolidT10P1.h"
 #include "CBElementSurface.h"
 #include "CBElementSurfaceT3.h"
 #include "CBElementSurfaceT6.h"
@@ -30,6 +31,7 @@
 CBElementFactory::CBElementFactory() {
     producers_["T4"]      = CBElementSolidT4::New;
     producers_["T10"]     = CBElementSolidT10::New;
+    producers_["T10P1"]   = CBElementSolidT10P1::New;
     producers_["CAVITY"]  = CBElementSurfaceT3::New;
     producers_["T3"]      = CBElementSurfaceT3::New;
     producers_["T6"]      = CBElementSurfaceT6::New;
@@ -47,6 +49,7 @@ CBElement *CBElementFactory::New(std::string elementType) {
         throw std::runtime_error(std::string("Unkown element type: [" + elementType + "] You might have to extend CBElementFactory \n Available elements are: \n")
                                  + "\t T4\t:4-node Iso-P1 tetrahedral element,\n"
                                  + "\t T10\t:10-node Iso-P2 tetrahedral element,\n"
+                                 + "\t T10P1\t:10-node Iso-P2 tetrahedral element with a linear pressure field on its 4 vertices (P2P1 Taylor-Hood),\n"
                                  + "\t CONTACT_MASTER\t:3-node triangle surface element for contact problems\n"
                                  + "\t CONTACT_SLAVE\t:3-node triangle surface element for contact problems\n"
                                  + "\t CONTACT_ROBIN\t:3-node triangle surface element for Robin boundary condition\n"

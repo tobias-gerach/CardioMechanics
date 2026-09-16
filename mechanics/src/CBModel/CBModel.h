@@ -131,6 +131,13 @@ public:
     void CheckElementsIndexes();
     
     std::vector<PetscInt> GetNodeNeighborsForNnz() {return nodeNeighborsNnz_;}
+    /// Non-zeros of the Jacobian row of each pressure index.
+    std::vector<PetscInt> GetPressureNeighborsForNnz() {return pressureNeighborsNnz_;}
+    /// Pressure index map: compacts global node index to pressure index, -1 for nodes without a
+    /// pressure degree of freedom. Built from the full element list, so identical on every rank.
+    void InitPressureIndices();
+    const std::vector<TInt>& GetPressureIndices() {return pressureIndices_;}
+    TInt GetNumberOfPressureNodes() {return numPressureNodes_;}
     
     void DetermineNeighbors();
     void DetermineNodeSolidElements();
@@ -256,6 +263,9 @@ protected:
     std::vector<TInt> backwardMapping_;
     std::vector<PetscInt> nodeNeighborsNnz_;
     TInt maxNnz_ = -1;
+    std::vector<PetscInt> pressureNeighborsNnz_;
+    std::vector<TInt> pressureIndices_;
+    TInt numPressureNodes_ = 0;
     
     std::vector<Vector3<TFloat>> velocity_;
     std::vector<Vector3<TFloat>> acceleration_;

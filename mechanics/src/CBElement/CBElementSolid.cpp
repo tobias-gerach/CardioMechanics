@@ -22,6 +22,13 @@ CBElementSolid::CBElementSolid(CBElementSolid& other) : CBElement(other){
     targetStrain = other.targetStrain;
 }
 
+CBStatus CBElementSolid::ReportCorruptElement(CBStatus rc) {
+    // print corrupt element messages from each processor
+    if (rc == CBStatus::CORRUPT_ELEMENT)
+        std::cout << "Solid" << GetType() << ": Element with index " << index_ << " is corrupt." << std::endl;
+    return rc;
+}
+
 void CBElementSolid::RepairDeformationTensorIfInverted(Matrix3<TFloat>& deformationTensor)
 {
     if(deformationTensor.Det() < 0)

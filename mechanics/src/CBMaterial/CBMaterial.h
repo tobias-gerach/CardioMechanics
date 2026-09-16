@@ -38,6 +38,7 @@ private:
         TFloat rayleighBeta_=0;
         TFloat tensionMax_=0;
         std::string tensionName_ = "not defined yet";
+        bool pk2ActiveTension_ = false;
         bool useSimpleElectroMechanicalFeedback_ = false;
         std::string simpleElectroMechanicalFeedbackType_;
         Matrix3<TFloat> conductivity_;
@@ -66,6 +67,7 @@ public:
     TFloat GetRayleighAlpha(){return(properties_->rayleighAlpha_); }
     TFloat GetRayleighBeta(){return(properties_->rayleighBeta_); }
     TFloat GetTensionMax(){return(properties_->tensionMax_); }
+    bool GetPK2ActiveTension(){return(properties_->pk2ActiveTension_); }
     Matrix3<TFloat> GetConductivity(){return(properties_->conductivity_);}
 protected:
     TInt                               materialIndex_;

@@ -16,6 +16,7 @@
 #define CB_ELEMENT_SOLID_T4_H
 
 #include "CBElementSolid.h"
+#include "CBElementKernel.h"
 #include <array>
 
 class CBElementSolidT4 : public CBElementSolid {
@@ -67,14 +68,10 @@ public:
     
 protected:
     void CalcShapeFunctionsDerivatives();
-    void CalcShapeFunctionDerivatives(TFloat l1, TFloat l2, TFloat l3, TFloat l4, TFloat *dNdX,
-                                      bool useReferenceNodes = false);
     void CalcDeformationTensorWithLocalBasis(const TFloat *nodesCoords, Matrix3<TFloat> &deformationTensor);
     void GetNodesCoordsIndices(TInt *nodesCoordsIndices);
-    virtual CBStatus CalcNodalForcesHelperFunction(const TFloat *nodesCoords, const bool *boundaryConditions, TFloat *forces);
     std::array<TInt, 4>   nodesIndices_;
-    std::array<TFloat, 12> dNdX_;     // partial derivates of the shape function Ni: âNi/âx Since this element is linear, the derivates are constant over the whole element.
-    TFloat detJ_ = 0;
+    CBReferenceGeometry<CBLinearTetBasis> geometry_{};  // under the single-point rule, set in UpdateShapeFunctions
     
     // ek717: needed for the CBAccelerate Plug in
     CBStatus GetDeformationTensorAtQuadraturePoints(Matrix3<TFloat> *f);
@@ -82,6 +79,11 @@ protected:
 private:
     typedef CBElement        Base;
     typedef CBElementSolid   Ancestor;
+    typedef CBElementKernel<CBLinearTetBasis, CBNoPressure> Kernel;
+
+    //! Kernel of this element at the current time.
+    Kernel MakeKernel();
+
     Matrix3<TFloat> basisAtQuadraturePoint_;
     CBElementSolidT4(const CBElementSolidT4 &);
     void operator=(const CBElementSolidT4 &);

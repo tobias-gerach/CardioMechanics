@@ -94,4 +94,11 @@ add_subdirectory(electrophysiology/src/acCELLerate)
 add_subdirectory(mechanics)
 add_subdirectory(tools)
 
+# Off by default, so that building and installing the binaries needs no GoogleTest.
+option(BUILD_TESTING "Build the C++ unit tests (requires GoogleTest)" OFF)
+if(BUILD_TESTING)
+    enable_testing()
+    add_subdirectory(mechanics/tests)
+endif()
+
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")

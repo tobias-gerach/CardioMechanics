@@ -227,6 +227,20 @@ void CBSolver::Init(ParameterMap *parameters, CBModel *model) {
     InitParameters();
     model_->SetMaxNnz(numNonZeros_);
     LoadMesh();
+
+    if (model_->GetNumberOfPressureNodes() > 0) {
+        if (!SupportsPressureField())
+            throw std::runtime_error("CBSolver::Init(): Solver [" + GetType() + "] does not support T10P1 elements");
+        // Evaluated once in the reference configuration, so that a material law without a mixed
+        // formulation fails here rather than inside the first solve.
+        for (auto &it : materials_) {
+            Matrix3<TFloat> stress;
+            TFloat energy;
+            it.second->GetConstitutiveModel()->CalcIsochoricPK2Stress(Matrix3<TFloat>::Identity(), stress);
+            it.second->GetConstitutiveModel()->CalcIsochoricEnergy(Matrix3<TFloat>::Identity(), energy);
+            it.second->GetConstitutiveModel()->GetBulkModulus();
+        }
+    }
     
     MPI_Barrier(DCPetsc::Comm());
     
@@ -443,7 +457,7 @@ void CBSolver::InitNodalForces() {
     else
         VecCreateSeq(PETSC_COMM_SELF, 3 * numNodes_, &nodalForces_);
     
-    VecSetLocalToGlobalMapping(nodalForces_, nodesIndicesMapping_);
+    VecSetLocalToGlobalMapping(nodalForces_, adapter_->GetNodesComponentsLocalToGlobalMapping());
     adapter_->LinkNodalForces(nodalForces_);
 }
 
@@ -487,6 +501,56 @@ void CBSolver::UpdateGhostNodesAndLinkToAdapter() {
     }
 } // CBSolver::UpdateGhostNodesAndLinkToAdapter
 
+void CBSolver::InitPressureVectors() {
+    PetscInt numLocalPressures = adapter_->GetNumberOfLocalPressureDofs();
+    const std::vector<PetscInt> &ghostPressures = adapter_->GetGhostPressureIndices();
+    if (DCCtrl::IsParallel())
+        VecCreateGhost(DCPetsc::Comm(), numLocalPressures, PETSC_DECIDE, ghostPressures.size(), ghostPressures.data(),
+                       &pressures_);
+    else
+        DCPetsc::CreateVector(numLocalPressures, PETSC_DETERMINE, &pressures_);
+    VecDuplicate(pressures_, &trialPressures_);
+    DCPetsc::CreateVector(numLocalPressures, PETSC_DETERMINE, &pressureResiduals_);
+    VecSetLocalToGlobalMapping(pressureResiduals_, adapter_->GetPressureLocalToGlobalMapping());
+    VecZeroEntries(pressures_);
+    VecZeroEntries(pressureResiduals_);
+    LinkPressures(pressures_);
+    adapter_->LinkPressureResiduals(pressureResiduals_);
+}
+
+void CBSolver::LinkPressures(Vec pressures) {
+    if (DCCtrl::IsParallel()) {
+        VecGhostUpdateBegin(pressures, INSERT_VALUES, SCATTER_FORWARD);
+        VecGhostUpdateEnd(pressures, INSERT_VALUES, SCATTER_FORWARD);
+    }
+    // The local form shares the storage of the field and lives as long as the field does, so the
+    // adapter may keep it after it is restored.
+    Vec localPressures;
+    VecGhostGetLocalForm(pressures, &localPressures);
+    adapter_->LinkPressures(localPressures);
+    VecGhostRestoreLocalForm(pressures, &localPressures);
+}
+
+void CBSolver::LinkTrialPressures(Vec unknowns, PetscScalar alpha) {
+    VecCopy(pressures_, trialPressures_);
+    AddBlock(trialPressures_, unknowns, adapter_->GetPressureDofs(), alpha);
+    LinkPressures(trialPressures_);
+}
+
+void CBSolver::AddBlock(Vec field, Vec unknowns, IS dofs, PetscScalar alpha) {
+    Vec block;
+    VecGetSubVector(unknowns, dofs, &block);
+    VecAXPY(field, alpha, block);
+    VecRestoreSubVector(unknowns, dofs, &block);
+}
+
+void CBSolver::SetBlock(Vec unknowns, IS dofs, Vec field) {
+    Vec block;
+    VecGetSubVector(unknowns, dofs, &block);
+    VecCopy(field, block);
+    VecRestoreSubVector(unknowns, dofs, &block);
+}
+
 void CBSolver::InitPlugins() {
     UpdateGhostNodesAndLinkToAdapter();
     adapter_->LinkNodalForcesJacobian(nodalForcesJacobian_);
@@ -523,7 +587,7 @@ void CBSolver::UpdateActiveStress(PetscScalar time) {
     // it->GetMaterial()->GetConstitutiveModel()->SetTemplateForce(activeStressData_->Get(time, it->GetIndex(), it->GetMaterialIndex()));
     // active stress currently gets scaled by the constitutive model, but should rather be in ActiveStressModel
     
-    // todo: instead of setting this here to zero, it should be remove from CalcNodalForcesHelperFunction in CBElementT4, CBElementT10, (partially done) and so on...
+    // todo: instead of setting this here to zero, it should be removed from the element kernel (CBElementKernel)...
     // activeStressTensorComponents_[cnt]        =  activeStressData_->Get(time, it->GetIndex(), it->GetMaterialIndex() );
     // activeStressTensorComponentsIndices_[cnt] = it->GetLocalIndex() + activeStressLowerIndex_;
     // cnt++;
@@ -536,6 +600,9 @@ void CBSolver::UpdateActiveStress(PetscScalar time) {
 }
 
 void CBSolver::Export(TFloat timeStep) {
+    // The previous frame is written on a thread that reads the model's export data, which the
+    // calls below overwrite, so it has to finish first or it writes a mix of both frames.
+    model_->GetExporter()->WaitForWriteToFile();
     UpdateGhostNodesAndLinkToAdapter();
     
     model_->SetCurrentTime(timeStep);
@@ -555,6 +622,8 @@ void CBSolver::Export(TFloat timeStep) {
     // (global?) plugin data
     for (auto &it : plugins_)
         it->Export(timeStep);
+    
+    ExportPressure();
     
     // per-element data
     
@@ -910,6 +979,29 @@ void CBSolver::ExportPK2Stress() {
     }
 } // CBSolver::ExportPK2Stress
 
+/// Pressure field of P2P1 elements as point data; absent from displacement-only models. Each
+/// rank inserts every node of its own elements, including nodes owned by another rank. Elements
+/// sharing a node insert the same value, because the field is continuous. The pressure is the
+/// solved unknown, p = kappa (J - 1): positive in tension, unlike hydrostatic or cavity pressure.
+void CBSolver::ExportPressure() {
+    if (model_->GetNumberOfPressureNodes() == 0)
+        return;
+
+    Vec pressure;
+    VecCreateMPI(DCPetsc::Comm(), numLocalNodes_, PETSC_DETERMINE, &pressure);
+    for (auto &e : solidElements_) {
+        unsigned int n = e->GetNumberOfNodesIndices();
+        std::vector<PetscInt>    nodes(n);
+        std::vector<PetscScalar> pressures(n);
+        for (unsigned int i = 0; i < n; i++)
+            nodes[i] = adapter_->GlobalNodeIndex(e->GetNodeIndex(i));
+        e->GetNodesPressures(pressures.data());
+        VecSetValues(pressure, n, nodes.data(), pressures.data(), INSERT_VALUES);
+    }
+    ExportNodesScalarData("Pressure", pressure);
+    VecDestroy(&pressure);
+}
+
 void CBSolver::ExportGreenLagrangeStrain() {
     if (model_->GetExporter()->GetExportOption("GreenLagrangeStrain", true)) {
         Vec diagonalElements;
@@ -1174,6 +1266,9 @@ void CBSolver::ExportLocalActivationTime() {
 } // CBSolver::ExportLocalActivationTime
 
 void CBSolver::DeInit() {
+    VecDestroy(&pressures_);
+    VecDestroy(&trialPressures_);
+    VecDestroy(&pressureResiduals_);
     if (formulation_ != 0)
         delete formulation_;
     if (activeStressData_ != 0)
@@ -1246,8 +1341,8 @@ void CBSolver::LoadMesh() {
     
     DCCtrl::print <<
     "\xd\t\tInitializing: Mesh: Nodes indices mapping ...                                                  ";
+    model_->InitPressureIndices();
     InitNodesIndicesMapping();
-    InitNodesIndicesMappingNonGhosted();
     
     DCCtrl::print <<
     "\xd\t\tInitializing: Mesh: Nodes ...                                                                  ";
@@ -1541,13 +1636,13 @@ void CBSolver::InitNodesComponentsBoundaryConditions() {
     
     if (DCCtrl::IsParallel()) {
         MatCreateAIJ(
-                     DCPetsc::Comm(), 3 * numLocalNodes_, 3 * numLocalNodes_, PETSC_DETERMINE, PETSC_DETERMINE, 3, PETSC_NULLPTR, 1, PETSC_NULLPTR,
+                     DCPetsc::Comm(), adapter_->GetNumberOfLocalDofs(), adapter_->GetNumberOfLocalDofs(), PETSC_DETERMINE, PETSC_DETERMINE, 3, PETSC_NULLPTR, 1, PETSC_NULLPTR,
                      &boundaryConditionsNodalForcesJacobianDiagonalComponents_);
         MatSetLocalToGlobalMapping(boundaryConditionsNodalForcesJacobianDiagonalComponents_, nodesIndicesMapping_,
                                    nodesIndicesMapping_);
     } else {
         MatCreateSeqAIJ(
-                        DCPetsc::Comm(), 3 * numNodes_, 3 * numNodes_, 3, PETSC_NULLPTR,
+                        DCPetsc::Comm(), adapter_->GetNumberOfLocalDofs(), adapter_->GetNumberOfLocalDofs(), 3, PETSC_NULLPTR,
                         &boundaryConditionsNodalForcesJacobianDiagonalComponents_);
         MatSetLocalToGlobalMapping(boundaryConditionsNodalForcesJacobianDiagonalComponents_, nodesIndicesMapping_,
                                    nodesIndicesMapping_);
@@ -1560,52 +1655,11 @@ void CBSolver::InitNodesIndicesMapping() {
     if (!isInitElementsDone_)
         throw std::runtime_error("CBSolver::InitElements() has to be run before CBSolver::InitNodesIndicesMapping()");
     
-    PetscInt  numTotalNodes = numLocalNodes_ + numGhostNodes_;
-    
-    PetscInt *globalNodesCoordsIndices = new PetscInt[3 * numTotalNodes];
-    
-    for (PetscInt i = 0; i < numTotalNodes; i++) {
-        if (i < numLocalNodes_) {
-            PetscInt n = (localNodesFrom_ + i);
-            globalNodesCoordsIndices[3 * i]     = 3 * n;
-            globalNodesCoordsIndices[3 * i + 1] = 3 * n + 1;
-            globalNodesCoordsIndices[3 * i + 2] = 3 * n + 2;
-        } else {
-            PetscInt n = (ghostNodes_[i - numLocalNodes_]);
-            globalNodesCoordsIndices[3 * i]     = 3 * n;
-            globalNodesCoordsIndices[3 * i + 1] = 3 * n + 1;
-            globalNodesCoordsIndices[3 * i + 2] = 3 * n + 2;
-        }
-    }
-    
-    ISLocalToGlobalMappingCreate(
-                                 DCPetsc::Comm(), 1, 3 * numTotalNodes, globalNodesCoordsIndices, PETSC_COPY_VALUES, &nodesIndicesMapping_);
-    
-    adapter_->LinkLocalToGlobalMapping(nodesIndicesMapping_);
-    delete[] globalNodesCoordsIndices;
+    // The adapter owns the layout of the global unknown vector, see ADR-0001.
+    adapter_->InitNodesIndicesMapping();
+    nodesIndicesMapping_           = adapter_->GetLocalToGlobalMapping();
+    nodesIndicesMappingNonGhosted_ = adapter_->GetLocalToGlobalMappingNonGhosted();
 } // CBSolver::InitNodesIndicesMapping
-
-void CBSolver::InitNodesIndicesMappingNonGhosted() {
-    if (!isInitElementsDone_) {
-        throw std::runtime_error(
-                                 "CBSolver::InitElements() has to be run before CBSolver::InitNodesIndicesMappingNonGhosted()");
-    }
-    
-    PetscInt *globalNodesCoordsIndices = new PetscInt[3 * numLocalNodes_];
-    
-    for (PetscInt i = 0; i < numLocalNodes_; i++) {
-        PetscInt n = (localNodesFrom_ + i);
-        globalNodesCoordsIndices[3 * i]     = 3 * n;
-        globalNodesCoordsIndices[3 * i + 1] = 3 * n + 1;
-        globalNodesCoordsIndices[3 * i + 2] = 3 * n + 2;
-    }
-    
-    ISLocalToGlobalMappingCreate(
-                                 DCPetsc::Comm(), 1, 3 * numLocalNodes_, globalNodesCoordsIndices, PETSC_COPY_VALUES, &nodesIndicesMappingNonGhosted_);
-    
-    adapter_->LinkLocalToGlobalMappingNonGhosted(nodesIndicesMappingNonGhosted_);
-    delete[] globalNodesCoordsIndices;
-}
 
 PetscScalar CBSolver::CalcFiniteDifferencesEpsilon(Vec a) {
     // adapted form snesj.c [petsc-3.3-p1]
@@ -1625,18 +1679,18 @@ PetscScalar CBSolver::CalcFiniteDifferencesEpsilon(Vec a) {
 }
 
 void CBSolver::CreateNodesJacobianAndLinkToAdapter() {
+    std::vector<PetscInt> nnz = adapter_->GetLocalDofsNnz();
     if (nodalForcesJacobian_ != 0)
         MatDestroy(&nodalForcesJacobian_);
     
     if (DCCtrl::IsParallel()) {
         MatCreateAIJ(
-                     DCPetsc::Comm(), 3 * numLocalNodes_, 3 * numLocalNodes_, PETSC_DETERMINE, PETSC_DETERMINE, 0,
-                     model_->GetNodeNeighborsForNnz().data() + localNodesFrom_*3, 0,
-                     model_->GetNodeNeighborsForNnz().data() + localNodesFrom_*3, &nodalForcesJacobian_);
+                     DCPetsc::Comm(), adapter_->GetNumberOfLocalDofs(), adapter_->GetNumberOfLocalDofs(), PETSC_DETERMINE, PETSC_DETERMINE, 0,
+                     nnz.data(), 0, nnz.data(), &nodalForcesJacobian_);
         MatSetLocalToGlobalMapping(nodalForcesJacobian_, nodesIndicesMapping_, nodesIndicesMapping_);
     } else {
-        [[maybe_unused]] PetscErrorCode ierr = MatCreateSeqAIJ(DCPetsc::Comm(), 3 * numNodes_, 3 * numNodes_, 0,
-                                              model_->GetNodeNeighborsForNnz().data(), &nodalForcesJacobian_);
+        [[maybe_unused]] PetscErrorCode ierr = MatCreateSeqAIJ(DCPetsc::Comm(), adapter_->GetNumberOfLocalDofs(), adapter_->GetNumberOfLocalDofs(), 0,
+                                              nnz.data(), &nodalForcesJacobian_);
         ierr = MatSetLocalToGlobalMapping(nodalForcesJacobian_, nodesIndicesMapping_, nodesIndicesMapping_);
     }
     adapter_->LinkNodalForcesJacobian(nodalForcesJacobian_);
@@ -2159,7 +2213,6 @@ void CBSolver::PrepareElements(std::vector<CBElementSolid *> elements) {
         throw std::runtime_error("CBSolver::PrepareElements(): InitNodes() and InitElements() has be finished first");
     
     UpdateGhostNodesAndLinkToAdapter();
-    adapter_->LinkLocalToGlobalMapping(nodesIndicesMapping_);
     
     for (auto &it : elements) {
         it->CheckNodeSorting();

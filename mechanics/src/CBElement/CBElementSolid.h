@@ -70,6 +70,16 @@ public:
     
     virtual TFloat *GetShapeFunctionsDerivatives() = 0;
     
+    /// Number of leading element nodes that carry a pressure degree of freedom; zero for
+    /// displacement-only elements.
+    virtual unsigned int GetNumberOfPressureNodesIndices() {return 0;}
+    
+    /// Pressure field at every element node, including nodes without a pressure degree of freedom.
+    virtual void GetNodesPressures(TFloat *pressures) {
+        throw std::runtime_error(
+                                 "CBElementSolid::GetNodesPressures(): This function is not implemented for the requested child class:");
+    }
+    
     virtual void CalcShapeFunctionDerivatives(TFloat l1, TFloat l2, TFloat l3, TFloat l4, TFloat *dNdX,
                                               bool useReferenceNodes = 0) {}
     
@@ -104,6 +114,9 @@ public:
     static void RepairDeformationTensorIfInverted(Matrix3<TFloat> &deformationTensor);
     
 protected:
+    //! Reports a corrupt element, which the status alone does not identify.
+    CBStatus ReportCorruptElement(CBStatus rc);
+
     TFloat initialVolume_;
     bool isDefect_ = false;
     Matrix3<TFloat> targetStrain = Matrix3<TFloat>::Identity();

@@ -27,6 +27,7 @@ public:
     virtual void Init(ParameterMap* parameters, CBModel* model);
     void DeInit();
     virtual std::string GetType(){return("Static Solver"); }
+    bool SupportsPressureField(){return true; }
     friend PetscErrorCode CBSolverEquilibriumSNESHelperFunctionForces(SNES snes, Vec x, Vec f, void* solver);
     friend PetscErrorCode CBSolverEquilibriumSNESHelperFunctionForcesJacobian(SNES snes, Vec x, Mat jacobian, Mat preconditionerMatrix, void* solver);
     
@@ -40,12 +41,15 @@ protected:
     using CBSolver::CalcNodalForces;
     CBStatus CalcNodalForces(Vec displacement, Vec forces);
     CBStatus CalcNodalForcesJacobian(Vec displacement, Mat jacobian);
+    /// displacedNodes = nodes + displacement increment; links pressures + pressure increment.
+    void ApplyIncrement(Vec unknowns, Vec displacedNodes);
     typedef CBSolver   Base;
     
     SNES snes_;
     int snesStep_ = 0;
     KSP  ksp_;
     PC   pc_;
+    // Unknown vectors hold the displacement increment, then the pressure increment (ADR-0001).
     Vec  residuum_;
     Vec  displacement_;
     Vec  initialGuess_;

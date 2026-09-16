@@ -76,6 +76,23 @@ def read_petsc_mat(path):
             "fro": float(np.sqrt((val ** 2).sum())), "vsum": float(val.sum())}
 
 
+def read_petsc_csr(path):
+    """A PETSc binary sparse matrix, in the format of read_petsc_mat, as a scipy CSR matrix. The file
+    must hold exactly one matrix."""
+    import scipy.sparse as sp
+
+    with open(str(path), "rb") as f:
+        classid, rows, cols, nnz = (int(x) for x in np.fromfile(f, dtype=">i4", count=4))
+        assert classid == 1211216, f"{path}: not a PETSc matrix (classid {classid})"
+        rowlen = np.fromfile(f, dtype=">i4", count=rows)
+        col = np.fromfile(f, dtype=">i4", count=nnz)
+        val = np.fromfile(f, dtype=">f8", count=nnz)
+        assert int(rowlen.sum()) == nnz and len(val) == nnz and not f.read(1), \
+            f"{path}: inconsistent, truncated, or more than one matrix"
+    return sp.csr_matrix((val.astype(float), col.astype(np.int64), np.concatenate([[0], np.cumsum(rowlen)])),
+                         shape=(rows, cols))
+
+
 def read_petsc_vec(path):
     """Invariants of a PETSc binary vector: dict(n, l2, vsum)."""
     with open(str(path), "rb") as f:
@@ -110,13 +127,27 @@ def read_vtu_points(path):
     import meshio
 
     m = meshio.read(str(path))
-    pts = m.points
-    pid = m.point_data.get("PointID")
+    return _by_point_id(m, m.points)
+
+
+def read_vtu_point_field(path, name):
+    """Named point-data field from a VTU, ordered by PointID, as read_vtu_points.
+    Returns (pointid, values), scalar fields squeezed to 1-D. Requires meshio."""
+    import meshio
+
+    m = meshio.read(str(path))
+    pid, vals = _by_point_id(m, np.asarray(m.point_data[name]))
+    return pid, vals.squeeze()
+
+
+def _by_point_id(mesh, values):
+    """(pointid, values) of per-point values ordered by PointID, in file order if there is none."""
+    pid = mesh.point_data.get("PointID")
     if pid is None:
-        return np.arange(len(pts)), pts
+        return np.arange(len(values)), values
     pid = np.asarray(pid).ravel()
     order = np.argsort(pid, kind="stable")
-    return pid[order], pts[order]
+    return pid[order], values[order]
 
 
 def read_vtu_cell_field(path, name):

@@ -45,7 +45,7 @@ CBStatus CBConstitutiveModelNeoHooke::CalcEnergy(const Matrix3<TFloat> &deformat
     TFloat J              = deformationTensor.Det();
     Matrix3<TFloat> C     = deformationTensor.GetTranspose() * deformationTensor;
     TFloat I3_C           = C.Invariant3();
-    Matrix3<TFloat> C_dist = pow(I3_C, -1/3) * C;
+    Matrix3<TFloat> C_dist = pow(I3_C, -1.0 / 3.0) * C;
     
     /// distortional component
     TFloat dist = (a_/2) * (C_dist.Invariant1() - 3);
@@ -65,19 +65,46 @@ CBStatus CBConstitutiveModelNeoHooke::CalcEnergy(const Matrix3<TFloat> &deformat
 
 CBStatus CBConstitutiveModelNeoHooke::CalcPK2Stress(const Matrix3<TFloat> &deformationTensor,
                                                     Matrix3<TFloat> &pk2Stress) {
+    CBStatus rc = CalcIsochoricPK2Stress(deformationTensor, pk2Stress);
+    if (rc != CBStatus::SUCCESS)
+        return rc;
+
+    TFloat J              = deformationTensor.Det();
+    Matrix3<TFloat> C_inv = (deformationTensor.GetTranspose() * deformationTensor).GetInverse();
+    TFloat p              = k_*(J - 1);
+
+    pk2Stress += p * J * C_inv;
+
+    return CBStatus::SUCCESS;
+}  // CBConstitutiveModelNeoHooke::CalcPK2Stress
+
+CBStatus CBConstitutiveModelNeoHooke::CalcIsochoricPK2Stress(const Matrix3<TFloat> &deformationTensor,
+                                                             Matrix3<TFloat> &pk2Stress) {
     if (!Base::ignoreCorruptElements_) {
         if (deformationTensor.Det() <= 0)
             return CBStatus::CORRUPT_ELEMENT;
     }
     
-    TFloat J              = deformationTensor.Det();
     Matrix3<TFloat> C     = deformationTensor.GetTranspose() * deformationTensor;
     Matrix3<TFloat> C_inv = C.GetInverse();
     TFloat I1_C           = C.Invariant1();
     TFloat I3_C           = C.Invariant3();
-    TFloat p              = k_*(J - 1);
     
-    pk2Stress = a_ * pow(I3_C, -1/3) * (identity_ - (I1_C * C_inv)/3) + p * J * C_inv;
+    pk2Stress = a_ * pow(I3_C, -1.0 / 3.0) * (identity_ - (I1_C * C_inv)/3);
     
     return CBStatus::SUCCESS;
-}  // CBConstitutiveModelNeoHooke::CalcPK2Stress
+}  // CBConstitutiveModelNeoHooke::CalcIsochoricPK2Stress
+
+CBStatus CBConstitutiveModelNeoHooke::CalcIsochoricEnergy(const Matrix3<TFloat> &deformationTensor, TFloat &energy) {
+    if (!Base::ignoreCorruptElements_) {
+        if (deformationTensor.Det() <= 0)
+            return CBStatus::CORRUPT_ELEMENT;
+    }
+
+    Matrix3<TFloat> C      = deformationTensor.GetTranspose() * deformationTensor;
+    Matrix3<TFloat> C_dist = pow(C.Invariant3(), -1.0 / 3.0) * C;
+
+    energy = (a_/2) * (C_dist.Invariant1() - 3);
+
+    return CBStatus::SUCCESS;
+}  // CBConstitutiveModelNeoHooke::CalcIsochoricEnergy

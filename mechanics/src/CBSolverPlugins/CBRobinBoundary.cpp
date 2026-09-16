@@ -119,7 +119,6 @@ void CBRobinBoundary::ApplyToNodalForces() {
     
     for (int i = 0; i < contactSurfaceElements_.size(); i++) {
         auto element = contactSurfaceElements_.at(i);
-        TInt nodesCoordsIndices[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
         TFloat nodalForces[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
         bool   bc[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
         
@@ -128,12 +127,9 @@ void CBRobinBoundary::ApplyToNodalForces() {
         velocity_.at(i)      = Vector3<TFloat>(0, 0, 0);
         
         /// add nodal forces to global vector
-        for (int k = 0; k < 3; k++) {
-            nodesCoordsIndices[3*k]   = 3.0 * element->GetNodeIndex(k);
-            nodesCoordsIndices[3*k+1] = 3.0 * element->GetNodeIndex(k)+1;
-            nodesCoordsIndices[3*k+2] = 3.0 * element->GetNodeIndex(k)+2;
-        }
-        adapter_->ApplyLocalToGlobalMapping(nodesCoordsIndices, 9);
+        TInt nodes[3];
+        for (int k = 0; k < 3; k++)
+            nodes[k] = adapter_->GlobalNodeIndex(element->GetNodeIndex(k));
         
         displacement_.at(i) = initialPos_.at(i) - element->GetCentroid();
         velocity_.at(i)     = (displacement_.at(i) - prevDisplacement_.at(i)) / dt_;
@@ -141,7 +137,7 @@ void CBRobinBoundary::ApplyToNodalForces() {
         CalcForceContributionOfElement(displacement_.at(i), velocity_.at(i), element, nodalForces);
         
         /// respect dirichlet boundary conditions
-        Base::GetAdapter()->GetNodesComponentsBoundaryConditionsGlobal(9, nodesCoordsIndices, bc);
+        Base::GetAdapter()->GetNodesComponentsBoundaryConditionsForGlobalNodes(3, nodes, bc);
         for (int k = 0; k < 3; k++) {
             if (bc[3*k] != 0) {
                 nodalForces[3*k] = 0;
@@ -154,7 +150,7 @@ void CBRobinBoundary::ApplyToNodalForces() {
             }
             ContactForces_.at(i)    += Vector3<TFloat>(nodalForces[3*k], nodalForces[3*k+1], nodalForces[3*k+2])/3;
         }
-        Base::GetAdapter()->AddNodalForcesComponentsGlobal(9, nodesCoordsIndices, nodalForces);
+        Base::GetAdapter()->AddNodalForcesComponentsGlobal(3, nodes, nodalForces);
     }
 }  // CBRobinBoundary::ApplyToNodalForces
 

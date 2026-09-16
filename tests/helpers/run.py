@@ -1,12 +1,13 @@
 import subprocess
 
 
-def run_binary(binary, args, cwd, env, timeout=300, np=None):
+def run_binary(binary, args, cwd, env, timeout=300, np=None, check=True):
     """Run a binary in cwd with env, asserting a clean exit.
 
     args entries are stringified so Paths and numbers can be passed directly.
     Pass np=<ranks> to launch under `mpirun -np <ranks>`. On failure the
-    assertion carries the exit code and the tail of stderr.
+    assertion carries the exit code and the tail of stderr. Pass check=False to
+    return the completed process untouched, for runs that are meant to abort.
     """
     cmd = ["mpirun", "-np", str(np)] if np else []
     cmd += [str(binary), *(str(a) for a in args)]
@@ -23,8 +24,23 @@ def run_binary(binary, args, cwd, env, timeout=300, np=None):
         errors="replace",
         timeout=timeout,
     )
-    assert proc.returncode == 0, (
-        f"{binary} exited {proc.returncode}\n"
-        f"args: {args}\n--- stderr (tail) ---\n{proc.stderr[-2000:]}"
-    )
+    if check:
+        assert proc.returncode == 0, (
+            f"{binary} exited {proc.returncode}\n"
+            f"args: {args}\n--- stderr (tail) ---\n{proc.stderr[-2000:]}"
+        )
     return proc
+
+
+def assert_refused(proc, *names):
+    """The run aborted with an error message naming every one of names on one line."""
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, f"expected a non-zero exit\n{out[-2000:]}"
+    assert any("error" in line.lower() and all(n in line for n in names) for line in out.splitlines()), \
+        f"no error names {names}\n{out[-2000:]}"
+
+
+def assert_no_petsc_error(output):
+    """CardioMechanics ignores most PETSc return codes, so an error often shows only in its output."""
+    first = output.find("PETSC ERROR")
+    assert first < 0, f"PETSc reported an error:\n{output[output.rfind(chr(10), 0, first) + 1:][:2000]}"
