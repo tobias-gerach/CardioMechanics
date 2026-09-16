@@ -1,11 +1,11 @@
-"""Truncated ellipsoid of the Land et al. (2015) benchmark problems 2 and 3, meshed by gmsh as curved
-second-order tetrahedra and carrying the analytic fibre field of problem 3.
+"""Truncated ellipsoid of the Land et al. (2015) benchmark problems 2 and 3, meshed by gmsh as
+tetrahedra and carrying the analytic fibre field of problem 3.
 
 Run from tests/ as `python -m helpers.ellipsoid DIRECTORY --level K` to write one mesh of the family.
 """
 import numpy as np
 
-from helpers.gmsh_tetgen import TETRAHEDRON10, write_tetgen
+from helpers.gmsh_tetgen import LAYOUTS, write_tetgen
 
 MATERIAL = 30                              # physical tag of the volume
 ENDO, EPI, BASE = 1, 2, 3                  # physical tags of the surfaces, as in examples/benchmark2015
@@ -55,12 +55,18 @@ def fibre_frames(X):
     return np.stack([fibre, sheet, np.cross(fibre, sheet)], axis=1)
 
 
-def write_ellipsoid(directory, level):
+def write_ellipsoid(directory, level, order=2, curved=True):
     """Write the ellipsoid at refinement level `level` as tetgen ellipsoid.node, .ele, .sur and .bases
     into directory, in mm. The element size grows linearly in z from SIZE_APEX at the apex to
     SIZE_BASE at the base, both divided by sqrt(2) per level, which about triples the elements. The
-    base nodes are fixed in all directions. The endocardium, epicardium and base are written as
-    six-node faces with surface indices ENDO, EPI and BASE. Returns the numbers of elements and nodes."""
+    base nodes are fixed in all directions. The endocardium, epicardium and base are written as faces
+    of the element order with surface indices ENDO, EPI and BASE. Returns the numbers of elements and
+    nodes.
+
+    order 1 writes T4 elements, order 2 T10 elements. With curved=False the mid-edge nodes stay at
+    the edge midpoints instead of moving onto the curved boundary, so the T10 mesh covers exactly the
+    domain of the T4 mesh of the same level: comparing element types on the two then measures the
+    discretization alone, not the geometry."""
     import gmsh
 
     gmsh.initialize(interruptible=False)
@@ -95,7 +101,9 @@ def write_ellipsoid(directory, level):
             gmsh.option.setNumber(option, 0)
         gmsh.model.mesh.generate(3)
         gmsh.model.mesh.optimize("Netgen")
-        gmsh.model.mesh.setOrder(2)
+        if order == 2:
+            gmsh.option.setNumber("Mesh.SecondOrderLinear", 0 if curved else 1)
+            gmsh.model.mesh.setOrder(2)
 
         # The quantities of interest are the displacements of the two apex points, read at nodes.
         coords = gmsh.model.mesh.getNodes()[1].reshape(-1, 3)
@@ -108,8 +116,8 @@ def write_ellipsoid(directory, level):
         # coordinates of vertices 2 to 4.
         frames = []
         for entity in gmsh.model.getEntitiesForPhysicalGroup(3, MATERIAL):
-            _, det, points = gmsh.model.mesh.getJacobians(TETRAHEDRON10, BASIS_POINTS[:, 1:].ravel(), entity)
-            assert np.all(det > 0), "a curved element is inverted at a basis point"
+            _, det, points = gmsh.model.mesh.getJacobians(LAYOUTS[order][0], BASIS_POINTS[:, 1:].ravel(), entity)
+            assert np.all(det > 0), "an element is inverted at a basis point"
             frames.append(fibre_frames(points.reshape(-1, 3)).reshape(-1, 9 * len(BASIS_POINTS)))
         frames = np.vstack(frames)
         with open(directory / "ellipsoid.bases", "w") as out:
@@ -131,4 +139,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
     args.directory.mkdir(parents=True, exist_ok=True)
     elements, nodes = write_ellipsoid(args.directory, args.level)
-    print(f"level {args.level}: {elements} T10 elements, {nodes} nodes")
+    print(f"level {args.level}: {elements} elements, {nodes} nodes")
