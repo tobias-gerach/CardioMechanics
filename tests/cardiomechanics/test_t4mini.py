@@ -61,7 +61,10 @@ def test_t4mini_static_run_converges_and_exports_pressure(binary, cm_env, tmp_pa
 
 
 @pytest.mark.mpi
-@pytest.mark.parametrize("fixture", [FIXTURE, DYNAMIC_FIXTURE], ids=["static", "generalized_alpha"])
+@pytest.mark.parametrize("fixture", [
+    pytest.param(FIXTURE, id="static"),
+    pytest.param(DYNAMIC_FIXTURE, id="generalized_alpha", marks=pytest.mark.slow),
+])
 def test_t4mini_parallel_matches_serial(binary, cm_env, tmp_path, fixture):
     """Every node carries a pressure, unlike on P2P1, so each rank's pressure block spans all its
     nodes and a rank shifts its displacement unknowns by every node of the ranks before it. An

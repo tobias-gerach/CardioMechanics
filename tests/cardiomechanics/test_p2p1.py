@@ -332,6 +332,7 @@ def test_p2p1_parallel_matches_serial(binary, cm_env, tmp_path):
 
 
 @pytest.mark.mpi
+@pytest.mark.slow
 def test_p2p1_generalized_alpha_parallel_matches_serial(binary, cm_env, tmp_path):
     """The mass and damping matrices are laid out like the nodes, the unknowns like each rank's
     displacements followed by its pressures, so on every rank but the first adding one to the other
@@ -343,6 +344,7 @@ MIN_ROBIN_EFFECT = 0.05     # relative change of the peak displacement
 
 
 @pytest.mark.mpi
+@pytest.mark.slow
 def test_p2p1_robin_boundary_parallel_matches_serial(binary, cm_env, tmp_path):
     """A Robin boundary adds its forces by global node rather than through the element mapping,
     from surface elements on every rank."""
