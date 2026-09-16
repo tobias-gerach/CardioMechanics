@@ -39,27 +39,11 @@ matches its displacement L2 order and exceeds none of its orders. Its displaceme
 vertex field, without the condensed bubble, which is never stored. The deformed points are single
 precision, which moves them by at most 1.2e-7, far below the finest error.
 
-The rates are asserted between the two finest levels of each family, because the coarsest mesh has
-only two elements across the wall.
-
-P2P1 runs under both quadrature rules of Mesh.QuadratureDegree: the default 4-point rule of degree
-2 and the 14-point rule of degree 5. J is cubic on an affine element, so the constraint integrand
-N_a (J - 1 - p / kappa) is of degree 4, which only the second integrates exactly. The rules also
-differ in their weights: the default takes the determinant of the element map at the centroid, the
-14-point rule at each point. Only the determinant matters here. On the curved elements at the
-spheres the centroid determinant nearly doubles the finest displacement L2 and pressure errors, whereas the 4-point
-rule with pointwise determinants matches the 14-point rule to 0.6%.
-
-T4MINI runs under both rules as well. Its elements are affine, so the rules share the determinant
-and differ only in the terms the bubble makes non-polynomial of high degree, which neither
-integrates exactly. Both keep the MINI orders, so the 4-point rule does not destabilise the
-pressure, and the 14-point rule is the less accurate: at the finest level its displacement errors
-are 4% (L2) and 2% (H1) larger and its pressure error 63% larger.
-
-Serial runtime, P2P1: 0.3 s, 1.6 s and 27 s at sizes 0.5, 0.25 and 0.125; the fourth level, in the
-slow family, takes about 20 min. T10 needs 87 s at size 0.125 and is slow as well, and so is every
-run under the 14-point rule. T4MINI needs 3 s, 24 s and 4.5 min at sizes 0.25, 0.125 and 0.0625
-under the 4-point rule, and about 2.5 times as long under the 14-point rule.
+The rates are asserted on the coarse family under the default quadrature rule, between its two
+finest levels, because the coarsest mesh has only two elements across the wall. The fine family,
+the 14-point rule and the T10 rates are a study, tools/python/verification/sphere_convergence.py.
+Serial runtime: P2P1 0.3 s, 1.6 s and 27 s at sizes 0.5, 0.25 and 0.125, T4MINI 3 s and 24 s at the
+last two.
 """
 import re
 from pathlib import Path
@@ -79,17 +63,15 @@ FIXTURE = Path(__file__).parent / "fixtures" / "sphere_octant.xml"
 PRESSURE = -float(re.search(r"<Amplitude>(.*?)</Amplitude>", FIXTURE.read_text()).group(1))
 SHEAR = float(re.search(r"<a>(.*?)</a>", FIXTURE.read_text()).group(1))
 KAPPA = float(re.search(r"<k>(.*?)</k>", FIXTURE.read_text()).group(1))
-SIZES = (0.5, 0.25, 0.125, 0.0625)         # gmsh element sizes of the mesh family
-DEGREES = (2, 5)                           # Mesh.QuadratureDegree
+SIZES = (0.5, 0.25, 0.125, 0.0625)         # gmsh element sizes of the coarse and fine families
 MESH_ORDER = {"T10": 2, "T10P1": 2, "T4MINI": 1}
 # Orders of the mixed elements. P2P1: displacement O(h^3) in L2 and O(h^2) in H1, pressure O(h^2)
 # in L2. MINI: displacement O(h^2) in L2 and O(h) in H1, pressure O(h) in L2.
 ORDERS = {"T10P1": {"displacement L2": 3, "displacement H1": 2, "pressure L2": 2},
           "T4MINI": {"displacement L2": 2, "displacement H1": 1, "pressure L2": 1}}
-# Before the asymptotic range the P2P1 rates fall short of the orders by up to 0.24 on the coarse
-# family and 0.20 on the fine one, both in the pressure, and the T4MINI rates by up to 0.06, in the
-# displacement L2 error on the coarse family. The tolerance still fails the loss of half an order,
-# as from a boundary, constraint or load integration error.
+# Before the asymptotic range the P2P1 rates fall short of the orders by up to 0.24, in the
+# pressure, and the T4MINI rates by up to 0.06, in the displacement L2 error. The tolerance still
+# fails the loss of half an order, as from a boundary, constraint or load integration error.
 RATE_TOL = 0.3
 # The reference is not polynomial and the T10 elements are curved, so no rule is exact. Against a
 # degree 10 rule the norms move by at most 2e-5 relative on the T10 meshes and 3e-7 on the T4
@@ -98,6 +80,8 @@ QUADRATURE = "Gauss6"
 COMPLEX_STEP = 1e-30
 # Faces of a T10: three vertices, then the mid-edge nodes of their edges in T6 order.
 T10_FACES = ((0, 1, 2, 4, 5, 6), (0, 1, 3, 4, 8, 7), (0, 2, 3, 6, 9, 7), (1, 2, 3, 5, 9, 8))
+
+pytestmark = pytest.mark.slow
 
 
 def cauchy_stress(l_r, l_t, a, kappa):
@@ -207,6 +191,26 @@ def _table(label, errors):
     return "\n".join(lines)
 
 
+def _run_octant(binary, env, wd, element_type, size, reference, degree=2):
+    """Stages the octant at the gmsh element size into the empty directory wd, runs it under
+    Mesh.QuadratureDegree degree and returns its discretization_errors."""
+    (wd / "tetgen").mkdir()
+    (wd / "Results").mkdir()
+    order = MESH_ORDER[element_type]
+    write_sphere_octant(wd / "tetgen", size, order)
+    text = FIXTURE.read_text()
+    for old, new in [("<Type>T10P1</Type>", f"<Type>{element_type}</Type>"),
+                     ("<Type>T6</Type>", f"<Type>{'T6' if order == 2 else 'T3'}</Type>"),
+                     ("<Format>Tetgen</Format>",
+                      f"<Format>Tetgen</Format><QuadratureDegree>{degree}</QuadratureDegree>")]:
+        assert text.count(old) == 1, f"{FIXTURE.name}: cannot substitute {old}"
+        text = text.replace(old, new)
+    (wd / FIXTURE.name).write_text(text)
+    proc = run_binary(binary("CardioMechanics"), ["-settings", FIXTURE.name], cwd=wd, env=env, timeout=7200)
+    assert "SIMULATION FAILED" not in proc.stdout, proc.stdout[-2000:]
+    return discretization_errors(wd, element_type, reference)
+
+
 @pytest.fixture(scope="module")
 def errors_at(binary, cm_env, tmp_path_factory):
     """Discretization errors of one element type at one mesh size, each run once per module."""
@@ -215,25 +219,11 @@ def errors_at(binary, cm_env, tmp_path_factory):
     reference = radial_solution(PRESSURE, SHEAR, KAPPA)
     cache = {}
 
-    def run(element_type, size, degree=DEGREES[0]):
-        if (element_type, size, degree) not in cache:
-            wd = tmp_path_factory.mktemp(f"{element_type}_{size}_{degree}")
-            (wd / "tetgen").mkdir()
-            (wd / "Results").mkdir()
-            order = MESH_ORDER[element_type]
-            write_sphere_octant(wd / "tetgen", size, order)
-            text = FIXTURE.read_text()
-            for old, new in [("<Type>T10P1</Type>", f"<Type>{element_type}</Type>"),
-                             ("<Type>T6</Type>", f"<Type>{'T6' if order == 2 else 'T3'}</Type>"),
-                             ("<Format>Tetgen</Format>",
-                              f"<Format>Tetgen</Format><QuadratureDegree>{degree}</QuadratureDegree>")]:
-                assert text.count(old) == 1, f"{FIXTURE.name}: cannot substitute {old}"
-                text = text.replace(old, new)
-            (wd / FIXTURE.name).write_text(text)
-            proc = run_binary(binary("CardioMechanics"), ["-settings", FIXTURE.name], cwd=wd, env=cm_env, timeout=7200)
-            assert "SIMULATION FAILED" not in proc.stdout, proc.stdout[-2000:]
-            cache[element_type, size, degree] = discretization_errors(wd, element_type, reference)
-        return cache[element_type, size, degree]
+    def run(element_type, size):
+        if (element_type, size) not in cache:
+            wd = tmp_path_factory.mktemp(f"{element_type}_{size}")
+            cache[element_type, size] = _run_octant(binary, cm_env, wd, element_type, size, reference)
+        return cache[element_type, size]
     return run
 
 
@@ -305,36 +295,12 @@ def test_reference_approaches_lame_solution():
 
 
 @pytest.mark.parametrize("norm", ["displacement L2", "displacement H1", "pressure L2"])
-@pytest.mark.parametrize("sizes", [SIZES[:3], pytest.param(SIZES[1:], marks=pytest.mark.slow)], ids=["coarse", "fine"])
-@pytest.mark.parametrize("degree", [DEGREES[0], pytest.param(DEGREES[1], marks=pytest.mark.slow)],
-                         ids=[f"degree{d}" for d in DEGREES])
 @pytest.mark.parametrize("element_type", list(ORDERS))
-def test_mixed_element_converges_at_expected_rate(errors_at, element_type, degree, sizes, norm):
+def test_mixed_element_converges_at_expected_rate(errors_at, element_type, norm):
     """Asserted on the finest pair of levels; every rate is shown with -rP."""
-    errors = [errors_at(element_type, s, degree) for s in sizes]
-    label = f"{element_type} degree {degree}"
-    print(_table(label, errors))
+    errors = [errors_at(element_type, s) for s in SIZES[:3]]
+    print(_table(element_type, errors))
     rate = rates(errors)[norm][-1]
     order = ORDERS[element_type][norm]
     assert rate >= order - RATE_TOL, (f"{norm} converges at {rate:.2f}, below the {element_type} order "
-                                      f"{order} less {RATE_TOL}\n{_table(label, errors)}")
-
-
-@pytest.mark.slow
-@pytest.mark.parametrize("element_type", list(ORDERS))
-def test_quadrature_degrees_are_compared(errors_at, element_type):
-    """The errors under both rules, and their ratio at each level, shown with -rP."""
-    errors = {d: [errors_at(element_type, s, d) for s in SIZES] for d in DEGREES}
-    for d in DEGREES:
-        print(_table(f"{element_type} degree {d}", errors[d]))
-    norms = [k for k in errors[DEGREES[0]][0] if k != "h"]
-    print(f"degree {DEGREES[1]} / degree {DEGREES[0]}: " + "  ".join(f"{k:>16}" for k in norms))
-    for low, high in zip(errors[DEGREES[0]], errors[DEGREES[1]]):
-        print("  " + "  ".join(f"{high[k] / low[k]:16.4f}" for k in norms))
-
-
-@pytest.mark.slow
-def test_t10_rates_are_reported(errors_at):
-    """T10 converges to the same solution but locks at this kappa, which also slows its Newton
-    iteration; its rates are shown with -rP, not asserted."""
-    print(_table("T10", [errors_at("T10", s) for s in SIZES[:3]]))
+                                      f"{order} less {RATE_TOL}\n{_table(element_type, errors)}")
