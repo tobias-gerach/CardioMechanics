@@ -13,6 +13,7 @@
 
 #include "CBLinearSolverOptions.h"
 
+#include <algorithm>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -21,21 +22,28 @@
 
 namespace {
 
-void Check(PetscErrorCode ierr, const std::string &what) {
+void Check(PetscErrorCode ierr, const std::string &what, const std::string &caller = "InsertLinearSolverOptions()") {
     if (ierr != PETSC_SUCCESS)
-        throw std::runtime_error("InsertLinearSolverOptions(): PETSc failed to " + what);
+        throw std::runtime_error(caller + ": PETSc failed to " + what);
 }
 
 }  // namespace
 
 std::string LinearSolverPresetOptions(const std::string &name, bool parallel) {
+    // MUMPS compresses a matrix with block size above 1 before ordering it. The displacement Jacobian has block size
+    // 3 for multigrid; compression would change the ordering, and so the results, of the direct solve.
     if (name == "direct")
-        return "-mech_ksp_type preonly -mech_pc_type lu -mech_pc_factor_mat_solver_type mumps";
+        return "-mech_ksp_type preonly -mech_pc_type lu -mech_pc_factor_mat_solver_type mumps -mech_mat_mumps_icntl_15 0";
     if (name == "direct-superlu")
         return std::string("-mech_ksp_type preonly -mech_pc_type lu -mech_pc_factor_mat_solver_type ") +
                (parallel ? "superlu_dist" : "superlu");
+    const std::string krylov = "-mech_ksp_type gmres -mech_ksp_gmres_restart 100 -mech_ksp_rtol 1e-8";
+    if (name == "amg")
+        return krylov + " -mech_pc_type gamg";
+    if (name == "amg-hypre")
+        return krylov + " -mech_pc_type hypre -mech_pc_hypre_type boomeramg";
     throw std::runtime_error("Solver.LinearSolver.Preset: unknown preset " + name +
-                             ". Valid presets are direct, direct-superlu.");
+                             ". Valid presets are direct, direct-superlu, amg, amg-hypre.");
 }
 
 void RejectRemovedLinearSolverKeys(ParameterMap &parameters) {
@@ -80,4 +88,29 @@ void InsertLinearSolverOptions(PetscOptions db, const std::string &presetOptions
         if (!given)
             Check(PetscOptionsSetValue(db, name.c_str(), value), "set " + name);
     }
+}
+
+MatNullSpace CreateRigidBodyModes(Vec coordinates) {
+    // PETSc reads the spatial dimension from the block size, which the coordinates of the solver do not carry.
+    const std::string caller = "CreateRigidBodyModes()";
+    PetscInt n, N;
+    Vec blocked;
+    Check(VecGetLocalSize(coordinates, &n), "get the local size", caller);
+    Check(VecGetSize(coordinates, &N), "get the size", caller);
+    Check(VecCreate(PetscObjectComm((PetscObject)coordinates), &blocked), "create the coordinates", caller);
+    Check(VecSetSizes(blocked, n, N), "size the coordinates", caller);
+    Check(VecSetBlockSize(blocked, 3), "set the block size", caller);
+    Check(VecSetType(blocked, VECSTANDARD), "set the vector type", caller);
+    const PetscScalar *from;
+    PetscScalar       *to;
+    Check(VecGetArrayRead(coordinates, &from), "read the coordinates", caller);
+    Check(VecGetArrayWrite(blocked, &to), "write the coordinates", caller);
+    std::copy_n(from, n, to);
+    Check(VecRestoreArrayWrite(blocked, &to), "write the coordinates", caller);
+    Check(VecRestoreArrayRead(coordinates, &from), "read the coordinates", caller);
+    
+    MatNullSpace modes;
+    Check(MatNullSpaceCreateRigidBody(blocked, &modes), "create the rigid-body modes", caller);
+    VecDestroy(&blocked);
+    return modes;
 }

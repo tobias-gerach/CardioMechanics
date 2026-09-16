@@ -1314,6 +1314,7 @@ void CBSolver::DeInit() {
     }
     
     MatDestroy(&boundaryConditionsNodalForcesJacobianDiagonalComponents_);
+    MatNullSpaceDestroy(&rigidBodyModes_);
     VecDestroy(&nodes_);
     
     if (nodesSeq_)
@@ -1692,7 +1693,7 @@ PetscScalar CBSolver::CalcFiniteDifferencesEpsilon(Vec a) {
     return dx;
 }
 
-Mat CBSolver::CreatePreallocatedMatrix(PetscInt numLocalRows, const PetscInt *nnz) {
+Mat CBSolver::CreatePreallocatedMatrix(PetscInt numLocalRows, const PetscInt *nnz, PetscInt blockSize) {
     PetscInt numRows;
     MPI_Allreduce(&numLocalRows, &numRows, 1, MPIU_INT, MPI_SUM, DCPetsc::Comm());
     std::vector<PetscInt> diagonal(numLocalRows), offDiagonal(numLocalRows);
@@ -1700,12 +1701,18 @@ Mat CBSolver::CreatePreallocatedMatrix(PetscInt numLocalRows, const PetscInt *nn
         diagonal[i]    = std::min(nnz[i], numLocalRows);
         offDiagonal[i] = std::min(nnz[i], numRows - numLocalRows);
     }
+    // PETSc fixes the block size at preallocation.
     Mat matrix;
-    if (DCCtrl::IsParallel())
-        MatCreateAIJ(DCPetsc::Comm(), numLocalRows, numLocalRows, PETSC_DETERMINE, PETSC_DETERMINE, 0, diagonal.data(), 0,
-                     offDiagonal.data(), &matrix);
-    else
-        MatCreateSeqAIJ(DCPetsc::Comm(), numLocalRows, numLocalRows, 0, diagonal.data(), &matrix);
+    MatCreate(DCPetsc::Comm(), &matrix);
+    MatSetSizes(matrix, numLocalRows, numLocalRows, PETSC_DETERMINE, PETSC_DETERMINE);
+    MatSetBlockSize(matrix, blockSize);
+    if (DCCtrl::IsParallel()) {
+        MatSetType(matrix, MATMPIAIJ);
+        MatMPIAIJSetPreallocation(matrix, 0, diagonal.data(), 0, offDiagonal.data());
+    } else {
+        MatSetType(matrix, MATSEQAIJ);
+        MatSeqAIJSetPreallocation(matrix, 0, diagonal.data());
+    }
     return matrix;
 }
 
@@ -1736,10 +1743,21 @@ void CBSolver::InitLinearSolver(SNES snes) {
     }
 }
 
+void CBSolver::AttachRigidBodyModes(Mat jacobian) {
+    if (model_->GetNumberOfPressureNodes() > 0)
+        return;
+    if (!rigidBodyModes_)
+        rigidBodyModes_ = CreateRigidBodyModes(refNodes_);
+    MatSetNearNullSpace(jacobian, rigidBodyModes_);
+}
+
 void CBSolver::CreateNodesJacobianAndLinkToAdapter() {
     if (nodalForcesJacobian_ != 0)
         MatDestroy(&nodalForcesJacobian_);
-    nodalForcesJacobian_ = CreatePreallocatedMatrix(adapter_->GetNumberOfLocalDofs(), adapter_->GetLocalDofsNnz().data());
+    // Algebraic multigrid treats the three displacement components of a node as one block. A pressure field breaks
+    // the blocks, and InitLinearSolver refuses multigrid for it.
+    nodalForcesJacobian_ = CreatePreallocatedMatrix(adapter_->GetNumberOfLocalDofs(), adapter_->GetLocalDofsNnz().data(),
+                                                    model_->GetNumberOfPressureNodes() == 0 ? 3 : 1);
     MatSetLocalToGlobalMapping(nodalForcesJacobian_, nodesIndicesMapping_, nodesIndicesMapping_);
     adapter_->LinkNodalForcesJacobian(nodalForcesJacobian_);
 }

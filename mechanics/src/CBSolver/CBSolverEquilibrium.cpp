@@ -28,6 +28,7 @@ PetscErrorCode CBSolverEquilibriumSNESHelperFunctionForcesJacobian(SNES snes, Ve
                                                                    Mat preconditionerMatrix, void *_solver) {
     CBSolverEquilibrium *solver = reinterpret_cast<CBSolverEquilibrium *>(_solver);
     CBStatus              rc     = solver->CalcNodalForcesJacobian(u, jacobian);
+    solver->AttachRigidBodyModes(jacobian);
     
     if (rc != CBStatus::SUCCESS)
         SNESSetFunctionDomainError(snes);

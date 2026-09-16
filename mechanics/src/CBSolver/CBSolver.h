@@ -186,7 +186,7 @@ protected:
     /// number of nonzero columns nnz of each local row. The estimates count a column once for every
     /// element sharing it, so on small meshes or small ranks they can exceed the columns a row has,
     /// which PETSc refuses. They are bounded here by the columns of the diagonal and off-diagonal blocks.
-    static Mat   CreatePreallocatedMatrix(PetscInt numLocalRows, const PetscInt *nnz);
+    static Mat   CreatePreallocatedMatrix(PetscInt numLocalRows, const PetscInt *nnz, PetscInt blockSize = 1);
     /// Creates the pressure field of mixed displacement/pressure elements and links it to the adapter.
     void         InitPressureVectors();
     /// Updates the ghost vertices of a pressure field and links it to the adapter.
@@ -212,6 +212,10 @@ protected:
     /// SNES settings such as line search and lag must be set before, so that options can override them.
     /// Options come from Solver.LinearSolver under the prefix mech_; the command line overrides them.
     void         InitLinearSolver(SNES snes);
+    /// Attaches the rigid-body modes of the reference configuration to the Jacobian of a displacement-only model, for
+    /// algebraic multigrid to build its coarse spaces from. Adding a matrix of different nonzero pattern rebuilds a
+    /// PETSc matrix and drops them, so this follows the last such addition.
+    void         AttachRigidBodyModes(Mat jacobian);
     void         DeInitExporter();
     virtual void Export(TFloat timeStep);
     void         ExportFiber();
@@ -320,6 +324,7 @@ protected:
     Vec refNodesSeq_         = 0;
     Vec nodalForces_         = 0;
     Mat nodalForcesJacobian_ = 0;
+    MatNullSpace rigidBodyModes_ = 0;
     Vec pressures_           = 0; // converged pressure field, the counterpart of nodes_
     Vec trialPressures_      = 0;
     Vec pressureResiduals_   = 0;
