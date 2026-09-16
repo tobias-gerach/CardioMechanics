@@ -1,8 +1,9 @@
 # Regression tests
 
-Golden-file characterization tests for the CardioMechanics binaries. Each test
-runs a binary on a fixed input and compares its output to a committed reference
-with numerical tolerances (never byte-exact).
+Tests of the CardioMechanics binaries. Each test runs a binary on a fixed input
+and compares its output, with numerical tolerances (never byte-exact), to an
+independent reference: a closed-form solution, a serial run, PETSc's finite
+differences, or a committed golden file.
 
 Coverage:
 - **CellModelTest** — all runnable single-cell ionic models (auto-discovered),
@@ -10,6 +11,10 @@ Coverage:
 - **CardioMechanics** — benchmark2015 Problem1 (Static solver) at `mpirun -np 4`:
   the `Pressure.dat` time series and the final deformed geometry (last VTU point
   coordinates, via meshio). Marked `mpi`.
+- **CardioMechanics inverse** — active-stress estimator round trip on the
+  ellipsoid example: a forward run with known active tension, then the estimator
+  recovering it from the deformed surface; compares the recovered active stress and
+  deformation.
 - **CardioMechanics dynamic** — mechanics-only dynamic fixture: benchmark2015
   Problem 3 (T10 ellipsoid, pressure and active-tension ramps) run with the
   `NewmarkBeta` solver and Rayleigh damping instead of the benchmark's `Static`
@@ -17,12 +22,34 @@ Coverage:
   time integrator from the coupled EM chain. Marked `mpi slow`. The same module
   also runs a creep fixture under both dynamic solvers: stiffness-proportional
   Rayleigh damping only, large enough to overdamp every mode, so the cavity
-  volume has to relax with time constant `Beta`.
-- **CardioMechanics damping sweep** — the same ellipsoid with Rayleigh damping
-  and active tension removed and a step endocardial pressure, run under
-  `GeneralizedAlpha` at six values of `RhoInf` at `mpirun -np 4`; checks that
-  high-frequency content in the cavity volume trace falls monotonically as
-  `RhoInf` drops while the low-frequency response is unchanged. Marked `mpi slow`.
+  volume has to relax with time constant `Beta`; checks that the
+  `GeneralizedAlpha` Jacobian fits its preallocation under consistent and lumped
+  mass; and, serially and not slow, that a missing or out-of-range `RhoInf` is
+  refused.
+- **CardioMechanics free vibration** — a cantilever ringing freely after a
+  pressure pulse, T10 under `NewmarkBeta` and T10 and P2P1 under
+  `GeneralizedAlpha` at five `RhoInf`: the period and logarithmic decrement of
+  the first bending mode against the closed form of each scheme, and
+  second-order convergence of the displacement.
+  The only check of the period and numerical damping of the integrators. Marked
+  `slow`.
+- **CardioMechanics mixed elements** (`test_p2p1`, `test_t4mini`) — P2P1
+  (Taylor-Hood, element type `T10P1`) and T4MINI on a small cantilever: input refusals, static and
+  `GeneralizedAlpha` runs, serial against `mpirun` runs, and for P2P1 the
+  pressure export and constraint, the Jacobian against PETSc finite differences,
+  and agreement with T10 at small kappa. The static parallel test of each element is not marked `slow`; the
+  `GeneralizedAlpha` and Robin-boundary parallel tests are marked `mpi slow`.
+- **CardioMechanics uniaxial patch** — homogeneous uniaxial tension of a
+  distorted box under NeoHooke, T4, T10 and P2P1 (default rule, and the 14-point
+  rule for P2P1): nodes against the closed-form stretches, and the P2P1 pressure
+  against `kappa (J - 1)`.
+- **CardioMechanics rigid rotation** — a distorted box rotated by 90° through
+  the points-control plugin under NeoHooke, T4, T10 and P2P1: nodes follow the
+  rotation, strain, stress and P2P1 pressure vanish.
+- **CardioMechanics sphere convergence** — inflated thick-walled sphere octant
+  against its exact radial solution: P2P1 and T4MINI displacement and pressure
+  errors converge at the rate of the pairing on the coarse mesh family. Marked
+  `slow`.
 - **BidomainMatrixGenerator** — assembles the EM01 mono-domain matrices (serial)
   and compares structural/numeric invariants (dims, nnz, Frobenius norm, sums)
   of the stiffness/mass matrices and material vector, read directly from the
@@ -31,13 +58,37 @@ Coverage:
   compares the P8 sensor traces (Vm, Cai). Marked `mpi slow`.
 - **CardioMechanics EM01** — full electromechanics (`NewmarkBeta` solver +
   acCELLerate plugin + Land17) at `mpirun -np 4`; compares final deformation and
-  the coupled P8 sensor traces. Marked `mpi slow`.
+  the coupled P8 sensor traces, and runs the same case on T4MINI under
+  `GeneralizedAlpha`. Marked `mpi slow`.
 
 The three EM01 tests share one staged tree and a single matrix-assembly step
 (the `em01_root` fixture). The EM01 electromechanics runs are shortened to
 `EM01_SIM_LENGTH` (0.05 s) — the full 1 s beat is ~30+ min; 0.05 s still captures
 the wavefront reaching the far sensor P8 (~42 ms) and the first clear mechanical
 deformation (~30 ms).
+
+Material-law correctness (energy against the published strain energy functions,
+PK2 stress as its derivative) is checked below the binary, by the GoogleTests of
+`mechanics/tests/ConstitutiveModelTest.cpp` (`ctest --test-dir _build/test`).
+
+## Study scripts
+
+Studies of a formulation print their results and assert nothing, so they live
+outside pytest in `tools/python/verification/`. Rerun one after changing what it
+studies and compare its output with the numbers in its docstring, or, for the
+reference energies, with the values the GoogleTest hard-codes:
+
+- `kappa_sensitivity.py` — strain spread over kappa, T10 against P2P1 and T4
+  against T4MINI.
+- `inf_sup.py` — numerical inf-sup constant of P2P1 on cube and thin-shell mesh
+  families.
+- `sphere_convergence.py` — sphere errors and rates over the fine family and both
+  quadrature rules, and the T10 rates.
+- `holzapfel_guccione_energy.py` — the reference energies hard-coded in the
+  law-level GoogleTest.
+
+Scripts that run a binary find it as the tests do, so set `CM_BIN_DIR` to the
+Release build.
 
 ## Setup
 
