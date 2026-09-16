@@ -1,4 +1,4 @@
-"""Octant of a thick-walled sphere, meshed by gmsh as curved second-order tetrahedra."""
+"""Octant of a thick-walled sphere, meshed by gmsh as curved second-order or linear tetrahedra."""
 import numpy as np
 
 from helpers.gmsh_tetgen import write_tetgen
@@ -8,11 +8,12 @@ MATERIAL, CAVITY = 30, 101                 # physical tags of the volume and the
 SYMMETRY_PLANES = (11, 12, 13)             # physical tags of the planes X_i = 0, i = 0, 1, 2
 
 
-def write_sphere_octant(directory, size):
+def write_sphere_octant(directory, size, order):
     """Write the octant X, Y, Z >= 0 of the shell INNER <= |X| <= OUTER, meshed by gmsh at element
-    size `size`, as tetgen sphere.node, sphere.ele and sphere.sur into directory. Every node on the
-    plane X_i = 0 has component i fixed, so the three plane faces are symmetry planes. The inner
-    surface is written as six-node faces with surface index CAVITY."""
+    size `size` and element order `order`, 1 for T4 or 2 for T10, as tetgen sphere.node, sphere.ele and
+    sphere.sur into directory. Every node on the plane X_i = 0 has component i fixed, so the three
+    plane faces are symmetry planes. The inner surface is written as six-node or three-node faces
+    with surface index CAVITY."""
     import gmsh
 
     gmsh.initialize(interruptible=False)
@@ -36,7 +37,7 @@ def write_sphere_octant(directory, size):
         gmsh.option.setNumber("Mesh.MeshSizeMin", size)
         gmsh.option.setNumber("Mesh.MeshSizeMax", size)
         gmsh.model.mesh.generate(3)
-        gmsh.model.mesh.setOrder(2)
+        gmsh.model.mesh.setOrder(order)
         write_tetgen(directory, "sphere", [CAVITY], {tag: 1 << i for i, tag in enumerate(SYMMETRY_PLANES)})
     finally:
         gmsh.finalize()

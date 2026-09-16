@@ -235,17 +235,8 @@ void CBSolverNewmarkBeta::InitDampingMatrix() {
     if ((globalRayleighAlpha_ != 0) || (globalRayleighBeta_ != 0)) {
         // Calculate nodes forces jacobian and initialize the damping matrix
         
-        if (DCCtrl::IsParallel()) {
-            MatCreateAIJ(
-                         DCPetsc::Comm(), 3 * numLocalNodes_, 3 * numLocalNodes_, PETSC_DETERMINE, PETSC_DETERMINE, 0,
-                         model_->GetNodeNeighborsForNnz().data() + localNodesFrom_*3, 0,
-                         model_->GetNodeNeighborsForNnz().data() + localNodesFrom_*3, &dampingMatrix_);
-            MatSetLocalToGlobalMapping(dampingMatrix_, Base::nodesIndicesMapping_, Base::nodesIndicesMapping_);
-        } else {
-            MatCreateSeqAIJ(DCPetsc::Comm(), 3 * Base::numNodes_, 3 * Base::numNodes_, 0,
-                            model_->GetNodeNeighborsForNnz().data(), &dampingMatrix_);
-            MatSetLocalToGlobalMapping(dampingMatrix_, Base::nodesIndicesMapping_, Base::nodesIndicesMapping_);
-        }
+        dampingMatrix_ = CreatePreallocatedMatrix(3 * numLocalNodes_, model_->GetNodeNeighborsForNnz().data() + localNodesFrom_*3);
+        MatSetLocalToGlobalMapping(dampingMatrix_, Base::nodesIndicesMapping_, Base::nodesIndicesMapping_);
         
         UpdateGhostNodesAndLinkToAdapter();
         
@@ -712,17 +703,8 @@ CBStatus CBSolverNewmarkBeta::CalcDampingMatrix() {
 }  // CBSolverNewmarkBeta::CalcDampingMatrix
 
 void CBSolverNewmarkBeta::InitMassMatrixLumped() {
-    if (DCCtrl::IsParallel()) {
-        MatCreateAIJ(
-                     DCPetsc::Comm(), 3 * Base::numLocalNodes_, 3 * Base::numLocalNodes_, PETSC_DETERMINE, PETSC_DETERMINE, 0,
-                     model_->GetNodeNeighborsForNnz().data() + localNodesFrom_*3, 0,
-                     model_->GetNodeNeighborsForNnz().data() + localNodesFrom_*3, &massMatrix_);
-        MatSetLocalToGlobalMapping(massMatrix_, Base::nodesIndicesMapping_, Base::nodesIndicesMapping_);
-    } else {
-        MatCreateSeqAIJ(DCPetsc::Comm(), 3 * Base::numNodes_, 3 * Base::numNodes_, 0,
-                        model_->GetNodeNeighborsForNnz().data(), &massMatrix_);
-        MatSetLocalToGlobalMapping(massMatrix_, Base::nodesIndicesMapping_, Base::nodesIndicesMapping_);
-    }
+    massMatrix_ = CreatePreallocatedMatrix(3 * numLocalNodes_, model_->GetNodeNeighborsForNnz().data() + localNodesFrom_*3);
+    MatSetLocalToGlobalMapping(massMatrix_, Base::nodesIndicesMapping_, Base::nodesIndicesMapping_);
     
     Base::adapter_->LinkMassMatrix(massMatrix_);
     
@@ -756,17 +738,8 @@ void CBSolverNewmarkBeta::InitMassMatrixLumped() {
 }  // CBSolverNewmarkBeta::InitMassMatrixLumped
 
 void CBSolverNewmarkBeta::InitMassMatrixConsistent() {
-    if (DCCtrl::IsParallel()) {
-        MatCreateAIJ(
-                     DCPetsc::Comm(), 3 * Base::numLocalNodes_, 3 * Base::numLocalNodes_, PETSC_DETERMINE, PETSC_DETERMINE, 0,
-                     model_->GetNodeNeighborsForNnz().data() + localNodesFrom_*3, 0,
-                     model_->GetNodeNeighborsForNnz().data() + localNodesFrom_*3, &massMatrix_);
-        MatSetLocalToGlobalMapping(massMatrix_, Base::nodesIndicesMapping_, Base::nodesIndicesMapping_);
-    } else {
-        MatCreateSeqAIJ(DCPetsc::Comm(), 3 * Base::numNodes_, 3 * Base::numNodes_, 0,
-                        model_->GetNodeNeighborsForNnz().data(), &massMatrix_);
-        MatSetLocalToGlobalMapping(massMatrix_, Base::nodesIndicesMapping_, Base::nodesIndicesMapping_);
-    }
+    massMatrix_ = CreatePreallocatedMatrix(3 * numLocalNodes_, model_->GetNodeNeighborsForNnz().data() + localNodesFrom_*3);
+    MatSetLocalToGlobalMapping(massMatrix_, Base::nodesIndicesMapping_, Base::nodesIndicesMapping_);
     
     Base::adapter_->LinkMassMatrix(massMatrix_);
     

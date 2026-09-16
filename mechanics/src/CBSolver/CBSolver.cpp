@@ -19,6 +19,8 @@
 #include "CBRuntimeEstimator.h"
 #include "CBModelLoader.h"
 #include "CBModelLoaderTetgen.h"
+#include <algorithm>
+#include <cassert>
 #include <iostream>
 #include <fstream>
 
@@ -229,16 +231,27 @@ void CBSolver::Init(ParameterMap *parameters, CBModel *model) {
     LoadMesh();
 
     if (model_->GetNumberOfPressureNodes() > 0) {
+        const auto &elements = model_->GetElements();
+        auto mixed = std::find_if(elements.begin(), elements.end(), [](CBElement *e) {
+            auto *solid = dynamic_cast<CBElementSolid *>(e);
+            return solid && solid->GetNumberOfPressureNodesIndices() > 0;
+        });
+        assert(mixed != elements.end());
+        const std::string mixedType = (*mixed)->GetType();
         if (!SupportsPressureField())
-            throw std::runtime_error("CBSolver::Init(): Solver [" + GetType() + "] does not support T10P1 elements");
+            throw std::runtime_error("CBSolver::Init(): Solver [" + GetType() + "] does not support " + mixedType + " elements");
         // Evaluated once in the reference configuration, so that a material law without a mixed
         // formulation fails here rather than inside the first solve.
-        for (auto &it : materials_) {
-            Matrix3<TFloat> stress;
-            TFloat energy;
-            it.second->GetConstitutiveModel()->CalcIsochoricPK2Stress(Matrix3<TFloat>::Identity(), stress);
-            it.second->GetConstitutiveModel()->CalcIsochoricEnergy(Matrix3<TFloat>::Identity(), energy);
-            it.second->GetConstitutiveModel()->GetBulkModulus();
+        try {
+            for (auto &it : materials_) {
+                Matrix3<TFloat> stress;
+                TFloat energy;
+                it.second->GetConstitutiveModel()->CalcIsochoricPK2Stress(Matrix3<TFloat>::Identity(), stress);
+                it.second->GetConstitutiveModel()->CalcIsochoricEnergy(Matrix3<TFloat>::Identity(), energy);
+                it.second->GetConstitutiveModel()->GetBulkModulus();
+            }
+        } catch (const std::runtime_error &e) {
+            throw std::runtime_error("CBSolver::Init(): " + mixedType + " elements: " + e.what());
         }
     }
     
@@ -1678,21 +1691,28 @@ PetscScalar CBSolver::CalcFiniteDifferencesEpsilon(Vec a) {
     return dx;
 }
 
+Mat CBSolver::CreatePreallocatedMatrix(PetscInt numLocalRows, const PetscInt *nnz) {
+    PetscInt numRows;
+    MPI_Allreduce(&numLocalRows, &numRows, 1, MPIU_INT, MPI_SUM, DCPetsc::Comm());
+    std::vector<PetscInt> diagonal(numLocalRows), offDiagonal(numLocalRows);
+    for (PetscInt i = 0; i < numLocalRows; i++) {
+        diagonal[i]    = std::min(nnz[i], numLocalRows);
+        offDiagonal[i] = std::min(nnz[i], numRows - numLocalRows);
+    }
+    Mat matrix;
+    if (DCCtrl::IsParallel())
+        MatCreateAIJ(DCPetsc::Comm(), numLocalRows, numLocalRows, PETSC_DETERMINE, PETSC_DETERMINE, 0, diagonal.data(), 0,
+                     offDiagonal.data(), &matrix);
+    else
+        MatCreateSeqAIJ(DCPetsc::Comm(), numLocalRows, numLocalRows, 0, diagonal.data(), &matrix);
+    return matrix;
+}
+
 void CBSolver::CreateNodesJacobianAndLinkToAdapter() {
-    std::vector<PetscInt> nnz = adapter_->GetLocalDofsNnz();
     if (nodalForcesJacobian_ != 0)
         MatDestroy(&nodalForcesJacobian_);
-    
-    if (DCCtrl::IsParallel()) {
-        MatCreateAIJ(
-                     DCPetsc::Comm(), adapter_->GetNumberOfLocalDofs(), adapter_->GetNumberOfLocalDofs(), PETSC_DETERMINE, PETSC_DETERMINE, 0,
-                     nnz.data(), 0, nnz.data(), &nodalForcesJacobian_);
-        MatSetLocalToGlobalMapping(nodalForcesJacobian_, nodesIndicesMapping_, nodesIndicesMapping_);
-    } else {
-        [[maybe_unused]] PetscErrorCode ierr = MatCreateSeqAIJ(DCPetsc::Comm(), adapter_->GetNumberOfLocalDofs(), adapter_->GetNumberOfLocalDofs(), 0,
-                                              nnz.data(), &nodalForcesJacobian_);
-        ierr = MatSetLocalToGlobalMapping(nodalForcesJacobian_, nodesIndicesMapping_, nodesIndicesMapping_);
-    }
+    nodalForcesJacobian_ = CreatePreallocatedMatrix(adapter_->GetNumberOfLocalDofs(), adapter_->GetLocalDofsNnz().data());
+    MatSetLocalToGlobalMapping(nodalForcesJacobian_, nodesIndicesMapping_, nodesIndicesMapping_);
     adapter_->LinkNodalForcesJacobian(nodalForcesJacobian_);
 }
 

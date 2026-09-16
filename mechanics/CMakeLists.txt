@@ -33,6 +33,7 @@ set(SRCS
     src/CBElement/CBElementSolidT10.cpp
     src/CBElement/CBElementSolidT10P1.cpp
     src/CBElement/CBElementSolidT4.cpp
+    src/CBElement/CBElementSolidT4Mini.cpp
     src/CBElement/CBElementSurfaceT3.cpp
     src/CBElement/CBElementSurfaceT6.cpp
     src/CBTensionModel/CBTensionFactory.cpp

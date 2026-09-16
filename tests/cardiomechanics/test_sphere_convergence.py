@@ -1,8 +1,9 @@
-"""Inflation of a thick-walled sphere: convergence of P2P1 to the exact radial solution.
+"""Inflation of a thick-walled sphere: convergence of P2P1 and MINI to the exact radial solution.
 
 The patch tests and the rigid rotation are reproduced exactly by any consistent element, so they
-cannot show whether P2P1 converges at the rate of the pairing. A wrong Jacobian block, a mis-signed
-coupling or an under-integrated constraint can pass all of them and still cost accuracy here.
+cannot show whether P2P1 or MINI converges at the rate of its pairing. A wrong Jacobian block, a
+mis-signed coupling or an under-integrated constraint can pass all of them and still cost accuracy
+here.
 
 The octant INNER <= |X| <= OUTER of helpers.sphere is held by symmetry planes on its three plane
 faces, and a follower pressure P inflates it from the inner surface. The exact deformation is
@@ -23,16 +24,19 @@ derivatives of sigma_r are taken by complex step, which is exact to round-off.
 The reference is compressible on purpose. Eliminating the P2P1 pressure pointwise from its
 perturbed constraint gives back the volumetric energy kappa/2 (J - 1)^2 (ADR-0002), so P2P1
 converges to exactly this solution at any kappa, pressure p = kappa (J - 1) included, and there is
-no compressibility error to bound. T10 converges to the same solution, but locks at large kappa.
-As kappa grows the reference approaches the closed form of the incompressible sphere (Green and
-Zerna; Rivlin): r^3 = R^3 + r_i^3 - INNER^3, sigma_t - sigma_r = a (l^2 - l^-4) with l = r / R, and
-since dr / r = -dl / (l (l^3 - 1)),
+no compressibility error to bound. MINI shares the constraint and converges to it as well. T10
+converges to the same solution, but locks at large kappa. As kappa grows the reference approaches
+the closed form of the incompressible sphere (Green and Zerna; Rivlin): r^3 = R^3 + r_i^3 - INNER^3,
+sigma_t - sigma_r = a (l^2 - l^-4) with l = r / R, and since dr / r = -dl / (l (l^3 - 1)),
 
     P = 2 a [1/l + 1/(4 l^4)] evaluated from l_i = r_i / INNER down to l_o = r_o / OUTER.
 
 The errors are integrated over the curved elements, against the reference at the image of each
 quadrature point, so they measure the solution on the mesh's own P2 approximation of the shell,
-whose O(h^3) geometric error is at or below every expected order. The deformed points are single
+whose O(h^3) geometric error is at or below every expected order. T4MINI runs on the linear meshes
+of the same family and its errors are integrated over their chords, whose O(h^2) geometric error
+matches its displacement L2 order and exceeds none of its orders. Its displacement is the exported
+vertex field, without the condensed bubble, which is never stored. The deformed points are single
 precision, which moves them by at most 1.2e-7, far below the finest error.
 
 The rates are asserted between the two finest levels of each family, because the coarsest mesh has
@@ -46,9 +50,16 @@ differ in their weights: the default takes the determinant of the element map at
 spheres the centroid determinant nearly doubles the finest displacement L2 and pressure errors, whereas the 4-point
 rule with pointwise determinants matches the 14-point rule to 0.6%.
 
+T4MINI runs under both rules as well. Its elements are affine, so the rules share the determinant
+and differ only in the terms the bubble makes non-polynomial of high degree, which neither
+integrates exactly. Both keep the MINI orders, so the 4-point rule does not destabilise the
+pressure, and the 14-point rule is the less accurate: at the finest level its displacement errors
+are 4% (L2) and 2% (H1) larger and its pressure error 63% larger.
+
 Serial runtime, P2P1: 0.3 s, 1.6 s and 27 s at sizes 0.5, 0.25 and 0.125; the fourth level, in the
 slow family, takes about 20 min. T10 needs 87 s at size 0.125 and is slow as well, and so is every
-run under the 14-point rule.
+run under the 14-point rule. T4MINI needs 3 s, 24 s and 4.5 min at sizes 0.25, 0.125 and 0.0625
+under the 4-point rule, and about 2.5 times as long under the 14-point rule.
 """
 import re
 from pathlib import Path
@@ -60,7 +71,7 @@ from scipy.optimize import brentq
 
 from helpers.box import T6_EDGES, T10_EDGES
 from helpers.compare import read_vtu_point_field, read_vtu_points
-from helpers.gmsh_tetgen import t10_quadrature
+from helpers.gmsh_tetgen import tetrahedron_quadrature
 from helpers.run import run_binary
 from helpers.sphere import CAVITY, INNER, OUTER, write_sphere_octant
 
@@ -70,14 +81,19 @@ SHEAR = float(re.search(r"<a>(.*?)</a>", FIXTURE.read_text()).group(1))
 KAPPA = float(re.search(r"<k>(.*?)</k>", FIXTURE.read_text()).group(1))
 SIZES = (0.5, 0.25, 0.125, 0.0625)         # gmsh element sizes of the mesh family
 DEGREES = (2, 5)                           # Mesh.QuadratureDegree
-# P2P1 orders: displacement O(h^3) in L2 and O(h^2) in H1, pressure O(h^2) in L2.
-ORDERS = {"displacement L2": 3, "displacement H1": 2, "pressure L2": 2}
-# Before the asymptotic range the rates fall short of the orders by up to 0.24 on the coarse family
-# and 0.20 on the fine one, both in the pressure. The tolerance still fails the loss of half an order, as from a boundary,
-# constraint or load integration error.
+MESH_ORDER = {"T10": 2, "T10P1": 2, "T4MINI": 1}
+# Orders of the mixed elements. P2P1: displacement O(h^3) in L2 and O(h^2) in H1, pressure O(h^2)
+# in L2. MINI: displacement O(h^2) in L2 and O(h) in H1, pressure O(h) in L2.
+ORDERS = {"T10P1": {"displacement L2": 3, "displacement H1": 2, "pressure L2": 2},
+          "T4MINI": {"displacement L2": 2, "displacement H1": 1, "pressure L2": 1}}
+# Before the asymptotic range the P2P1 rates fall short of the orders by up to 0.24 on the coarse
+# family and 0.20 on the fine one, both in the pressure, and the T4MINI rates by up to 0.06, in the
+# displacement L2 error on the coarse family. The tolerance still fails the loss of half an order,
+# as from a boundary, constraint or load integration error.
 RATE_TOL = 0.3
-# The reference is not polynomial and the elements are curved, so no rule is exact. Against a
-# degree 10 rule the norms move by at most 2e-5 relative, far below the change between levels.
+# The reference is not polynomial and the T10 elements are curved, so no rule is exact. Against a
+# degree 10 rule the norms move by at most 2e-5 relative on the T10 meshes and 3e-7 on the T4
+# meshes, far below the change between levels.
 QUADRATURE = "Gauss6"
 COMPLEX_STEP = 1e-30
 # Faces of a T10: three vertices, then the mid-edge nodes of their edges in T6 order.
@@ -128,17 +144,18 @@ def rivlin_inner_radius(pressure, a):
 
 
 def _read_mesh(directory):
-    """Node coordinates and fixation flags, T10 elements and the rows of the surface file, 0-based."""
+    """Node coordinates, fixation flags, T4 or T10 elements and surface file rows, 0-based."""
     nodes = np.loadtxt(directory / "sphere.node", skiprows=1)
-    elements = np.loadtxt(directory / "sphere.ele", skiprows=1, dtype=int)[:, 1:11] - 1
+    elements = np.loadtxt(directory / "sphere.ele", skiprows=1, dtype=int)[:, 1:-1] - 1
     rows = np.loadtxt(directory / "sphere.sur", skiprows=1, dtype=int)
     return nodes[:, 1:4], nodes[:, 4].astype(int), elements, rows
 
 
 def discretization_errors(directory, element_type, reference):
     """Errors of the final VTU of the run in directory against the reference, integrated over the
-    curved elements by QUADRATURE: displacement in L2 and H1 seminorm, and for P2P1 the pressure in
-    L2. Returns them as a dict, with the mean element size (volume / elements)^(1/3) as "h"."""
+    elements of the mesh by QUADRATURE: displacement in L2 and H1 seminorm, and for the mixed
+    elements the pressure in L2. Returns them as a dict, with the mean element size
+    (volume / elements)^(1/3) as "h"."""
     X, _, elements, _ = _read_mesh(directory / "tetgen")
     vtu_dir = directory / "Results" / "sphere_vtu"
     last = vtu_dir / "sphere.1.vtu"            # one export at the fixture's stop time
@@ -148,7 +165,7 @@ def discretization_errors(directory, element_type, reference):
     assert np.array_equal(pid, np.arange(len(X))) and np.abs(x0 - X).max() < 2e-7
     u = read_vtu_points(last)[1].astype(float) - X
 
-    weights, N, dN, L = t10_quadrature(QUADRATURE)
+    weights, N, dN, L = tetrahedron_quadrature(QUADRATURE, MESH_ORDER[element_type])
     Xq = np.einsum("qn,end->eqd", N, X[elements])
     dX = np.einsum("qnk,end->eqdk", dN, X[elements])
     det = np.linalg.det(dX)
@@ -156,8 +173,8 @@ def discretization_errors(directory, element_type, reference):
     dV = weights * det
     du = np.einsum("qnk,end->eqdk", dN, u[elements]) @ np.linalg.inv(dX)
 
-    # Points of elements on the spheres can lie O(h^3) outside the shell, where the dense output of
-    # the reference extends smoothly.
+    # Points of elements on the spheres can lie outside the shell, O(h^3) on the curved elements and
+    # O(h^2) on the linear ones, where the dense output of the reference extends smoothly.
     R = np.linalg.norm(Xq, axis=-1)
     r, l_r = reference(R.ravel()).reshape(2, *R.shape)
     e = Xq / R[..., None]
@@ -170,7 +187,7 @@ def discretization_errors(directory, element_type, reference):
     errors = {"h": (dV.sum() / len(elements)) ** (1 / 3),
               "displacement L2": norm(np.einsum("qn,end->eqd", N, u[elements]) - (r / R - 1)[..., None] * Xq),
               "displacement H1": norm(du - (F - np.eye(3)))}
-    if element_type == "T10P1":
+    if element_type in ORDERS:
         pressure = read_vtu_point_field(last, "Pressure")[1]
         errors["pressure L2"] = norm(np.einsum("qa,ea->eq", L, pressure[elements[:, :4]])
                                      - KAPPA * (l_r * (r / R) ** 2 - 1))
@@ -203,9 +220,11 @@ def errors_at(binary, cm_env, tmp_path_factory):
             wd = tmp_path_factory.mktemp(f"{element_type}_{size}_{degree}")
             (wd / "tetgen").mkdir()
             (wd / "Results").mkdir()
-            write_sphere_octant(wd / "tetgen", size)
+            order = MESH_ORDER[element_type]
+            write_sphere_octant(wd / "tetgen", size, order)
             text = FIXTURE.read_text()
             for old, new in [("<Type>T10P1</Type>", f"<Type>{element_type}</Type>"),
+                             ("<Type>T6</Type>", f"<Type>{'T6' if order == 2 else 'T3'}</Type>"),
                              ("<Format>Tetgen</Format>",
                               f"<Format>Tetgen</Format><QuadratureDegree>{degree}</QuadratureDegree>")]:
                 assert text.count(old) == 1, f"{FIXTURE.name}: cannot substitute {old}"
@@ -226,20 +245,25 @@ def _assert_mid_nodes_near_midpoints(X, cells, edges):
         assert np.all(np.linalg.norm(m - (a + b) / 2, axis=1) < 0.1 * np.linalg.norm(b - a, axis=1))
 
 
-def test_octant_mesh_is_curved_and_constrained(tmp_path):
+@pytest.mark.parametrize("order", [1, 2])
+def test_octant_mesh_is_on_spheres_and_constrained(tmp_path, order):
     pytest.importorskip("gmsh")
-    write_sphere_octant(tmp_path, 0.5)
+    write_sphere_octant(tmp_path, 0.5, order)
     X, fixed, elements, rows = _read_mesh(tmp_path)
-    assert np.all(rows[:, 7:] == CAVITY)
-    loaded = rows[:, 1:7] - 1
-    _assert_mid_nodes_near_midpoints(X, elements, T10_EDGES)
-    _assert_mid_nodes_near_midpoints(X, loaded, T6_EDGES)
+    assert elements.shape[1] == (4, 10)[order - 1]
+    assert np.all(rows[:, -2:] == CAVITY)
+    loaded = rows[:, 1:-2] - 1
+    if order == 2:
+        _assert_mid_nodes_near_midpoints(X, elements, T10_EDGES)
+        _assert_mid_nodes_near_midpoints(X, loaded, T6_EDGES)
     radius = np.linalg.norm(X, axis=1)
     assert radius.min() > INNER - 1e-12 and radius.max() < OUTER + 1e-12
 
     # Boundary faces belong to one element only. Every node of those on either sphere, mid-edge
     # nodes included, lies on it rather than on a chord, and the loaded faces are those on the inner one.
-    faces = elements[:, T10_FACES].reshape(-1, 6)
+    # The vertices lead each T10 face, so its first three nodes are the face of a T4.
+    face_nodes = np.array(T10_FACES)[:, :loaded.shape[1]]
+    faces = elements[:, face_nodes].reshape(-1, loaded.shape[1])
     _, first, count = np.unique(np.sort(faces[:, :3], axis=1), axis=0, return_index=True, return_counts=True)
     boundary = faces[first[count == 1]]
     for sphere in (INNER, OUTER):
@@ -284,22 +308,25 @@ def test_reference_approaches_lame_solution():
 @pytest.mark.parametrize("sizes", [SIZES[:3], pytest.param(SIZES[1:], marks=pytest.mark.slow)], ids=["coarse", "fine"])
 @pytest.mark.parametrize("degree", [DEGREES[0], pytest.param(DEGREES[1], marks=pytest.mark.slow)],
                          ids=[f"degree{d}" for d in DEGREES])
-def test_p2p1_converges_at_expected_rate(errors_at, degree, sizes, norm):
+@pytest.mark.parametrize("element_type", list(ORDERS))
+def test_mixed_element_converges_at_expected_rate(errors_at, element_type, degree, sizes, norm):
     """Asserted on the finest pair of levels; every rate is shown with -rP."""
-    errors = [errors_at("T10P1", s, degree) for s in sizes]
-    label = f"P2P1 degree {degree}"
+    errors = [errors_at(element_type, s, degree) for s in sizes]
+    label = f"{element_type} degree {degree}"
     print(_table(label, errors))
     rate = rates(errors)[norm][-1]
-    assert rate >= ORDERS[norm] - RATE_TOL, (f"{norm} converges at {rate:.2f}, below the P2P1 order "
-                                             f"{ORDERS[norm]} less {RATE_TOL}\n{_table(label, errors)}")
+    order = ORDERS[element_type][norm]
+    assert rate >= order - RATE_TOL, (f"{norm} converges at {rate:.2f}, below the {element_type} order "
+                                      f"{order} less {RATE_TOL}\n{_table(label, errors)}")
 
 
 @pytest.mark.slow
-def test_quadrature_degrees_are_compared(errors_at):
-    """The P2P1 errors under both rules, and their ratio at each level, shown with -rP."""
-    errors = {d: [errors_at("T10P1", s, d) for s in SIZES] for d in DEGREES}
+@pytest.mark.parametrize("element_type", list(ORDERS))
+def test_quadrature_degrees_are_compared(errors_at, element_type):
+    """The errors under both rules, and their ratio at each level, shown with -rP."""
+    errors = {d: [errors_at(element_type, s, d) for s in SIZES] for d in DEGREES}
     for d in DEGREES:
-        print(_table(f"P2P1 degree {d}", errors[d]))
+        print(_table(f"{element_type} degree {d}", errors[d]))
     norms = [k for k in errors[DEGREES[0]][0] if k != "h"]
     print(f"degree {DEGREES[1]} / degree {DEGREES[0]}: " + "  ".join(f"{k:>16}" for k in norms))
     for low, high in zip(errors[DEGREES[0]], errors[DEGREES[1]]):

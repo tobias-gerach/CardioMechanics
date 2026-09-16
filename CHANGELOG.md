@@ -16,13 +16,25 @@
 - Unit tests for the pure-python tool logic under `tests/python/` (no binaries required).
 - CardioMechanics copies the settings file it was started with next to the results, as `<Export.Prefix>_settings.xml`, so an output directory always records the parameters that produced it. Note that `-parameter` overrides given on the command line are not reflected in the copy.
 - Manual sections covering the inverse problem: the regularized Gauss-Newton formulation and its regularization terms in "Mathematical Model", the `ActiveStressEstimator` settings and the `PointsCtrl` plugin in "Simulation Framework", the `ExtractSurfaceNodesFromVTU` tool and the `CreateTargetSurfaces` script in "Tools", and the target-surface file format in "File Formats".
+- Generalized-alpha time integrator, `Solver.Type=GeneralizedAlpha` (Chung-Hulbert): second-order accurate and unconditionally stable, with numerical damping of high frequencies set by the single parameter `Solver.GeneralizedAlpha.RhoInf`. `RhoInf` is required, has no default and must lie in `[0, 1]`. Opt-in: `NewmarkBeta` is unchanged.
+- P2P1 Taylor-Hood element, `Mesh.Type=T10P1`: a linear pressure field on the vertices of a T10 mesh as an unknown of its own, which removes volumetric locking; `kappa` keeps its key and becomes the material bulk modulus. Supports NeoHooke, Holzapfel and Guccione under the `Static` and `GeneralizedAlpha` solvers, in parallel; other material laws and solvers are refused at initialization. T4 meshes are converted with `ConvertT4toT10`. Opt-in: existing inputs are unaffected.
+- MINI element, `Mesh.Type=T4MINI`: the same pressure field on unchanged T4 meshes, with a bubble per element condensed inside the element. Smaller global system than `T10P1`, first- instead of second-order convergence in the energy norm. Same material laws, solvers and refusals as `T10P1`. Opt-in: existing inputs are unaffected.
+- The pressure of mixed elements is exported as the point field `Pressure`.
+- `Mesh.QuadratureDegree` selects the 4-point (`2`, the default) or 14-point (`5`) rule for T10, T10P1 and T4MINI elements.
+- Manual sections covering mixed elements (supported combinations, the path from a T4 mesh, the pressure output), the generalized-alpha solver, and their formulations in "Mathematical Model".
 
 ### Changed
+- Land17 raises an error naming the element type for element types it does not know, instead of returning zero calcium.
+- The manual marks the `Mesh.Transform` tags as not implemented; they never had an effect.
+- The manual documents the optional surface-file argument of `ConvertT4toT10`.
 - Corrected the statement in the manual that two solver classes are available, which no longer held once `ActiveStressEstimator` was added.
 - `docs/BUILD.md` and the CI PETSc image now recommend and use OpenBLAS (`--download-openblas`) instead of reference BLAS. Results are unaffected; the inverse problem is roughly 7x faster, pure mechanics roughly 2x, and EP-dominated runs largely unchanged.
 - `tools/python/VTK2tetgen.py` rewritten to be Python 3 compatible and importable: the CLI and conversion moved into `main()` under a `__main__` guard and the `vtk` import is deferred, so the geometry helpers can be imported without VTK. Mesh output is unchanged; `.bases` differs only in whitespace between the row index and the values.
 
 ### Fixed
+- The isochoric/volumetric split of NeoHooke and Holzapfel had no effect: integer division made the exponents of `J^(-2/3)` and `I3^(-1/3)` zero. The split now applies, which changes results of both laws wherever `J != 1`.
+- Guccione computed its exponential term from the full instead of the isochoric right Cauchy-Green tensor, so deviatoric strain leaked into the pressure. It now performs the isochoric/volumetric split. Results of Guccione models change: the tip of the Land 2015 Problem 1 benchmark moves from 4.160 mm to 4.215 mm at its `K=1e5`.
+- Holzapfel's stress omitted the derivative of the smoothed Heaviside switch in the fibre and sheet terms, so stress and energy disagreed. Results change only for `k != 0`.
 - Corrected the sign of the master-to-target gap vector in `CBContactHandling`. The gap was taken as `(ip - p).Norm()`, which discards the sign of the signed distance along the master normal, so the vector pointed the wrong way whenever the target lay on the negative-normal side. Only the estimator consumes this vector; the forward contact force computes its own distance and is unaffected.
 - `CBDataFromFile`'s default constructor left `startTime_` and `period_` uninitialized, which produced NaN sampled values on the default-constructed path used by `CBPointsCtrl`.
 

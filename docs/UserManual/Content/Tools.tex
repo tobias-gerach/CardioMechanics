@@ -96,9 +96,14 @@ PETScVec2VTK <vector filename> <VTK filename (.vtp/.vtu) in>  <VTK filename (.vt
 \label{tools:ConvertT4toT10}
 
 Use to convert linear elements to quadratic elements based on \nameref{nodeFile} and \nameref{eleFile}.
+If a \nameref{surFile} is given as well, its linear triangles are converted to quadratic ones.
+The tool writes \verb|<Output>.node|, \verb|<Output>.ele| and, with a surface file, \verb|<Output>.sur|.
+The elements keep their order, so a \nameref{basesFile} with one basis per element stays valid.
+This is the way to obtain a mesh for \verb+T10P1+ elements from a \verb+T4+ mesh (\Sec{settings:MixedElements}).
 
 \begin{lstlisting}[language=bash,caption=Syntax for ConvertT4toT10]
 ConvertT4toT10 <Nodes_File.node> <Elements_File.ele> <Output>
+ConvertT4toT10 <Nodes_File.node> <Elements_File.ele> <Surface_File.sur> <Output>
 \end{lstlisting}
 
 \subsection{VTPExtractSurfaceFromMesh}

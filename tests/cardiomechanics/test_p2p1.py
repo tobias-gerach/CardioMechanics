@@ -49,15 +49,18 @@ def _run(binary, cm_env, wd, element_type="T10P1", kappa=100, material="NeoHooke
          env=None, check=True, ranks=None, fixture=FIXTURE, replace=()):
     """Stage mesh and settings into wd, run on ranks MPI ranks (serially if None), return (process, vtu directory).
     solver replaces the Static solver of the fixture; None keeps the fixture's own. replace holds further
-    (old, new) substitutions of the settings text."""
+    (old, new) substitutions of the settings text. The linear element types get the linear mesh."""
+    linear = element_type in ("T4", "T4MINI")
     (wd / "tetgen").mkdir()
-    write_mesh(wd / "tetgen")
+    write_mesh(wd / "tetgen", linear=linear)
     (wd / "Results").mkdir()
     text, n = re.subn(r"<NeoHooke>.*?</NeoHooke>", MATERIALS[material].format(kappa=kappa),
                       fixture.read_text(), flags=re.DOTALL)
     assert n == 1, f"{fixture.name}: cannot substitute the NeoHooke parameters"
     substitutions = [("<Type>T10P1</Type>", f"<Type>{element_type}</Type>"),
                      ("<Type>NeoHooke</Type>", f"<Type>{material}</Type>")]
+    if linear:
+        substitutions.append(("<Surface_130><Type>T6</Type></Surface_130>", "<Surface_130><Type>T3</Type></Surface_130>"))
     if solver:
         substitutions.append(("<Type>Static</Type>", f"<Type>{solver}</Type>"))
     substitutions += replace
@@ -285,7 +288,7 @@ DEFORM_RTOL, DEFORM_ATOL = 1e-4, 1e-8     # as for the benchmark goldens
 PRESSURE_RTOL = 1e-4                      # absolute tolerance scaled by the peak pressure
 
 
-def _assert_parallel_matches_serial(binary, cm_env, tmp_path, fixture):
+def _assert_parallel_matches_serial(binary, cm_env, tmp_path, fixture, element_type="T10P1"):
     """Run fixture serially and at NP ranks, assert the final shapes and pressures agree, return the
     serial vtu directory."""
     pytest.importorskip("meshio")
@@ -295,7 +298,8 @@ def _assert_parallel_matches_serial(binary, cm_env, tmp_path, fixture):
     for ranks in (None, NP):
         wd = tmp_path / f"np{ranks or 1}"
         wd.mkdir(parents=True)
-        _, vtu_dirs[ranks] = _run(binary, cm_env, wd, ranks=ranks, fixture=fixture)
+        proc, vtu_dirs[ranks] = _run(binary, cm_env, wd, element_type=element_type, ranks=ranks, fixture=fixture)
+        assert_no_petsc_error(proc.stdout + proc.stderr)
         points[ranks] = _final_points(vtu_dirs[ranks])
 
     (pid, serial), (pid_parallel, parallel) = points[None], points[NP]

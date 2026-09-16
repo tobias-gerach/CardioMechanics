@@ -193,6 +193,31 @@ In the case of static equilibrium, where mass inertia can be neglected, all time
     \vec f^\mathrm{int}(\d) - \vec f^\mathrm{ext}(\d)  = \vec 0 \,. \label{eq:staticLinMom}
 \end{equation}
 
+\subsection{Mixed Displacement-Pressure Formulation}
+\label{model:mixed}
+
+The mixed elements \verb+T10P1+ and \verb+T4MINI+ split the strain energy into an isochoric part, which depends only on the volume-preserving $\bar{\C} = J^{-2/3} \C$, and a volumetric part:
+\begin{equation}
+    \Psi(\C) = \Psi_\mathrm{iso}(\bar{\C}) + \frac{\kappa}{2} (J-1)^2 \,.
+\end{equation}
+The anisotropic terms of Holzapfel are the exception: they use the full fibre and sheet stretches.
+Instead of evaluating the volumetric part from the displacement, a pressure field $p = p_A N^p_A$ is introduced as an unknown of its own, and the stress becomes
+\begin{equation}
+    \S = 2 \pdv{\Psi_\mathrm{iso}}{\C} + p J \C^{-1} + \S_\mathrm{a} \,.
+\end{equation}
+The pressure is tied to the deformation by the perturbed incompressibility constraint $J - 1 - p/\kappa = 0$, imposed in weak form with the pressure shape functions $N^p_A$:
+\begin{equation}
+    r^p_A = \int_{\Omega_0} N^p_A \left( J - 1 - \frac{p}{\kappa} \right) \dd{\Omega_0} = 0 \,.
+\end{equation}
+Eliminating $p$ pointwise gives back the volumetric energy above, so both formulations model the same material; they differ only in how the discretization carries the volumetric response, and only the mixed one is free of volumetric locking.
+The pressure is positive in tension, $p = \kappa (J-1)$.
+The constraint is not exact: its $p/\kappa$ term leaves a non-zero diagonal block in the Jacobian, which is why the saddle-point system of displacement and pressure can be solved directly.
+Both fields are solved together in one Newton iteration.
+
+In \verb+T10P1+ elements, $N_I$ are the quadratic shape functions of the ten nodes and $N^p_A$ the linear ones of the four vertices.
+In \verb+T4MINI+ elements, the linear displacement field is enriched by the bubble $b = 256\, \lambda_1 \lambda_2 \lambda_3 \lambda_4$, with the barycentric coordinates $\lambda_i$, which vanishes on the element boundary.
+Its three amplitudes per element are solved for by a local Newton iteration in every residual evaluation and eliminated by static condensation, so that the global unknowns are the vertex displacements and pressures alone.
+
 \subsection{Time Discretization}
 
 Now that the equations are discretized in space, the temporal derivatives $\dot{\d}$ and $\Ddot{\d}$ have to be discretized in time as well.
@@ -241,6 +266,32 @@ where internal and external forces $\K$ are linearized in each Newton iteration:
     \K \dn{n+1} \approx \vec f^\mathrm{int}(\dn{n+1}, \tn{n+1}) - \vec f^\mathrm{ext}(\dn{n+1}, \tn{n+1}) \,.
 \end{equation}
 Finally, we calculate the updated values for velocity and acceleration using \autoref{eq:updatev} and \autoref{eq:updatea}.
+
+\subsubsection{Generalized-\texorpdfstring{$\alpha$}{alpha} Time Integration}
+\label{model:generalizedAlpha}
+
+Newmark-beta can dissipate high frequencies only by choosing $\gamma > \frac{1}{2}$, which reduces it to first-order accuracy.
+The generalized-$\alpha$ method \cite{chung1993} evaluates the residual at intermediate levels between $\tn{n}$ and $\tn{n+1}$ instead:
+\begin{equation}
+    \vec r(\dn{n+1}) = \M \an{n+1-\alpha_m} + \C \vn{n+1-\alpha_f} + \vec f^\mathrm{int}(\dn{n+1-\alpha_f}, \tn{n+1-\alpha_f}) - \vec f^\mathrm{ext}(\dn{n+1-\alpha_f}, \tn{n+1-\alpha_f}) \overset{!}{=} 0 \,,
+\end{equation}
+with $\vec x^{n+1-\alpha} = (1-\alpha) \vec x^{n+1} + \alpha \vec x^{n}$ for displacement, velocity, acceleration and time.
+Displacement, velocity and acceleration at $\tn{n+1}$ are related by the Newmark updates \autoref{eq:updated} to \autoref{eq:updatea}; $\alpha_m = \alpha_f = 0$ recovers Newmark-beta.
+All four coefficients are derived from the spectral radius at infinite frequency $\rho_\infty \in [0, 1]$:
+\begin{equation}
+    \alpha_m = \frac{2\rho_\infty - 1}{\rho_\infty + 1} \,, \quad
+    \alpha_f = \frac{\rho_\infty}{\rho_\infty + 1} \,, \quad
+    \beta = \frac{1}{4} (1 - \alpha_m + \alpha_f)^2 \,, \quad
+    \gamma = \frac{1}{2} - \alpha_m + \alpha_f \,,
+\end{equation}
+which makes the method second-order accurate and unconditionally stable for every $\rho_\infty$.
+$\rho_\infty = 1$ dissipates nothing, and lower values damp high-frequency modes increasingly strongly.
+The system Jacobian becomes
+\begin{equation}
+    \vec A = \frac{1-\alpha_m}{\beta \dt^2} \M + \frac{(1-\alpha_f) \gamma}{\beta \dt} \C + (1-\alpha_f) \K \,.
+\end{equation}
+For the mixed elements of \Sec{model:mixed}, the pressure has no time derivative.
+It is interpolated between the time levels like the displacement, the constraint is evaluated at the intermediate configuration, and mass and damping act on the displacement alone.
 
 
 \subsection{The Inverse Problem: Active Stress Estimation}

@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from helpers.compare import compare_columns, read_golden, read_vtu_points, write_golden
-from helpers.run import run_binary
+from helpers.run import assert_no_petsc_error, run_binary
 
 GOLDEN_DIR = Path(__file__).parent / "golden"
 NP = 4
@@ -81,6 +81,16 @@ def test_em01_coupled_sensors(em01_em_out, update_golden):
     compare_columns(actual, read_golden(golden_path), rtol=SENSOR_RTOL, atol=SENSOR_ATOL)
 
 
+def _generalized_alpha(xml):
+    """Settings text with the example's NewmarkBeta solver replaced by generalized-alpha."""
+    solver = xml[xml.index("<Type>NewmarkBeta</Type>"):xml.index("</NewmarkBeta>") + len("</NewmarkBeta>")]
+    return xml.replace(solver, "<Type>GeneralizedAlpha</Type>\n"
+                               "    <GeneralizedAlpha>\n"
+                               "        <RhoInf>0.8</RhoInf>\n"
+                               "        <ConsistentMassMatrix>true</ConsistentMassMatrix>\n"
+                               "    </GeneralizedAlpha>")
+
+
 def test_em01_runs_under_generalized_alpha(em01_root, em01_sim_length, cm_env, binary):
     """Smoke test that the coupled path survives the new integrator.
 
@@ -96,13 +106,7 @@ def test_em01_runs_under_generalized_alpha(em01_root, em01_sim_length, cm_env, b
                      ("../Results/", "../ResultsGenAlpha/")):
         assert old in xml, f"M_1mm.xml no longer contains {old!r}"
         xml = xml.replace(old, new)
-    solver = xml[xml.index("<Type>NewmarkBeta</Type>"):xml.index("</NewmarkBeta>") + len("</NewmarkBeta>")]
-    xml = xml.replace(solver, "<Type>GeneralizedAlpha</Type>\n"
-                              "    <GeneralizedAlpha>\n"
-                              "        <RhoInf>0.8</RhoInf>\n"
-                              "        <ConsistentMassMatrix>true</ConsistentMassMatrix>\n"
-                              "    </GeneralizedAlpha>")
-    (settings / "M_short_genalpha.xml").write_text(xml)
+    (settings / "M_short_genalpha.xml").write_text(_generalized_alpha(xml))
     (em01_root / "ResultsGenAlpha").mkdir(exist_ok=True)
     run_binary(
         binary("CardioMechanics"),
@@ -113,4 +117,31 @@ def test_em01_runs_under_generalized_alpha(em01_root, em01_sim_length, cm_env, b
         timeout=1200,
     )
     vtu = em01_root / "ResultsGenAlpha" / "Cube_vtu"
+    assert list(vtu.glob("Cube.*.vtu")), f"no deformation output written to {vtu}"
+
+
+def test_em01_runs_on_t4mini(em01_root, em01_sim_length, cm_env, binary):
+    """Land17 takes the calcium of the electrophysiology through a dispatch on the element type,
+    which has to know T4MINI. T4MINI does not support NewmarkBeta, so the run uses
+    generalized-alpha, and there is again nothing to compare against."""
+    settings = em01_root / "settings"
+    xml = (settings / "M_1mm.xml").read_text()
+    for old, new in (("<StopTime>1.0</StopTime>", f"<StopTime>{em01_sim_length}</StopTime>"),
+                     ("../Results/", "../ResultsT4Mini/"),
+                     ("<Type>T4</Type>", "<Type>T4MINI</Type>")):
+        assert old in xml, f"M_1mm.xml no longer contains {old!r}"
+        xml = xml.replace(old, new)
+    (settings / "M_short_t4mini.xml").write_text(_generalized_alpha(xml))
+    (em01_root / "ResultsT4Mini").mkdir(exist_ok=True)
+    proc = run_binary(
+        binary("CardioMechanics"),
+        ["-settings", "M_short_t4mini.xml"],
+        cwd=settings,
+        env=cm_env,
+        np=NP,
+        timeout=1200,
+    )
+    assert_no_petsc_error(proc.stdout + proc.stderr)
+    assert "SIMULATION FAILED" not in proc.stdout, proc.stdout[-2000:]
+    vtu = em01_root / "ResultsT4Mini" / "Cube_vtu"
     assert list(vtu.glob("Cube.*.vtu")), f"no deformation output written to {vtu}"

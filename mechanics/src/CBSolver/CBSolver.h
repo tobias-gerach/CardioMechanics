@@ -182,6 +182,11 @@ protected:
     virtual void InitLoadedState();
     void         UpdateGhostNodesAndLinkToAdapter();
     void         CreateNodesJacobianAndLinkToAdapter();
+    /// AIJ matrix with numLocalRows rows and columns on this rank, preallocated for the estimated
+    /// number of nonzero columns nnz of each local row. The estimates count a column once for every
+    /// element sharing it, so on small meshes or small ranks they can exceed the columns a row has,
+    /// which PETSc refuses. They are bounded here by the columns of the diagonal and off-diagonal blocks.
+    static Mat   CreatePreallocatedMatrix(PetscInt numLocalRows, const PetscInt *nnz);
     /// Creates the pressure field of mixed displacement/pressure elements and links it to the adapter.
     void         InitPressureVectors();
     /// Updates the ghost vertices of a pressure field and links it to the adapter.
