@@ -173,27 +173,7 @@ void CBSolverGeneralizedAlpha::InitPETScSolver() {
     SNESSetLagJacobian(snes_, -2);
     SNESSetLagPreconditioner(snes_, -2);
     
-    if (Base::parameters_->Get<bool>("Solver.LU", true)) {
-        PCSetType(pc_, PCLU);
-        KSPSetType(ksp_, "preonly");
-    }
-    
-    if (solverType_ == "mumps") {
-        PCFactorSetMatSolverType(pc_, "mumps");
-    } else if (solverType_ == "superlu") {
-        if (DCCtrl::IsParallel())
-            PCFactorSetMatSolverType(pc_, "superlu_dist");
-        else
-            PCFactorSetMatSolverType(pc_, "superlu");
-    } else {
-        throw std::runtime_error(
-                                 "CBSolverGeneralizedAlpha::InitPETScSolver(): unkown Solver.GeneralizedAlpha.Type " +
-                                 solverType_ + ". Choose either mumps or superlu.");
-    }
-    
-    SNESSetFromOptions(snes_);
-    KSPSetFromOptions(ksp_);
-    PCSetFromOptions(pc_);
+    Base::InitLinearSolver(snes_, solverType_);
 }  // CBSolverGeneralizedAlpha::InitPETScSolver
 
 void CBSolverGeneralizedAlpha::InitParameters() {

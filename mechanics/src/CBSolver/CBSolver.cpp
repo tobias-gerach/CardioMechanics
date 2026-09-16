@@ -1708,6 +1708,30 @@ Mat CBSolver::CreatePreallocatedMatrix(PetscInt numLocalRows, const PetscInt *nn
     return matrix;
 }
 
+void CBSolver::InitLinearSolver(SNES snes, const std::string &factorSolverType) {
+    KSP ksp;
+    PC  pc;
+    SNESGetKSP(snes, &ksp);
+    KSPGetPC(ksp, &pc);
+    
+    if (parameters_->Get<bool>("Solver.LU", true)) {
+        PCSetType(pc, PCLU);
+        KSPSetType(ksp, KSPPREONLY);
+    }
+    
+    if (factorSolverType == "mumps")
+        PCFactorSetMatSolverType(pc, MATSOLVERMUMPS);
+    else if (factorSolverType == "superlu")
+        PCFactorSetMatSolverType(pc, DCCtrl::IsParallel() ? MATSOLVERSUPERLU_DIST : MATSOLVERSUPERLU);
+    else
+        throw std::runtime_error("CBSolver::InitLinearSolver(): unknown solver type " + factorSolverType +
+                                 ". Choose either mumps or superlu.");
+    
+    SNESSetFromOptions(snes);
+    KSPSetFromOptions(ksp);
+    PCSetFromOptions(pc);
+}
+
 void CBSolver::CreateNodesJacobianAndLinkToAdapter() {
     if (nodalForcesJacobian_ != 0)
         MatDestroy(&nodalForcesJacobian_);
