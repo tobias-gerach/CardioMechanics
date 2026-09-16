@@ -64,7 +64,6 @@
     <!-- Coordinates are O(1) here, so the default finite-difference step of 1e-12 would sit
          at round-off; 1e-7 is the square root of machine precision for unit-sized values. -->
     <Epsilon>1e-7</Epsilon>
-    <LU>true</LU>
 
     <Type>GeneralizedAlpha</Type>
     <GeneralizedAlpha>

@@ -173,7 +173,7 @@ void CBSolverGeneralizedAlpha::InitPETScSolver() {
     SNESSetLagJacobian(snes_, -2);
     SNESSetLagPreconditioner(snes_, -2);
     
-    Base::InitLinearSolver(snes_, solverType_);
+    Base::InitLinearSolver(snes_);
 }  // CBSolverGeneralizedAlpha::InitPETScSolver
 
 void CBSolverGeneralizedAlpha::InitParameters() {
@@ -216,7 +216,6 @@ void CBSolverGeneralizedAlpha::InitGeneralizedAlphaParameter() {
     alphaF_ << ", beta = " << beta_ << ", gamma = " << gamma_ << "\n";
     
     useConsistentMassMatrix_ = Base::parameters_->Get<bool>("Solver.GeneralizedAlpha.ConsistentMassMatrix", true);
-    solverType_              = Base::parameters_->Get<std::string>("Solver.GeneralizedAlpha.Type", "mumps");
 }  // CBSolverGeneralizedAlpha::InitGeneralizedAlphaParameter
 
 PetscScalar CBSolverGeneralizedAlpha::IntermediateTime(PetscScalar time) {

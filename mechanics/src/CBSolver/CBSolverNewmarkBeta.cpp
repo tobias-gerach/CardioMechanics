@@ -173,7 +173,7 @@ void CBSolverNewmarkBeta::InitPETScSolver() {
     SNESSetLagJacobian(snes_, -2);
     SNESSetLagPreconditioner(snes_, -2);
     
-    Base::InitLinearSolver(snes_, solverType_);
+    Base::InitLinearSolver(snes_);
 }  // CBSolverNewmarkBeta::InitPETScSolver
 
 void CBSolverNewmarkBeta::InitParameters() {
@@ -188,7 +188,6 @@ void CBSolverNewmarkBeta::InitNewmarkBetaParameter() {
     beta_                    = Base::parameters_->Get<double>("Solver.NewmarkBeta.Beta", 0.25);
     gamma_                   = Base::parameters_->Get<double>("Solver.NewmarkBeta.Gamma", 0.5);
     useConsistentMassMatrix_ = Base::parameters_->Get<bool>("Solver.NewmarkBeta.ConsistentMassMatrix", true);
-    solverType_              = Base::parameters_->Get<std::string>("Solver.NewmarkBeta.Type", "mumps");
 }
 
 void CBSolverNewmarkBeta::InitDampingMatrix() {

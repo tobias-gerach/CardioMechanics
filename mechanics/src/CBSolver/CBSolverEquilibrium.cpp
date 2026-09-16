@@ -205,11 +205,11 @@ void CBSolverEquilibrium::InitPETScSolver() {
     // the next step converges quadratically, so backtracking creeps at steps of a few percent until
     // the residual drops below the absolute tolerance, well short of the converged state. The
     // secant line search minimises the norm along the Newton direction instead, and unlike full
-    // steps it still shortens a step that diverges. -snes_linesearch_type overrides this default.
+    // steps it still shortens a step that diverges. -mech_snes_linesearch_type overrides this default.
     SNESLineSearch lineSearch;
     SNESGetLineSearch(snes_, &lineSearch);
     SNESLineSearchSetType(lineSearch, SNESLINESEARCHSECANT);
-    Base::InitLinearSolver(snes_, "mumps");
+    Base::InitLinearSolver(snes_);
 }
 
 void CBSolverEquilibrium::InitVectors() {

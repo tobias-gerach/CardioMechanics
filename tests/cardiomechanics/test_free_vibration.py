@@ -49,7 +49,7 @@ RING_DOWN = int(round(PULSE / DT)) + 1
 # error of the ring-down, second order but growing with time, outgrows a first-order error in the
 # forcing, such as loads evaluated at the end of the step instead of at the intermediate level.
 CONVERGENCE_SAMPLES = 2 * RING_DOWN
-FRESH_JACOBIAN = "-snes_lag_jacobian 1 -snes_lag_preconditioner 1"
+FRESH_JACOBIAN = "-mech_snes_lag_jacobian 1 -mech_snes_lag_preconditioner 1"
 
 ELEMENTS = ("T10", "T10P1")
 RHO_INF = (1.0, 0.8, 0.5, 0.2, 0.0)

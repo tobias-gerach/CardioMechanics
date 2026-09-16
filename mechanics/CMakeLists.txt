@@ -52,6 +52,7 @@ set(SRCS
     src/CBModel/CBModelLoaderTetgen.cpp
     src/CBSolver/CBSolver.cpp
     src/CBSolver/CBTiming.cpp
+    src/CBSolver/CBLinearSolverOptions.cpp
     src/CBSolver/CBSolverEquilibrium.cpp
     src/CBSolver/CBSolverNewmarkBeta.cpp
     src/CBSolver/CBSolverGeneralizedAlpha.cpp

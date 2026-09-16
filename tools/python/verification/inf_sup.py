@@ -64,9 +64,8 @@ INNER, OUTER = 1.0, 1.2                    # radii of the thin shell
 # put two, three and four elements through its wall.
 SIZES = {"box": (0.25, 0.125, 0.0833), "shell": (0.1, 0.059, 0.042)}
 # The unloaded residual is round-off, so SNES would stop before assembling a Jacobian unless forced
-# to iterate. The right-hand side is round-off too, which one application of no preconditioner
-# solves as well as any factorization, at no cost. PETSc writes the operator of that solve.
-PETSC_OPTIONS = "-snes_force_iteration -ksp_type preonly -pc_type none -ksp_view_mat binary:J.bin"
+# to iterate. PETSc writes the operator of the first linear solve.
+PETSC_OPTIONS = "-mech_snes_force_iteration -mech_ksp_view_mat binary:J.bin"
 # Degree 2 is exact on the affine box. The curved elements of the shell have rational integrands, but
 # degrees 4 and 8 leave beta_h unchanged there to six digits.
 QUADRATURE = "Gauss2"

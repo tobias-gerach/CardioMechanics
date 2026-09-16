@@ -210,8 +210,8 @@ protected:
     virtual void InitPETScSolver() = 0;
     /// Configures the linear solve of snes and applies the PETSc options database to it. Solver-specific
     /// SNES settings such as line search and lag must be set before, so that options can override them.
-    /// factorSolverType is "mumps" or "superlu".
-    void         InitLinearSolver(SNES snes, const std::string &factorSolverType);
+    /// Options come from Solver.LinearSolver under the prefix mech_; the command line overrides them.
+    void         InitLinearSolver(SNES snes);
     void         DeInitExporter();
     virtual void Export(TFloat timeStep);
     void         ExportFiber();

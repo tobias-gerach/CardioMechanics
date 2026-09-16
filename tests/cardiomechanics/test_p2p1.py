@@ -108,6 +108,13 @@ def test_active_stress_estimator_refuses_p2p1(binary, cm_env, tmp_path):
     assert_refused(proc, "Active Stress Estimator", "T10P1")
 
 
+def test_p2p1_refuses_preconditioner_other_than_lu_or_fieldsplit(binary, cm_env, tmp_path):
+    options = "<LinearSolver><Options>-mech_pc_type jacobi</Options></LinearSolver>"
+    proc, _ = _run(binary, cm_env, tmp_path, check=False,
+                   replace=[("<Type>Static</Type>", f"<Type>Static</Type>{options}")])
+    assert_refused(proc, "jacobi", "lu", "fieldsplit")
+
+
 def _active_tension(measure):
     """Settings substitution for a fibre tension ramped to 0.3 over the run, with the top face unloaded."""
     return [("<TensionMax>0</TensionMax>",
@@ -388,8 +395,8 @@ def test_p2p1_jacobian_matches_finite_differences(binary, cm_env, tmp_path, fixt
     clamped nodes like any other.
     """
     view = tmp_path / "jacobian.txt"
-    env = dict(cm_env, PETSC_OPTIONS=f"-snes_test_jacobian {JACOBIAN_THRESHOLD} "
-                                     f"-snes_test_jacobian_view ascii:{view}")
+    env = dict(cm_env, PETSC_OPTIONS=f"-mech_snes_test_jacobian {JACOBIAN_THRESHOLD} "
+                                     f"-mech_snes_test_jacobian_view ascii:{view}")
     _run(binary, cm_env, tmp_path, kappa=1, env=env, fixture=fixture)
     clamped = _clamped_dofs()
     wrong = [e for e in _jacobian_differences(view) if e[0] not in clamped and e[1] not in clamped]
