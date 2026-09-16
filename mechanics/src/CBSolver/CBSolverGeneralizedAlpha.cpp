@@ -30,6 +30,7 @@ PetscErrorCode CBSolverGeneralizedAlphaSNESHelperFunctionForcesJacobian(SNES sne
                                                                         Mat preconditionerMatrix, void *_solver) {
     CBSolverGeneralizedAlpha *solver = reinterpret_cast<CBSolverGeneralizedAlpha *>(_solver);
     CBStatus                  rc     = solver->CalcNodalForcesJacobian(u, jacobian);
+    solver->AttachRigidBodyModes(jacobian);
     
     if (rc != CBStatus::SUCCESS)
         SNESSetFunctionDomainError(snes);

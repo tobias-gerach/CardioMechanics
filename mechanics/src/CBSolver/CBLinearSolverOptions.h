@@ -15,7 +15,7 @@
 #define CB_LINEAR_SOLVER_OPTIONS
 
 #include <string>
-#include <petscsys.h>
+#include <petscmat.h>
 
 class ParameterMap;
 
@@ -30,5 +30,9 @@ void RejectRemovedLinearSolverKeys(ParameterMap &parameters);
 /// already in `db`, as one given on the command line, keeps its value. Throws, inserting nothing, if an option lacks the
 /// prefix mech_.
 void InsertLinearSolverOptions(PetscOptions db, const std::string &presetOptions, const std::string &xmlOptions);
+
+/// The six rigid-body modes of a displacement field, for use as the near-null space of the stiffness matrix by
+/// algebraic multigrid. `coordinates` holds x, y and z of each node in turn, in the layout of the matrix.
+MatNullSpace CreateRigidBodyModes(Vec coordinates);
 
 #endif  // CB_LINEAR_SOLVER_OPTIONS

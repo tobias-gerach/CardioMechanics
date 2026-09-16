@@ -28,6 +28,7 @@ PetscErrorCode CBSolverNewmarkBetaSNESHelperFunctionForcesJacobian(SNES snes, Ve
                                                                    Mat preconditionerMatrix, void *_solver) {
     CBSolverNewmarkBeta *solver = reinterpret_cast<CBSolverNewmarkBeta *>(_solver);
     CBStatus             rc     = solver->CalcNodalForcesJacobian(u, jacobian);
+    solver->AttachRigidBodyModes(jacobian);
     
     //    CBStatus             rc     = solver->CalcNodalForcesJacobianAndDamping(u, jacobian);
     

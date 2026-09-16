@@ -1,12 +1,16 @@
+#include <array>
 #include <functional>
 #include <stdexcept>
 #include <string>
 
 #include <gtest/gtest.h>
-#include <petscsys.h>
+#include <petscmat.h>
 
+#include "CBElementKernel.h"
 #include "CBLinearSolverOptions.h"
+#include "CBTensionModel.h"
 #include "ParameterMap.h"
+#include "VerificationLaws.h"
 
 namespace {
 
@@ -52,6 +56,7 @@ TEST(LinearSolverPreset, DirectIsMumpsLu) {
     EXPECT_NE(options.find("-mech_ksp_type preonly"), std::string::npos);
     EXPECT_NE(options.find("-mech_pc_type lu"), std::string::npos);
     EXPECT_NE(options.find("-mech_pc_factor_mat_solver_type mumps"), std::string::npos);
+    EXPECT_NE(options.find("-mech_mat_mumps_icntl_15 0"), std::string::npos);
 }
 
 TEST(LinearSolverPreset, DirectSuperluIsDistributedInParallel) {
@@ -62,11 +67,23 @@ TEST(LinearSolverPreset, DirectSuperluIsDistributedInParallel) {
               std::string::npos);
 }
 
+TEST(LinearSolverPreset, AmgPresetsAreRestartedGmresToRtol1e8) {
+    for (const auto &[name, pc] : {std::pair<std::string, std::string>{"amg", "gamg"}, {"amg-hypre", "hypre"}}) {
+        const std::string options = LinearSolverPresetOptions(name, false);
+        EXPECT_NE(options.find("-mech_ksp_type gmres"), std::string::npos) << options;
+        EXPECT_NE(options.find("-mech_ksp_gmres_restart 100"), std::string::npos) << options;
+        EXPECT_NE(options.find("-mech_ksp_rtol 1e-8"), std::string::npos) << options;
+        EXPECT_NE(options.find("-mech_pc_type " + pc), std::string::npos) << options;
+    }
+}
+
 TEST(LinearSolverPreset, UnknownNameListsValidNames) {
     const std::string error = ErrorOf([] {LinearSolverPresetOptions("mumps", false); });
     EXPECT_NE(error.find("mumps"), std::string::npos) << error;
     EXPECT_NE(error.find("direct"), std::string::npos) << error;
     EXPECT_NE(error.find("direct-superlu"), std::string::npos) << error;
+    EXPECT_NE(error.find("amg"), std::string::npos) << error;
+    EXPECT_NE(error.find("amg-hypre"), std::string::npos) << error;
 }
 
 TEST(LinearSolverPreset, RemovedKeysNameTheReplacement) {
@@ -114,4 +131,71 @@ TEST_F(LinearSolverOptions, UnprefixedOptionsAreRejected) {
     PetscBool set;
     ASSERT_EQ(PetscOptionsHasName(db_, nullptr, "-ksp_rtol", &set), PETSC_SUCCESS);
     EXPECT_FALSE(set);
+}
+
+// Two T4 elements sharing a face, stiffness at the stress-free reference configuration. There the
+// geometric stiffness vanishes, so infinitesimal rigid motions are exactly in the null space.
+TEST(RigidBodyModes, LieInNullSpaceOfT4Stiffness) {
+    using Kernel = CBElementKernel<CBLinearTetBasis, CBNoPressure>;
+    const TFloat X[5][3]           = {{0, 0, 0}, {1.1, 0.1, 0}, {0.2, 0.9, 0.1}, {0.1, 0.2, 1.2}, {1.0, 1.0, 1.0}};
+    const int elements[2][4]       = {{0, 1, 2, 3}, {4, 2, 1, 3}};
+    ParameterMap parameters;
+    const auto law                 = MakeLaw("NeoHooke", parameters);
+    CBNoTension tension;
+    const std::array<Matrix3<TFloat>, CBQuadratureRule::maxPoints> bases{Matrix3<TFloat>::Identity()};
+    const bool free[Kernel::numUnknowns] = {};
+
+    Mat K;
+    ASSERT_EQ(MatCreateSeqAIJ(PETSC_COMM_SELF, 15, 15, 15, nullptr, &K), PETSC_SUCCESS);
+    for (const auto &element : elements) {
+        std::array<TFloat, Kernel::numUnknowns> x;
+        std::array<PetscInt, Kernel::numUnknowns> rows;
+        for (int a = 0; a < 4; a++)
+            for (int i = 0; i < 3; i++) {
+                x[3 * a + i]    = X[element[a]][i];
+                rows[3 * a + i] = 3 * element[a] + i;
+            }
+        const auto geometry = CalcReferenceGeometry<CBLinearTetBasis>(x.data(), quadratureRule1);
+        std::array<TFloat, Kernel::numUnknowns * Kernel::numUnknowns> tangent;
+        ASSERT_EQ(Kernel(geometry, bases.data(), *law, tension, 0.0).Tangent(x.data(), free, 1e-6, tangent.data()),
+                  CBStatus::SUCCESS);
+        ASSERT_EQ(MatSetValues(K, 12, rows.data(), 12, rows.data(), tangent.data(), ADD_VALUES), PETSC_SUCCESS);
+    }
+    ASSERT_EQ(MatAssemblyBegin(K, MAT_FINAL_ASSEMBLY), PETSC_SUCCESS);
+    ASSERT_EQ(MatAssemblyEnd(K, MAT_FINAL_ASSEMBLY), PETSC_SUCCESS);
+
+    Vec coordinates;
+    ASSERT_EQ(VecCreateSeq(PETSC_COMM_SELF, 15, &coordinates), PETSC_SUCCESS);
+    PetscScalar *c;
+    ASSERT_EQ(VecGetArray(coordinates, &c), PETSC_SUCCESS);
+    for (int n = 0; n < 5; n++)
+        for (int i = 0; i < 3; i++)
+            c[3 * n + i] = X[n][i];
+    ASSERT_EQ(VecRestoreArray(coordinates, &c), PETSC_SUCCESS);
+
+    MatNullSpace modes = CreateRigidBodyModes(coordinates);
+    PetscBool hasConstant;
+    PetscInt numModes;
+    const Vec *vectors;
+    ASSERT_EQ(MatNullSpaceGetVecs(modes, &hasConstant, &numModes, &vectors), PETSC_SUCCESS);
+    EXPECT_EQ(numModes, 6);
+    PetscBool isNullSpace;
+    ASSERT_EQ(MatNullSpaceTest(modes, K, &isNullSpace), PETSC_SUCCESS);
+    EXPECT_TRUE(isNullSpace);
+
+    // The test detects modes that are not rigid motions: a stretch is not in the null space.
+    PetscReal stretchNorm;
+    Vec stretch, image;
+    ASSERT_EQ(VecDuplicate(coordinates, &stretch), PETSC_SUCCESS);
+    ASSERT_EQ(VecDuplicate(coordinates, &image), PETSC_SUCCESS);
+    ASSERT_EQ(VecCopy(coordinates, stretch), PETSC_SUCCESS);
+    ASSERT_EQ(MatMult(K, stretch, image), PETSC_SUCCESS);
+    ASSERT_EQ(VecNorm(image, NORM_2, &stretchNorm), PETSC_SUCCESS);
+    EXPECT_GT(stretchNorm, 1e-2);
+
+    VecDestroy(&image);
+    VecDestroy(&stretch);
+    MatNullSpaceDestroy(&modes);
+    VecDestroy(&coordinates);
+    MatDestroy(&K);
 }
