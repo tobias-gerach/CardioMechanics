@@ -86,6 +86,10 @@ reference energies, with the values the GoogleTest hard-codes:
   quadrature rules, and the T10 rates.
 - `holzapfel_guccione_energy.py` — the reference energies hard-coded in the
   law-level GoogleTest.
+- `linear_solver.py` — Krylov iterations, solve time and peak memory of the
+  `direct`, `amg` and `amg-hypre` presets over a refined displacement-only mesh
+  family at several rank counts; the mesh size from which the iterative presets
+  win is read off its tables.
 
 Scripts that run a binary find it as the tests do, so set `CM_BIN_DIR` to the
 Release build.
