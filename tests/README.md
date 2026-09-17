@@ -90,6 +90,13 @@ reference energies, with the values the GoogleTest hard-codes:
   `direct`, `amg` and `amg-hypre` presets over a refined displacement-only mesh
   family at several rank counts; the mesh size from which the iterative presets
   win is read off its tables.
+- `schur_approximation.py` — outer iterations, solve time and peak memory of
+  `direct` and of the `fieldsplit` preset under the `a11` and the `selfp` Schur
+  approximation, over a kappa sweep and over a refined mixed mesh family at
+  several rank counts; which Schur approximation belongs in the preset is read
+  off its tables. Rerun it after changing the `fieldsplit` preset, the Schur
+  approximation it selects, or the perturbed constraint of ADR-0002 that leaves
+  the pressure mass matrix in the `A11` block.
 
 Scripts that run a binary find it as the tests do, so set `CM_BIN_DIR` to the
 Release build.

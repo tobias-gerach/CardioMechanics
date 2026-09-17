@@ -105,11 +105,11 @@ def settings(preset):
     return text
 
 
-def measure(binary, env, wd, mesh_dir, preset, ranks):
-    """Run one case in the empty directory wd off the mesh already written to mesh_dir, and return
-    its measurements, or why it did not finish."""
+def measure(binary, env, wd, mesh_dir, text, ranks):
+    """Run the settings text in the empty directory wd off the mesh already written to mesh_dir, and
+    return its measurements, or why it did not finish."""
     (wd / "Results").mkdir()
-    (wd / FIXTURE.name).write_text(settings(preset).replace("./tetgen/", f"{mesh_dir}/"))
+    (wd / FIXTURE.name).write_text(text.replace("./tetgen/", f"{mesh_dir}/"))
     args = ["-settings", FIXTURE.name, "-mech_ksp_converged_reason", "-log_view", "-memory_view"]
     start = time.perf_counter()
     try:
@@ -162,7 +162,7 @@ if __name__ == "__main__":
                         continue
                     wd = Path(tmp) / f"{ranks}_{size}_{preset}"
                     wd.mkdir()
-                    rows[size, preset] = row = measure(_find_binary, env, wd, meshes[size], preset, ranks)
+                    rows[size, preset] = row = measure(_find_binary, env, wd, meshes[size], settings(preset), ranks)
                     if not isinstance(row, dict):
                         failed.add(preset)
                     print(f"  {ranks} {size} {preset}: {row}", file=sys.stderr, flush=True)
