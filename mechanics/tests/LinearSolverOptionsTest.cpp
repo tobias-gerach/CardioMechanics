@@ -102,7 +102,7 @@ TEST(LinearSolverPreset, FieldsplitIsSchurOverTheTwoFields) {
     EXPECT_NE(options.find("-mech_pc_type fieldsplit"), std::string::npos) << options;
     EXPECT_NE(options.find("-mech_pc_fieldsplit_type schur"), std::string::npos) << options;
     EXPECT_NE(options.find("-mech_pc_fieldsplit_schur_fact_type full"), std::string::npos) << options;
-    EXPECT_NE(options.find("-mech_pc_fieldsplit_schur_precondition a11"), std::string::npos) << options;
+    EXPECT_NE(options.find("-mech_pc_fieldsplit_schur_precondition selfp"), std::string::npos) << options;
     // The displacement block is the one a direct solve does not fit in memory for; the pressure block is small.
     EXPECT_NE(options.find("-mech_fieldsplit_u_pc_type gamg"), std::string::npos) << options;
     EXPECT_NE(options.find("-mech_fieldsplit_p_pc_type lu"), std::string::npos) << options;

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Cost of the Schur approximations of the fieldsplit preset over kappa and over a refined mesh family.
 
-The fieldsplit preset approximates the Schur complement by the A11 block (ADR-0007), which the
-perturbed constraint of ADR-0002 makes a pressure mass matrix scaled by -1/kappa. That block
-vanishes as kappa grows, which is the regime mixed elements exist for, so whether the approximation
-survives it is a measurement rather than a guess. This script makes it, against selfp, the
-approximation A10 inv(diag(A00)) A01 PETSc assembles itself, and against the direct solve the preset
-replaces.
+The textbook Schur approximation for a mixed element is the A11 block, which the perturbed
+constraint of ADR-0002 makes a pressure mass matrix scaled by -1/kappa. That block vanishes as kappa
+grows, which is the regime mixed elements exist for, so whether the approximation survives it is a
+measurement rather than a guess. This script makes it, against selfp, the approximation
+A10 inv(diag(A00)) A01 PETSc assembles itself and the preset selects (ADR-0007), and against the
+direct solve the preset replaces.
 
 The problem is the inflated thick-walled sphere octant of test_sphere_convergence, kept at its own
 T10P1 element type and run under the Static solver. It is swept twice: over kappa on the second
@@ -74,10 +74,10 @@ from conftest import _find_binary                     # noqa: E402
 from helpers.sphere import write_sphere_octant        # noqa: E402
 from linear_solver import FIXTURE, measure            # noqa: E402
 
-# name -> (preset, Solver.LinearSolver.Options). The options overwrite the preset, so selfp differs
-# from a11 in the Schur approximation alone.
+# name -> (preset, Solver.LinearSolver.Options). The options overwrite the preset, so the two rows
+# differ in the Schur approximation alone, and stay what they say they are if the preset changes.
 CONFIGS = {"direct": ("direct", ""),
-           "a11": ("fieldsplit", ""),
+           "a11": ("fieldsplit", "-mech_pc_fieldsplit_schur_precondition a11"),
            "selfp": ("fieldsplit", "-mech_pc_fieldsplit_schur_precondition selfp")}
 SIZES = (0.3, 0.2, 0.15, 0.1, 0.075)    # gmsh element sizes, as in linear_solver.py
 KAPPA_SWEEP = (10, 100, 1000, 10000, 100000, 1000000)
