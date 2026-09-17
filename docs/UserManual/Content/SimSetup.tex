@@ -778,7 +778,6 @@ First order accuracy and unconditional stability can be achieved with $\beta = \
 Using $\gamma > 0.5$ enables numerical dissipation of higher frequencies.
 However, it degrades the accuracy of the solver slightly.
 Additionally, you can choose to use a \verb|ConsistentMassMatrix| (recommended) or a lumped mass matrix by setting the parameter to \verb|false|.
-With \verb|NewmarkBeta.Type| you can choose between the \href{https://petsc.org/main/manualpages/Mat/MATSOLVERMUMPS/}{mumps} and \href{https://petsc.org/main/manualpages/Mat/MATSOLVERSUPERLU/}{superlu} solver packages to perform the factorization.
 
 The \verb|GeneralizedAlpha| solver uses the generalized-$\alpha$ method of Chung and Hulbert \cite{chung1993} (\Sec{model:generalizedAlpha}).
 It is second-order accurate and unconditionally stable for every value of its single parameter \verb|RhoInf|, the spectral radius at infinite frequency, from which its four coefficients are derived; they cannot be set individually.
@@ -788,8 +787,54 @@ At \verb|RhoInf| $= 1$ the method dissipates nothing.
 It is then the midpoint rule, which shares $\beta = \frac{1}{4}$ and $\gamma = \frac{1}{2}$ with \verb|NewmarkBeta| and agrees with it to truncation error, not exactly.
 Lower values damp high-frequency modes increasingly strongly, down to their annihilation at \verb|RhoInf| $= 0$, while the method stays second-order accurate, which \verb|NewmarkBeta| with $\gamma > \frac{1}{2}$ does not.
 Loads, tension courses and plugins are evaluated at the intermediate time $\tn{n+1} - \alpha_f \dt$, so they see the time of each step shifted by $-\alpha_f \dt$.
-\verb|ConsistentMassMatrix|, \verb|Type| and Rayleigh damping work as for \verb|NewmarkBeta|, with the same defaults.
+\verb|ConsistentMassMatrix| and Rayleigh damping work as for \verb|NewmarkBeta|, with the same defaults.
 \verb|GeneralizedAlpha| is the only dynamic solver that supports the mixed elements of \Sec{settings:MixedElements}.
+
+\paragraph{Linear Solver}
+Each of the three solvers above solves one linear system per Newton iteration.
+The solver used for it is set in the \verb|Solver.LinearSolver| block.
+\verb|Preset| names one of the combinations of Krylov method and preconditioner listed in \autoref{tab:linearSolverPresets}, and \verb|Options| adds PETSc options to it.
+Both are optional; the default is the \verb|direct| preset.
+An unknown preset name aborts the initialization with an error listing the valid ones.
+The presets other than \verb|direct| need PETSc to have been built with the package they name (\Sec{sec:gettingstrated}).
+
+\begin{table}[h!]
+    \centering
+    \caption{Linear solver presets of \texttt{Solver.LinearSolver.Preset}.}
+    \label{tab:linearSolverPresets}
+    \begin{tabular}{p{0.2\linewidth}p{0.35\linewidth}p{0.35\linewidth}}
+    \toprule
+        Preset & Krylov method & Preconditioner \\
+        \midrule
+        \verb|direct| (default) & \verb|preonly| & LU, \href{https://petsc.org/main/manualpages/Mat/MATSOLVERMUMPS/}{mumps} \\
+        \verb|direct-superlu| & \verb|preonly| & LU, \href{https://petsc.org/main/manualpages/Mat/MATSOLVERSUPERLU/}{superlu}, \verb|superlu_dist| in parallel \\
+        \verb|amg| & GMRES, restart 100, relative residual \num{1e-8} & GAMG \\
+        \verb|amg-hypre| & GMRES, restart 100, relative residual \num{1e-8} & hypre BoomerAMG \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+The direct presets factorize the Jacobian and are the most robust choice, but the memory of the factorization grows faster than the mesh, which is what limits the mesh size in practice.
+The \verb|amg| presets replace the factorization by a preconditioned GMRES iteration whose memory grows with the mesh, so they run meshes that do not fit in memory with \verb|direct|.
+\verb|amg| coarsens the Jacobian by its displacement blocks and by the six rigid-body modes of the reference configuration, which multigrid needs in order to coarsen an elasticity operator well.
+\verb|amg-hypre| uses neither and coarsens from the matrix entries alone, so which of the two converges in fewer iterations depends on the problem; try both.
+A linear solve that does not converge fails the step, and the adaptive time stepping halves the time step as after any other failed step; there is no fallback to a direct solve.
+
+Mixed elements (\Sec{settings:MixedElements}) make the system a saddle-point problem, on which neither multigrid variant converges.
+Their models therefore accept only the \verb|lu| and \verb|fieldsplit| preconditioners, and any other one aborts the setup with an error; the \verb|amg| presets are for the displacement-only element types \verb+T4+ and \verb+T10+.
+
+\verb|Options| takes PETSc options in their command-line syntax, so every option of the \href{https://petsc.org/main/manualpages/KSP/}{KSP} and \href{https://petsc.org/main/manualpages/PC/}{PC} manual pages is reachable without a preset of its own.
+The mechanics solvers read their options under the prefix \verb|mech_|, which keeps them apart from the electrophysiology solve of a coupled run (\nameref{plugin:acCELLerate}), which reads the unprefixed ones.
+An option in \verb|Options| that lacks the prefix aborts the initialization.
+An option given on the command line wins over \verb|Options|, which wins over the preset, so a tolerance can be varied over a series of runs without editing the settings file:
+\begin{lstlisting}[language=bash,caption=Overriding a linear solver option on the command line]
+CardioMechanics -settings heart.xml -mech_ksp_rtol 1e-6
+\end{lstlisting}
+
+\paragraph{Migration from Solver.LU}
+The keys \verb|Solver.LU|, \verb|Solver.NewmarkBeta.Type| and \verb|Solver.GeneralizedAlpha.Type| have been removed and abort the initialization with an error naming \verb|Solver.LinearSolver.Preset|.
+A \verb|Type| of \verb|mumps| is the default \verb|direct| preset, so the key is simply dropped; a \verb|Type| of \verb|superlu| becomes the preset \verb|direct-superlu|.
+Unprefixed \verb|-ksp_*|, \verb|-pc_*| and \verb|-snes_*| options on the command line used to reach the mechanics solvers and no longer do; add the \verb|mech_| prefix to them.
 
 \paragraph{Adaptive Time Stepping}
 Since the cardiac cycle consists of different phases that are more or less difficult to solve,
@@ -839,15 +884,19 @@ One really bad element is all it takes to give you a lot of trouble.
         <Beta> 0.25 </Beta>
         <Gamma> 0.5 </Gamma>
         <ConsistentMassMatrix> true </ConsistentMassMatrix>
-        <Type> mumps/superlu </Type>
     </NewmarkBeta>
     <GeneralizedAlpha>
         <!-- Required, no default: spectral radius at infinite frequency in [0, 1] -->
         <!-- 1: no numerical dissipation, 0: strongest dissipation of high frequencies -->
         <RhoInf> FLOAT </RhoInf>
         <ConsistentMassMatrix> true </ConsistentMassMatrix>
-        <Type> mumps/superlu </Type>
     </GeneralizedAlpha>
+
+    <!-- Linear solver of each Newton iteration -->
+    <LinearSolver>
+        <Preset> direct/direct-superlu/amg/amg-hypre </Preset>
+        <Options> -mech_ksp_rtol 1e-6 </Options>
+    </LinearSolver>
 
     <!-- Timing -->
     <StartTime> 0 </StartTime>
