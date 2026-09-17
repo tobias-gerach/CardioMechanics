@@ -77,6 +77,20 @@ TEST(LinearSolverPreset, AmgPresetsAreRestartedGmresToRtol1e8) {
     }
 }
 
+TEST(LinearSolverPreset, FieldsplitIsSchurOverTheTwoFields) {
+    const std::string options = LinearSolverPresetOptions("fieldsplit", false);
+    EXPECT_NE(options.find("-mech_ksp_type fgmres"), std::string::npos) << options;
+    EXPECT_NE(options.find("-mech_ksp_gmres_restart 100"), std::string::npos) << options;
+    EXPECT_NE(options.find("-mech_ksp_rtol 1e-8"), std::string::npos) << options;
+    EXPECT_NE(options.find("-mech_pc_type fieldsplit"), std::string::npos) << options;
+    EXPECT_NE(options.find("-mech_pc_fieldsplit_type schur"), std::string::npos) << options;
+    EXPECT_NE(options.find("-mech_pc_fieldsplit_schur_fact_type full"), std::string::npos) << options;
+    EXPECT_NE(options.find("-mech_pc_fieldsplit_schur_precondition a11"), std::string::npos) << options;
+    // Both blocks are solved directly, so the split itself is all that the preset changes.
+    EXPECT_NE(options.find("-mech_fieldsplit_u_pc_type lu"), std::string::npos) << options;
+    EXPECT_NE(options.find("-mech_fieldsplit_p_pc_type lu"), std::string::npos) << options;
+}
+
 TEST(LinearSolverPreset, UnknownNameListsValidNames) {
     const std::string error = ErrorOf([] {LinearSolverPresetOptions("mumps", false); });
     EXPECT_NE(error.find("mumps"), std::string::npos) << error;
@@ -84,6 +98,7 @@ TEST(LinearSolverPreset, UnknownNameListsValidNames) {
     EXPECT_NE(error.find("direct-superlu"), std::string::npos) << error;
     EXPECT_NE(error.find("amg"), std::string::npos) << error;
     EXPECT_NE(error.find("amg-hypre"), std::string::npos) << error;
+    EXPECT_NE(error.find("fieldsplit"), std::string::npos) << error;
 }
 
 TEST(LinearSolverPreset, RemovedKeysNameTheReplacement) {
@@ -131,6 +146,49 @@ TEST_F(LinearSolverOptions, UnprefixedOptionsAreRejected) {
     PetscBool set;
     ASSERT_EQ(PetscOptionsHasName(db_, nullptr, "-ksp_rtol", &set), PETSC_SUCCESS);
     EXPECT_FALSE(set);
+}
+
+// A preconditioner is checked against the model before the first solve, rather than failing to converge in it.
+class Preconditioner : public testing::Test {
+protected:
+    void SetUp() override {
+        ASSERT_EQ(PCCreate(PETSC_COMM_SELF, &pc_), PETSC_SUCCESS);
+    }
+
+    void TearDown() override {PCDestroy(&pc_); }
+
+    std::string RejectionOf(PCType type, bool hasPressureField) {
+        EXPECT_EQ(PCSetType(pc_, type), PETSC_SUCCESS);
+        return ErrorOf([&] {CheckPreconditionerSupportsModel(pc_, hasPressureField); });
+    }
+
+    PC pc_ = nullptr;
+};
+
+TEST_F(Preconditioner, SaddlePointSystemTakesLuOrFieldsplit) {
+    for (const auto type : {PCLU, PCFIELDSPLIT}) {
+        ASSERT_EQ(PCSetType(pc_, type), PETSC_SUCCESS);
+        EXPECT_NO_THROW(CheckPreconditionerSupportsModel(pc_, true)) << type;
+    }
+}
+
+TEST_F(Preconditioner, SaddlePointSystemRejectsMultigrid) {
+    const std::string error = RejectionOf(PCGAMG, true);
+    EXPECT_NE(error.find("gamg"), std::string::npos) << error;
+    EXPECT_NE(error.find("lu"), std::string::npos) << error;
+    EXPECT_NE(error.find("fieldsplit"), std::string::npos) << error;
+}
+
+TEST_F(Preconditioner, DisplacementOnlyModelRejectsFieldsplitNamingTheMixedTypes) {
+    const std::string error = RejectionOf(PCFIELDSPLIT, false);
+    EXPECT_NE(error.find("fieldsplit"), std::string::npos) << error;
+    EXPECT_NE(error.find("T10P1"), std::string::npos) << error;
+    EXPECT_NE(error.find("T4MINI"), std::string::npos) << error;
+}
+
+TEST_F(Preconditioner, DisplacementOnlyModelTakesMultigrid) {
+    ASSERT_EQ(PCSetType(pc_, PCGAMG), PETSC_SUCCESS);
+    EXPECT_NO_THROW(CheckPreconditionerSupportsModel(pc_, false));
 }
 
 // Two T4 elements sharing a face, stiffness at the stress-free reference configuration. There the

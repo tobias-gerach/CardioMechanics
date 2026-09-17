@@ -37,13 +37,50 @@ std::string LinearSolverPresetOptions(const std::string &name, bool parallel) {
     if (name == "direct-superlu")
         return std::string("-mech_ksp_type preonly -mech_pc_type lu -mech_pc_factor_mat_solver_type ") +
                (parallel ? "superlu_dist" : "superlu");
-    const std::string krylov = "-mech_ksp_type gmres -mech_ksp_gmres_restart 100 -mech_ksp_rtol 1e-8";
+    const auto krylov = [](const std::string &method) {
+        return "-mech_ksp_type " + method + " -mech_ksp_gmres_restart 100 -mech_ksp_rtol 1e-8";
+    };
     if (name == "amg")
-        return krylov + " -mech_pc_type gamg";
+        return krylov("gmres") + " -mech_pc_type gamg";
     if (name == "amg-hypre")
-        return krylov + " -mech_pc_type hypre -mech_pc_hypre_type boomeramg";
+        return krylov("gmres") + " -mech_pc_type hypre -mech_pc_hypre_type boomeramg";
+
+    // The saddle-point system of a mixed element type, split into its displacement and pressure fields (ADR-0007).
+    // FGMRES tolerates a preconditioner that varies between outer iterations, which is what an iterative solve of a
+    // block produces. The perturbed constraint of ADR-0002 leaves a scaled pressure mass matrix in A11, which
+    // approximates the Schur complement.
+    if (name == "fieldsplit")
+        return krylov("fgmres") +
+               " -mech_pc_type fieldsplit -mech_pc_fieldsplit_type schur"
+               " -mech_pc_fieldsplit_schur_fact_type full -mech_pc_fieldsplit_schur_precondition a11"
+               " -mech_fieldsplit_u_ksp_type preonly -mech_fieldsplit_u_pc_type lu"
+               " -mech_fieldsplit_u_pc_factor_mat_solver_type mumps"
+               " -mech_fieldsplit_p_ksp_type preonly -mech_fieldsplit_p_pc_type lu"
+               " -mech_fieldsplit_p_pc_factor_mat_solver_type mumps";
     throw std::runtime_error("Solver.LinearSolver.Preset: unknown preset " + name +
-                             ". Valid presets are direct, direct-superlu, amg, amg-hypre.");
+                             ". Valid presets are direct, direct-superlu, amg, amg-hypre, fieldsplit.");
+}
+
+void CheckPreconditionerSupportsModel(PC pc, bool hasPressureField) {
+    const std::string caller = "CheckPreconditionerSupportsModel()";
+    PetscBool isLU, isFieldSplit;
+    Check(PetscObjectTypeCompare((PetscObject)pc, PCLU, &isLU), "compare the preconditioner type", caller);
+    Check(PetscObjectTypeCompare((PetscObject)pc, PCFIELDSPLIT, &isFieldSplit), "compare the preconditioner type",
+          caller);
+    PCType type;
+    Check(PCGetType(pc, &type), "get the preconditioner type", caller);
+
+    // A pressure field makes the system an indefinite saddle-point problem, on which a preconditioner other than
+    // LU or a field split does not converge.
+    if (hasPressureField && !isLU && !isFieldSplit)
+        throw std::runtime_error(std::string("CheckPreconditionerSupportsModel(): preconditioner ") + type +
+                                 " is not supported with a pressure field; use lu or fieldsplit");
+
+    // The mirror case: there is no second field to split off.
+    if (!hasPressureField && isFieldSplit)
+        throw std::runtime_error("CheckPreconditionerSupportsModel(): preconditioner fieldsplit needs a pressure "
+                                 "field, which only the mixed element types T10P1 and T4MINI have; use direct, "
+                                 "direct-superlu, amg or amg-hypre");
 }
 
 void RejectRemovedLinearSolverKeys(ParameterMap &parameters) {

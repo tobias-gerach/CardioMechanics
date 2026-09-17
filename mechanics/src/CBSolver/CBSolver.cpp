@@ -1731,15 +1731,16 @@ void CBSolver::InitLinearSolver(SNES snes) {
     KSPSetFromOptions(ksp);
     PCSetFromOptions(pc);
     
-    // A pressure field makes the system an indefinite saddle-point problem. Preconditioners other than LU or a
-    // field split do not converge on it, so they are refused before the first solve.
-    PetscBool supported;
-    PetscObjectTypeCompareAny((PetscObject)pc, &supported, PCLU, PCFIELDSPLIT, "");
-    if (model_->GetNumberOfPressureNodes() > 0 && !supported) {
-        PCType type;
-        PCGetType(pc, &type);
-        throw std::runtime_error(std::string("CBSolver::InitLinearSolver(): preconditioner ") + type +
-                                 " is not supported with a pressure field; use lu or fieldsplit");
+    CheckPreconditionerSupportsModel(pc, model_->GetNumberOfPressureNodes() > 0);
+
+    // The two fields of the split are the ones the unknown vector is laid out in (ADR-0001), named so that the inner
+    // solvers are addressable as -mech_fieldsplit_u_* and -mech_fieldsplit_p_*. They have to be attached before the
+    // preconditioner is set up, which the first solve does.
+    PetscBool isFieldSplit = PETSC_FALSE;
+    PetscObjectTypeCompare((PetscObject)pc, PCFIELDSPLIT, &isFieldSplit);
+    if (isFieldSplit) {
+        PCFieldSplitSetIS(pc, "u", adapter_->GetDisplacementDofs());
+        PCFieldSplitSetIS(pc, "p", adapter_->GetPressureDofs());
     }
 }
 

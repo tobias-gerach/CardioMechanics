@@ -1,18 +1,23 @@
-"""Iterative linear solver presets on the displacement-only cantilever of test_p2p1.
+"""Iterative linear solver presets on the cantilever of test_p2p1.
 
 Each Newton step of an iterative run solves its linear system only to a relative residual of 1e-8, so its
 converged shape agrees with that of the direct solve to well below the resolution of the exported points.
+The amg presets take the displacement-only element types, the fieldsplit preset the mixed ones.
 """
+import re
 import shutil
 
 import numpy as np
 import pytest
 
+from helpers.cantilever import CELLS
 from helpers.run import assert_no_petsc_error, assert_refused
 from test_p2p1 import DYNAMIC_FIXTURE, FIXTURE, NP, _final_points, _run
 
 ATOL = 1e-6     # the exported points are float32, which resolves 2.4e-7 at the coordinates of up to 4
 SOLVER_TYPE = {FIXTURE: "Static", DYNAMIC_FIXTURE: "GeneralizedAlpha"}
+# Both mixed element types carry one pressure unknown per cube corner of the mesh.
+PRESSURE_DOFS = (CELLS[0] + 1) * (CELLS[1] + 1) * (CELLS[2] + 1)
 
 
 def _linear_solver(fixture, preset, options=""):
@@ -71,3 +76,60 @@ def test_pressure_field_refuses_amg_presets(binary, cm_env, tmp_path, element_ty
     proc, _ = _run(binary, cm_env, tmp_path, element_type=element_type, check=False,
                    replace=_linear_solver(FIXTURE, preset))
     assert_refused(proc, pc, "lu", "fieldsplit")
+
+
+def _split_rows(view, field):
+    """Rows of the matrix of the `field` block of the fieldsplit, from -mech_ksp_view output."""
+    match = re.search(rf"\(mech_fieldsplit_{field}_\).*?rows=(\d+)", view, re.DOTALL)
+    assert match, f"the view shows no {field} block\n{view[-2000:]}"
+    return int(match.group(1))
+
+
+def _displacement_dofs(wd):
+    """Three per node of the mesh staged in wd, as the tetgen header counts them."""
+    return 3 * int((wd / "tetgen" / "cantilever.node").read_text().split(maxsplit=1)[0])
+
+
+@pytest.mark.parametrize("fixture", [FIXTURE, DYNAMIC_FIXTURE], ids=["Static", "GeneralizedAlpha"])
+@pytest.mark.parametrize("element_type", ["T10P1", "T4MINI"])
+def test_fieldsplit_matches_direct_solve(binary, cm_env, tmp_path, element_type, fixture):
+    pytest.importorskip("meshio")
+    shapes = {}
+    for preset in ("direct", "fieldsplit"):
+        wd = tmp_path / preset
+        wd.mkdir()
+        # The view shows which system the split is actually over.
+        options = "-mech_ksp_view" if preset == "fieldsplit" else ""
+        proc, vtu_dir = _run(binary, cm_env, wd, element_type=element_type, fixture=fixture,
+                             replace=_linear_solver(fixture, preset, options))
+        assert_no_petsc_error(proc.stdout + proc.stderr)
+        shapes[preset] = _final_points(vtu_dir)
+        if preset == "fieldsplit":
+            assert "FieldSplit with Schur preconditioner, factorization FULL" in proc.stdout, proc.stdout[-2000:]
+            assert "Schur complement formed from A11" in proc.stdout, proc.stdout[-2000:]
+            assert _split_rows(proc.stdout, "u") == _displacement_dofs(wd)
+            assert _split_rows(proc.stdout, "p") == PRESSURE_DOFS
+    _assert_same_shape(shapes["fieldsplit"], shapes["direct"], "fieldsplit")
+
+
+@pytest.mark.mpi
+def test_fieldsplit_parallel_matches_serial_direct_solve(binary, cm_env, tmp_path):
+    pytest.importorskip("meshio")
+    if shutil.which("mpirun") is None:
+        pytest.skip("mpirun not found")
+    shapes = {}
+    for preset, ranks in (("direct", None), ("fieldsplit", NP)):
+        wd = tmp_path / preset
+        wd.mkdir()
+        proc, vtu_dir = _run(binary, cm_env, wd, element_type="T10P1", ranks=ranks,
+                             replace=_linear_solver(FIXTURE, preset))
+        assert_no_petsc_error(proc.stdout + proc.stderr)
+        shapes[preset] = _final_points(vtu_dir)
+    _assert_same_shape(shapes["fieldsplit"], shapes["direct"], f"fieldsplit at np={NP}")
+
+
+@pytest.mark.parametrize("element_type", ["T4", "T10"])
+def test_displacement_only_model_refuses_fieldsplit(binary, cm_env, tmp_path, element_type):
+    proc, _ = _run(binary, cm_env, tmp_path, element_type=element_type, check=False,
+                   replace=_linear_solver(FIXTURE, "fieldsplit"))
+    assert_refused(proc, "fieldsplit", "T10P1", "T4MINI")
