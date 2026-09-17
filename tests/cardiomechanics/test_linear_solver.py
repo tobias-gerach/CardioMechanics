@@ -124,7 +124,8 @@ def test_fieldsplit_matches_direct_solve(binary, cm_env, tmp_path, element_type,
         shapes[preset] = _final_points(vtu_dir)
         if preset == "fieldsplit":
             assert "FieldSplit with Schur preconditioner, factorization FULL" in proc.stdout, proc.stdout[-2000:]
-            assert "Schur complement formed from A11" in proc.stdout, proc.stdout[-2000:]
+            assert "Schur complement formed from Sp, an assembled approximation to S" in proc.stdout, \
+                proc.stdout[-2000:]
             assert _split_rows(proc.stdout, "u") == _displacement_dofs(wd)
             assert _split_rows(proc.stdout, "p") == PRESSURE_DOFS
             # The displacement block is the one multigrid needs a node's three components and the
