@@ -1723,33 +1723,55 @@ void CBSolver::InitLinearSolver(SNES snes) {
                               parameters_->Get<std::string>("Solver.LinearSolver.Options", ""));
     
     KSP ksp;
-    PC  pc;
     SNESGetKSP(snes, &ksp);
-    KSPGetPC(ksp, &pc);
+    KSPGetPC(ksp, &pc_);
     SNESSetOptionsPrefix(snes, "mech_");
     SNESSetFromOptions(snes);
     KSPSetFromOptions(ksp);
-    PCSetFromOptions(pc);
+    PCSetFromOptions(pc_);
     
-    CheckPreconditionerSupportsModel(pc, model_->GetNumberOfPressureNodes() > 0);
+    CheckPreconditionerSupportsModel(pc_, model_->GetNumberOfPressureNodes() > 0);
 
     // The two fields of the split are the ones the unknown vector is laid out in (ADR-0001), named so that the inner
     // solvers are addressable as -mech_fieldsplit_u_* and -mech_fieldsplit_p_*. They have to be attached before the
     // preconditioner is set up, which the first solve does.
-    PetscBool isFieldSplit = PETSC_FALSE;
-    PetscObjectTypeCompare((PetscObject)pc, PCFIELDSPLIT, &isFieldSplit);
-    if (isFieldSplit) {
-        PCFieldSplitSetIS(pc, "u", adapter_->GetDisplacementDofs());
-        PCFieldSplitSetIS(pc, "p", adapter_->GetPressureDofs());
+    if (IsFieldSplit()) {
+        PCFieldSplitSetIS(pc_, "u", adapter_->GetDisplacementDofs());
+        PCFieldSplitSetIS(pc_, "p", adapter_->GetPressureDofs());
     }
 }
 
+bool CBSolver::IsFieldSplit() const {
+    assert(pc_ && "the preconditioner is set up before the first solve");
+    PetscBool isFieldSplit = PETSC_FALSE;
+    PetscObjectTypeCompare((PetscObject)pc_, PCFIELDSPLIT, &isFieldSplit);
+    return isFieldSplit == PETSC_TRUE;
+}
+
 void CBSolver::AttachRigidBodyModes(Mat jacobian) {
-    if (model_->GetNumberOfPressureNodes() > 0)
-        return;
+    // Of a mixed model only the displacement block of the split is preconditioned by multigrid, so the modes go on
+    // that submatrix rather than on the whole Jacobian. It exists once the split has been set up, which is forced
+    // here rather than left to the solve because a set-up that follows a change of the nonzero pattern builds the
+    // submatrix afresh. Multigrid reads the modes when it builds its coarse spaces, which is the set-up of the inner
+    // solver of the block and so still ahead of this point.
+    Mat block = jacobian;
+    if (model_->GetNumberOfPressureNodes() > 0) {
+        if (!IsFieldSplit())
+            return;
+        PetscErrorCode ierr;
+        PetscInt numBlocks;
+        KSP     *blocks;
+        ierr = PCSetUp(pc_); CHKERRQ(ierr);
+        ierr = PCFieldSplitGetSubKSP(pc_, &numBlocks, &blocks); CHKERRQ(ierr);
+        assert(numBlocks == 2 && "the split is over the displacement and the pressure field");
+        ierr = KSPGetOperators(blocks[0], nullptr, &block); CHKERRQ(ierr);
+        ierr = PetscFree(blocks); CHKERRQ(ierr);
+        // The Jacobian of a mixed model has block size 1, since its pressure rows break the blocks of three.
+        ierr = MatSetBlockSize(block, 3); CHKERRQ(ierr);
+    }
     if (!rigidBodyModes_)
         rigidBodyModes_ = CreateRigidBodyModes(refNodes_);
-    MatSetNearNullSpace(jacobian, rigidBodyModes_);
+    MatSetNearNullSpace(block, rigidBodyModes_);
 }
 
 void CBSolver::CreateNodesJacobianAndLinkToAdapter() {

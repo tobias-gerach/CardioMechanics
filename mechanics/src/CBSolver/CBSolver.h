@@ -212,9 +212,12 @@ protected:
     /// SNES settings such as line search and lag must be set before, so that options can override them.
     /// Options come from Solver.LinearSolver under the prefix mech_; the command line overrides them.
     void         InitLinearSolver(SNES snes);
-    /// Attaches the rigid-body modes of the reference configuration to the Jacobian of a displacement-only model, for
-    /// algebraic multigrid to build its coarse spaces from. Adding a matrix of different nonzero pattern rebuilds a
-    /// PETSc matrix and drops them, so this follows the last such addition.
+    /// Whether the linear solve preconditions the system with a field split over the displacement and pressure fields.
+    bool         IsFieldSplit() const;
+    /// Attaches the rigid-body modes of the reference configuration to the matrix algebraic multigrid builds its
+    /// coarse spaces from: the Jacobian of a displacement-only model, or the displacement block of the split of a
+    /// mixed one. Rebuilding either matrix, which adding a matrix of different nonzero pattern does, drops them, so
+    /// this follows the last such addition.
     void         AttachRigidBodyModes(Mat jacobian);
     void         DeInitExporter();
     virtual void Export(TFloat timeStep);
@@ -325,6 +328,7 @@ protected:
     Vec nodalForces_         = 0;
     Mat nodalForcesJacobian_ = 0;
     MatNullSpace rigidBodyModes_ = 0;
+    PC  pc_                  = nullptr;  // of the linear solve of the derived solver, set in InitPETScSolver
     Vec pressures_           = 0; // converged pressure field, the counterpart of nodes_
     Vec trialPressures_      = 0;
     Vec pressureResiduals_   = 0;

@@ -78,11 +78,29 @@ def test_pressure_field_refuses_amg_presets(binary, cm_env, tmp_path, element_ty
     assert_refused(proc, pc, "lu", "fieldsplit")
 
 
-def _split_rows(view, field):
-    """Rows of the matrix of the `field` block of the fieldsplit, from -mech_ksp_view output."""
-    match = re.search(rf"\(mech_fieldsplit_{field}_\).*?rows=(\d+)", view, re.DOTALL)
+def _split_matrix(view, field):
+    """What -mech_ksp_view says about the matrix of the `field` block of the fieldsplit: its size and
+    the properties, the near-null space among them, listed under it.
+
+    Matched on the matrix itself rather than on the first one under the block, which for multigrid is
+    its coarsest level.
+    """
+    match = re.search(rf"Mat Object: \(mech_fieldsplit_{field}_\)[^\n]*\n\s*type: \w+\n"
+                      rf"(?P<body>(?:[ \t]+\S[^\n]*\n)+?)(?=[ \t]*(?:Up solver|KSP|PC|Mat|linear system))", view)
     assert match, f"the view shows no {field} block\n{view[-2000:]}"
-    return int(match.group(1))
+    return match.group("body")
+
+
+def _split_pc(view, field):
+    """The preconditioner type of the `field` block of the fieldsplit."""
+    match = re.search(rf"PC Object: \(mech_fieldsplit_{field}_\)[^\n]*\n\s*type: (\w+)", view)
+    assert match, f"the view shows no preconditioner for the {field} block\n{view[-2000:]}"
+    return match.group(1)
+
+
+def _split_rows(view, field):
+    """Rows of the matrix of the `field` block of the fieldsplit."""
+    return int(re.search(r"rows=(\d+)", _split_matrix(view, field)).group(1))
 
 
 def _displacement_dofs(wd):
@@ -109,6 +127,12 @@ def test_fieldsplit_matches_direct_solve(binary, cm_env, tmp_path, element_type,
             assert "Schur complement formed from A11" in proc.stdout, proc.stdout[-2000:]
             assert _split_rows(proc.stdout, "u") == _displacement_dofs(wd)
             assert _split_rows(proc.stdout, "p") == PRESSURE_DOFS
+            # The displacement block is the one multigrid needs a node's three components and the
+            # rigid-body modes on, neither of which the whole Jacobian of a mixed model carries.
+            block = _split_matrix(proc.stdout, "u")
+            assert _split_pc(proc.stdout, "u") == "gamg", proc.stdout[-2000:]
+            assert "bs=3" in block, block
+            assert "has attached near null space" in block, block
     _assert_same_shape(shapes["fieldsplit"], shapes["direct"], "fieldsplit")
 
 

@@ -39,6 +39,23 @@ protected:
     PetscOptions db_ = nullptr;
 };
 
+// Two tetrahedra sharing a face, the smallest mesh whose stiffness is assembled from more than one
+// element. At its stress-free reference configuration the geometric stiffness vanishes, so
+// infinitesimal rigid motions are exactly in the null space.
+const TFloat referenceNodes[5][3] = {{0, 0, 0}, {1.1, 0.1, 0}, {0.2, 0.9, 0.1}, {0.1, 0.2, 1.2}, {1.0, 1.0, 1.0}};
+const int tetrahedra[2][4]        = {{0, 1, 2, 3}, {4, 2, 1, 3}};
+constexpr int numMeshNodes        = 5;
+
+Vec ReferenceCoordinates() {
+    Vec coordinates;
+    PetscCallAbort(PETSC_COMM_SELF, VecCreateSeq(PETSC_COMM_SELF, 3 * numMeshNodes, &coordinates));
+    PetscScalar *c;
+    PetscCallAbort(PETSC_COMM_SELF, VecGetArray(coordinates, &c));
+    std::copy_n(&referenceNodes[0][0], 3 * numMeshNodes, c);
+    PetscCallAbort(PETSC_COMM_SELF, VecRestoreArray(coordinates, &c));
+    return coordinates;
+}
+
 std::string ErrorOf(const std::function<void()> &f) {
     try {
         f();
@@ -86,8 +103,8 @@ TEST(LinearSolverPreset, FieldsplitIsSchurOverTheTwoFields) {
     EXPECT_NE(options.find("-mech_pc_fieldsplit_type schur"), std::string::npos) << options;
     EXPECT_NE(options.find("-mech_pc_fieldsplit_schur_fact_type full"), std::string::npos) << options;
     EXPECT_NE(options.find("-mech_pc_fieldsplit_schur_precondition a11"), std::string::npos) << options;
-    // Both blocks are solved directly, so the split itself is all that the preset changes.
-    EXPECT_NE(options.find("-mech_fieldsplit_u_pc_type lu"), std::string::npos) << options;
+    // The displacement block is the one a direct solve does not fit in memory for; the pressure block is small.
+    EXPECT_NE(options.find("-mech_fieldsplit_u_pc_type gamg"), std::string::npos) << options;
     EXPECT_NE(options.find("-mech_fieldsplit_p_pc_type lu"), std::string::npos) << options;
 }
 
@@ -191,12 +208,10 @@ TEST_F(Preconditioner, DisplacementOnlyModelTakesMultigrid) {
     EXPECT_NO_THROW(CheckPreconditionerSupportsModel(pc_, false));
 }
 
-// Two T4 elements sharing a face, stiffness at the stress-free reference configuration. There the
-// geometric stiffness vanishes, so infinitesimal rigid motions are exactly in the null space.
 TEST(RigidBodyModes, LieInNullSpaceOfT4Stiffness) {
     using Kernel = CBElementKernel<CBLinearTetBasis, CBNoPressure>;
-    const TFloat X[5][3]           = {{0, 0, 0}, {1.1, 0.1, 0}, {0.2, 0.9, 0.1}, {0.1, 0.2, 1.2}, {1.0, 1.0, 1.0}};
-    const int elements[2][4]       = {{0, 1, 2, 3}, {4, 2, 1, 3}};
+    const auto &X                  = referenceNodes;
+    const auto &elements           = tetrahedra;
     ParameterMap parameters;
     const auto law                 = MakeLaw("NeoHooke", parameters);
     CBNoTension tension;
@@ -222,15 +237,7 @@ TEST(RigidBodyModes, LieInNullSpaceOfT4Stiffness) {
     ASSERT_EQ(MatAssemblyBegin(K, MAT_FINAL_ASSEMBLY), PETSC_SUCCESS);
     ASSERT_EQ(MatAssemblyEnd(K, MAT_FINAL_ASSEMBLY), PETSC_SUCCESS);
 
-    Vec coordinates;
-    ASSERT_EQ(VecCreateSeq(PETSC_COMM_SELF, 15, &coordinates), PETSC_SUCCESS);
-    PetscScalar *c;
-    ASSERT_EQ(VecGetArray(coordinates, &c), PETSC_SUCCESS);
-    for (int n = 0; n < 5; n++)
-        for (int i = 0; i < 3; i++)
-            c[3 * n + i] = X[n][i];
-    ASSERT_EQ(VecRestoreArray(coordinates, &c), PETSC_SUCCESS);
-
+    Vec coordinates    = ReferenceCoordinates();
     MatNullSpace modes = CreateRigidBodyModes(coordinates);
     PetscBool hasConstant;
     PetscInt numModes;
@@ -255,5 +262,68 @@ TEST(RigidBodyModes, LieInNullSpaceOfT4Stiffness) {
     VecDestroy(&stretch);
     MatNullSpaceDestroy(&modes);
     VecDestroy(&coordinates);
+    MatDestroy(&K);
+}
+
+// The same mesh with T4MINI elements, whose Jacobian carries a pressure block. GAMG preconditions the
+// displacement block of the field split, which is the submatrix over the displacement degrees of
+// freedom, and needs the rigid-body modes on it rather than on the whole saddle-point system.
+TEST(RigidBodyModes, LieInNullSpaceOfDisplacementBlockOfMixedStiffness) {
+    using Kernel = CBCondensedKernel<CBElementKernel<CBMiniBasis, CBLinearVertexPressure>, 3>;
+    constexpr PetscInt numDisplacementDofs = 3 * numMeshNodes;
+    ParameterMap parameters;
+    const auto law = MakeLaw("NeoHooke", parameters);
+    CBNoTension tension;
+    std::array<Matrix3<TFloat>, CBQuadratureRule::maxPoints> bases;
+    bases.fill(Matrix3<TFloat>::Identity());
+    const bool free[Kernel::numUnknowns] = {};
+
+    // The unknowns of the solver are the displacements of every node followed by the pressures
+    // (ADR-0001), which is the layout the index sets of the split are strides of.
+    Mat K;
+    ASSERT_EQ(MatCreateSeqAIJ(PETSC_COMM_SELF, numDisplacementDofs + numMeshNodes, numDisplacementDofs + numMeshNodes,
+                              numDisplacementDofs + numMeshNodes, nullptr, &K), PETSC_SUCCESS);
+    for (const auto &element : tetrahedra) {
+        std::array<TFloat, Kernel::numUnknowns> x{};  // the reference configuration, where the pressures vanish
+        std::array<PetscInt, Kernel::numUnknowns> rows;
+        for (int a = 0; a < Kernel::numNodes; a++) {
+            for (int i = 0; i < 3; i++) {
+                x[3 * a + i]    = referenceNodes[element[a]][i];
+                rows[3 * a + i] = 3 * element[a] + i;
+            }
+            rows[3 * Kernel::numNodes + a] = numDisplacementDofs + element[a];
+        }
+        // The bubble's gradient vanishes at the centroid, so the single-point rule leaves its block singular.
+        const auto geometry = CalcReferenceGeometry<CBMiniBasis>(x.data(), quadratureRule4);
+        std::array<TFloat, Kernel::numUnknowns * Kernel::numUnknowns> tangent;
+        ASSERT_EQ(Kernel(geometry, bases.data(), *law, tension, 0.0).Tangent(x.data(), free, 1e-6, tangent.data()),
+                  CBStatus::SUCCESS);
+        ASSERT_EQ(MatSetValues(K, Kernel::numUnknowns, rows.data(), Kernel::numUnknowns, rows.data(), tangent.data(),
+                               ADD_VALUES), PETSC_SUCCESS);
+    }
+    ASSERT_EQ(MatAssemblyBegin(K, MAT_FINAL_ASSEMBLY), PETSC_SUCCESS);
+    ASSERT_EQ(MatAssemblyEnd(K, MAT_FINAL_ASSEMBLY), PETSC_SUCCESS);
+
+    IS displacementDofs;
+    Mat displacementBlock;
+    ASSERT_EQ(ISCreateStride(PETSC_COMM_SELF, numDisplacementDofs, 0, 1, &displacementDofs), PETSC_SUCCESS);
+    ASSERT_EQ(MatCreateSubMatrix(K, displacementDofs, displacementDofs, MAT_INITIAL_MATRIX, &displacementBlock),
+              PETSC_SUCCESS);
+    // The whole Jacobian has block size 1, so the block takes the one multigrid groups a node by.
+    ASSERT_EQ(MatSetBlockSize(displacementBlock, 3), PETSC_SUCCESS);
+    PetscInt blockSize;
+    ASSERT_EQ(MatGetBlockSize(displacementBlock, &blockSize), PETSC_SUCCESS);
+    EXPECT_EQ(blockSize, 3);
+
+    Vec coordinates    = ReferenceCoordinates();
+    MatNullSpace modes = CreateRigidBodyModes(coordinates);
+    PetscBool isNullSpace;
+    ASSERT_EQ(MatNullSpaceTest(modes, displacementBlock, &isNullSpace), PETSC_SUCCESS);
+    EXPECT_TRUE(isNullSpace);
+
+    MatNullSpaceDestroy(&modes);
+    VecDestroy(&coordinates);
+    MatDestroy(&displacementBlock);
+    ISDestroy(&displacementDofs);
     MatDestroy(&K);
 }
