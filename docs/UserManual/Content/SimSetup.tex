@@ -147,13 +147,14 @@ Both use a linear pressure field on the four vertices of each element.
 \begin{description}
     \item[\texttt{T10P1}] The P2P1 Taylor-Hood element \cite{taylor1973}, with a quadratic displacement field on the ten nodes of a \verb+T10+ element.
     It runs on any \verb+T10+ mesh unchanged and converges at second order in the energy norm.
-    Its system has about 1.3 times the unknowns of the \verb+T10+ system on the same mesh and is solved with a direct solver, so it needs noticeably more time and memory.
+    Its system has about 1.3 times the unknowns of the \verb+T10+ system on the same mesh, so it needs noticeably more time and memory.
     \item[\texttt{T4MINI}] The MINI element \cite{arnold1984}, with the linear displacement field of a \verb+T4+ element enriched by a bubble function per element.
     The bubble is eliminated inside each element and is neither a global unknown nor exported, so the element runs on any \verb+T4+ mesh unchanged, with four unknowns per node.
     It converges at first order in the energy norm, and assembling one element costs about as much as one \verb+T10P1+ element.
 \end{description}
 Prefer \verb+T10P1+ for accuracy.
 Prefer \verb+T4MINI+ when the size of the global system is the limit: converting a \verb+T4+ mesh to \verb+T10+ multiplies the number of nodes by roughly seven.
+Both are solved directly by default; where the memory of that factorization is the limit, the \verb|fieldsplit| preset solves them iteratively instead (\Sec{settings:Solver}).
 
 \paragraph{From a T4 mesh to a T10P1 mesh}
 Convert the mesh with \nameref{tools:ConvertT4toT10} and set \verb|Mesh.Type| to \verb+T10P1+:
@@ -810,6 +811,7 @@ The presets other than \verb|direct| need PETSc to have been built with the pack
         \verb|direct-superlu| & \verb|preonly| & LU, \href{https://petsc.org/main/manualpages/Mat/MATSOLVERSUPERLU/}{superlu}, \verb|superlu_dist| in parallel \\
         \verb|amg| & GMRES, restart 100, relative residual \num{1e-8} & GAMG \\
         \verb|amg-hypre| & GMRES, restart 100, relative residual \num{1e-8} & hypre BoomerAMG \\
+        \verb|fieldsplit| & FGMRES, restart 100, relative residual \num{1e-8} & \href{https://petsc.org/main/manualpages/PC/PCFIELDSPLIT/}{PCFIELDSPLIT} over the displacement and the pressure field, Schur complement, GAMG on the displacement block \\
         \bottomrule
     \end{tabular}
 \end{table}
@@ -822,6 +824,23 @@ A linear solve that does not converge fails the step, and the adaptive time step
 
 Mixed elements (\Sec{settings:MixedElements}) make the system a saddle-point problem, on which neither multigrid variant converges.
 Their models therefore accept only the \verb|lu| and \verb|fieldsplit| preconditioners, and any other one aborts the setup with an error; the \verb|amg| presets are for the displacement-only element types \verb+T4+ and \verb+T10+.
+\verb|fieldsplit| is what \verb|amg| is for those: the iterative preset that lifts the memory limit of the factorization, for \verb+T10P1+ and \verb+T4MINI+ alone.
+It splits the system into its displacement and its pressure field and preconditions it by a Schur complement of the two.
+The displacement block is the large one and carries the memory of a direct solve, so it is preconditioned by GAMG, with the block size and the rigid-body modes that \verb|amg| uses; the pressure block is factorized.
+The outer method is FGMRES rather than GMRES, because the blocks are solved iteratively and the preconditioner therefore varies between outer iterations.
+On a model without a pressure field the preset aborts the setup with an error naming the mixed element types, there being no second field to split off.
+
+The preset approximates the Schur complement by \verb|selfp|, the matrix $A_{10} \operatorname{diag}(A_{00})^{-1} A_{01}$ that PETSc assembles at every preconditioner setup.
+The alternative for nearly incompressible elasticity is the $A_{11}$ block, which the $p/\kappa$ term of the perturbed constraint (\Sec{model:mixed}) leaves non-zero.
+It is not the default because that block is scaled by $-1/\kappa$, so the approximation degrades with the very $\kappa$ a mixed element is chosen for: on an inflated sphere octant as \verb+T10P1+, at \num{13100} displacement unknowns, it takes 79 outer iterations per solve at $\kappa = 10$ and 1145 at $\kappa = \num{1e6}$, where \verb|selfp| takes 52 and then about 62 from $\kappa = 100$ upwards.
+\verb|selfp| depends on the mesh instead, growing from 52 to 137 iterations over a 33-fold refinement, where $A_{11}$ stays flat at about 300 on \verb+T10P1+; on \verb+T4MINI+ it grows as well and is behind \verb|selfp| on both counts.
+The measurements are those of \verb|tools/python/verification/schur_approximation.py|, which reruns them.
+
+Through \verb|Options|, the Schur approximation and the inner solver of either block are exchanged without a preset of their own; the displacement block reads the options prefixed \verb|-mech_fieldsplit_u_|, the pressure block those prefixed \verb|-mech_fieldsplit_p_|.
+As everywhere in \verb|Options|, they belong on one line: a line break inside the block ends up in the value of the option it follows, which PETSc then rejects.
+\begin{lstlisting}[language=XML,caption=Tuning the fieldsplit preset]
+<Options> -mech_pc_fieldsplit_schur_precondition a11 -mech_fieldsplit_u_pc_type hypre -mech_fieldsplit_p_pc_factor_mat_solver_type superlu </Options>
+\end{lstlisting}
 
 \verb|Options| takes PETSc options in their command-line syntax, so every option of the \href{https://petsc.org/main/manualpages/KSP/}{KSP} and \href{https://petsc.org/main/manualpages/PC/}{PC} manual pages is reachable without a preset of its own.
 The mechanics solvers read their options under the prefix \verb|mech_|, which keeps them apart from the electrophysiology solve of a coupled run (\nameref{plugin:acCELLerate}), which reads the unprefixed ones.
@@ -894,7 +913,7 @@ One really bad element is all it takes to give you a lot of trouble.
 
     <!-- Linear solver of each Newton iteration -->
     <LinearSolver>
-        <Preset> direct/direct-superlu/amg/amg-hypre </Preset>
+        <Preset> direct/direct-superlu/amg/amg-hypre/fieldsplit </Preset>
         <Options> -mech_ksp_rtol 1e-6 </Options>
     </LinearSolver>
 
