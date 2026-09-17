@@ -15,13 +15,17 @@
 #define CB_LINEAR_SOLVER_OPTIONS
 
 #include <string>
-#include <petscmat.h>
+#include <petscksp.h>
 
 class ParameterMap;
 
 /// PETSc options, under the mechanics prefix mech_, of the linear solver preset `name`. Throws for an unknown name, listing
 /// the valid ones. `parallel` selects the distributed variant of factor packages that have one.
 std::string LinearSolverPresetOptions(const std::string &name, bool parallel);
+
+/// Throws unless the preconditioner of `pc` fits a model with, or without, a pressure field: a saddle-point system
+/// needs LU or a field split, and a field split needs a second field to split off.
+void CheckPreconditionerSupportsModel(PC pc, bool hasPressureField);
 
 /// Throws if `parameters` holds a key that Solver.LinearSolver.Preset replaces.
 void RejectRemovedLinearSolverKeys(ParameterMap &parameters);
