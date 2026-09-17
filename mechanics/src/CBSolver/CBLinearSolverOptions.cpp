@@ -48,13 +48,13 @@ std::string LinearSolverPresetOptions(const std::string &name, bool parallel) {
     // The saddle-point system of a mixed element type, split into its displacement and pressure fields (ADR-0007).
     // FGMRES tolerates a preconditioner that varies between outer iterations, which is what an iterative solve of a
     // block produces. The perturbed constraint of ADR-0002 leaves a scaled pressure mass matrix in A11, which
-    // approximates the Schur complement.
+    // approximates the Schur complement. The displacement block is the large one and carries the memory limit of a
+    // direct solve, so it is preconditioned by one multigrid cycle; the pressure block stays factorized.
     if (name == "fieldsplit")
         return krylov("fgmres") +
                " -mech_pc_type fieldsplit -mech_pc_fieldsplit_type schur"
                " -mech_pc_fieldsplit_schur_fact_type full -mech_pc_fieldsplit_schur_precondition a11"
-               " -mech_fieldsplit_u_ksp_type preonly -mech_fieldsplit_u_pc_type lu"
-               " -mech_fieldsplit_u_pc_factor_mat_solver_type mumps"
+               " -mech_fieldsplit_u_ksp_type preonly -mech_fieldsplit_u_pc_type gamg"
                " -mech_fieldsplit_p_ksp_type preonly -mech_fieldsplit_p_pc_type lu"
                " -mech_fieldsplit_p_pc_factor_mat_solver_type mumps";
     throw std::runtime_error("Solver.LinearSolver.Preset: unknown preset " + name +

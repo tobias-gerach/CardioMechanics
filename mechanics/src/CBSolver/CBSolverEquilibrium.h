@@ -48,7 +48,6 @@ protected:
     SNES snes_;
     int snesStep_ = 0;
     KSP  ksp_;
-    PC   pc_;
     // Unknown vectors hold the displacement increment, then the pressure increment (ADR-0001).
     Vec  residuum_;
     Vec  displacement_;

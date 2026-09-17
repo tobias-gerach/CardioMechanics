@@ -87,7 +87,6 @@ private:
     SNES        snes_;
     int         snesStep_ = 0;
     KSP         ksp_;
-    PC          pc_;
     
     Mat         massMatrix_;
     Mat         dampingMatrix_;
