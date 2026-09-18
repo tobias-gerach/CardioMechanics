@@ -1289,6 +1289,18 @@ CBSolver::~CBSolver() {
     
     if (DCCtrl::IsParallel())
         DeInitExporter();
+    
+    // The elements are clones the solver made at mesh load and outlive everything that
+    // reaches them: plugins_ and the exporter. The solid and surface vectors are views into
+    // this one, so they are cleared, never deleted through.
+    assert(elements_.size() == static_cast<size_t>(numLocalElements_) &&
+           "every element cloned at mesh load is freed exactly once");
+    for (auto *element : elements_)
+        delete element;
+    elements_.clear();
+    solidElements_.clear();
+    surfaceElements_.clear();
+    
     if (adapter_ != 0) {
         delete adapter_;
         adapter_ = 0;
@@ -1514,6 +1526,7 @@ void CBSolver::InitElements() {
             elements_.push_back(solverElement);
         }
     }
+    numLocalElements_ = elements_.size();
     
     // Convert elements global indices to local indices !!!!
     
@@ -1545,7 +1558,6 @@ void CBSolver::InitElements() {
             }
         }
     
-    numLocalElements_ = elements_.size();
     numGhostNodes_ = ghostNodesIndicesSet.size();
     ghostNodes_ = new PetscInt[numGhostNodes_];
     

@@ -260,7 +260,7 @@ protected:
     CBFormulation *formulation_ = 0;
     std::map<TInt, CBMaterial *> materials_;
     
-    std::vector<CBElement *> elements_; // Factory takes control over elements -> delete is not needed !!
+    std::vector<CBElement *> elements_; // Owned by the solver, freed in its destructor
     std::vector<CBElementSolid *> solidElements_;
     std::vector<CBElementSurface *> surfaceElements_;
     
