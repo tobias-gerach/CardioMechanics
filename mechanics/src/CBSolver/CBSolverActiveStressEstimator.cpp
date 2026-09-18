@@ -39,8 +39,8 @@ void CBSolverActiveStressEstimator::Init(ParameterMap *parameters, CBModel *mode
     // prescribed target (slave) surface, which is the residual the estimator drives to zero.
     contact_ = nullptr;
     for (auto &p : plugins_)
-        if (dynamic_cast<CBContactHandling *>(p) != nullptr)
-            contact_ = dynamic_cast<CBContactHandling *>(p);
+        if (auto *contact = dynamic_cast<CBContactHandling *>(p.get()))
+            contact_ = contact;
     if (contact_ == nullptr)
         throw std::runtime_error("CBSolverActiveStressEstimator::Init(): ContactHandling plugin is required");
 

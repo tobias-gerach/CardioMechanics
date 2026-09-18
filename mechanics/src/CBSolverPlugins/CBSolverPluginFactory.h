@@ -15,8 +15,12 @@
 #ifndef CB_SOLVER_PLUGIN_FACTORY
 #define CB_SOLVER_PLUGIN_FACTORY
 
+#include <functional>
+#include <map>
+#include <memory>
+#include <string>
 #include <vector>
-#include <set>
+
 #include "ParameterMap.h"
 
 class CBSolverPlugin;
@@ -25,21 +29,20 @@ class CBSolverPlugin;
 class CBSolverPluginFactory
 {
 public:
+    using FactoryFunction = std::function<CBSolverPlugin *()>;
     
-    CBSolverPluginFactory(){}
+    CBSolverPluginFactory();
     
-    ~CBSolverPluginFactory()
-    {
-        for( std::vector<CBSolverPlugin* >::iterator it = plugins_.begin(); it != plugins_.end(); it++)
-            delete(*it);
-    }
-    CBSolverPlugin* New(std::string pluginName);
+    /// Creates a plugin of the given type. Ownership passes to the caller.
+    std::unique_ptr<CBSolverPlugin> New(const std::string& pluginName);
     
-    void LoadAllPlugins(std::vector<CBSolverPlugin* >& plugins, ParameterMap* parameters);
+    /// Creates every plugin enabled in the parameters, in the fixed order the solver
+    /// initializes them in. Ownership passes to the caller.
+    std::vector<std::unique_ptr<CBSolverPlugin>> LoadAllPlugins(ParameterMap* parameters);
     
 protected:
 private:
-    std::vector<CBSolverPlugin* > plugins_;
+    std::map<std::string, FactoryFunction> producers_;
 };
 
 #endif

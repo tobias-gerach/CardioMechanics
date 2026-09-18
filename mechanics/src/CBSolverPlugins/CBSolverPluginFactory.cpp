@@ -15,6 +15,8 @@
 #include "CBSolverPlugin.h"
 #include "CBSolverPluginFactory.h"
 
+#include <stdexcept>
+
 #include "CBContactHandling.h"
 #include "CBApplyPressureFromFunction.h"
 #include "CBApplyPressureFromFunctionNodeExport.h"
@@ -27,75 +29,62 @@
 #include "CBacCELLerate.h"
 #include "CBPointsCtrl.h"
 
-class CBSolverPlugin;
+namespace {
+/// The order in which the solver creates and initializes the plugins. It is load-bearing:
+/// CBSolver::PrepareSimulation prepares them one after the other in this sequence.
+/// The keys are the parameter keys, which for some plugins differ from GetName().
+const std::vector<std::string> kPluginOrder = {
+    "acCELLerate",
+    "LoadUnloadedState",
+    "ReferenceRecovery",
+    "Circulation",
+    "ContactHandling",
+    "RobinBoundary",
+    "RobinBoundaryGeneral",
+    "ApplyPressureFromFunction",
+    "ApplyPressureFromFunctionNodeExport",
+    "ApplyPressure",
+    "PointsCtrl",
+};
+}
 
-void CBSolverPluginFactory::LoadAllPlugins(std::vector<CBSolverPlugin *> &plugins, ParameterMap *parameters) {
-    
-    if(parameters->Get<bool>("Solver.Plugins.acCELLerate", false)) {
-        CBSolverPlugin *solverPlugin = new CBacCELLerate();
-        solverPlugin->SetParameters(parameters);
-        plugins_.push_back(solverPlugin);
-    }
-    
-    if (parameters->Get<bool>("Solver.Plugins.LoadUnloadedState", false)) {
-        CBSolverPlugin *solverPlugin = new CBLoadUnloadedState();
-        solverPlugin->SetParameters(parameters);
-        plugins_.push_back(solverPlugin);
-    }
-    
-    if (parameters->Get<bool>("Solver.Plugins.ReferenceRecovery", false)) {
-        CBSolverPlugin *solverPlugin = new CBReferenceRecovery();
-        solverPlugin->SetParameters(parameters);
-        plugins_.push_back(solverPlugin);
-    }
-    
-    if (parameters->Get<bool>("Solver.Plugins.Circulation", false)) {
-        CBSolverPlugin *solverPlugin = new CBCirculation();
-        solverPlugin->SetParameters(parameters);
-        plugins_.push_back(solverPlugin);
-    }
-    
-    if (parameters->Get<bool>("Solver.Plugins.ContactHandling", false)) {
-        CBSolverPlugin *solverPlugin = new CBContactHandling();
-        solverPlugin->SetParameters(parameters);
-        plugins_.push_back(solverPlugin);
-    }
-    
-    if (parameters->Get<bool>("Solver.Plugins.RobinBoundary", false)) {
-        CBSolverPlugin *solverPlugin = new CBRobinBoundary();
-        solverPlugin->SetParameters(parameters);
-        plugins_.push_back(solverPlugin);
-    }
-    
-    if (parameters->Get<bool>("Solver.Plugins.RobinBoundaryGeneral", false)) {
-        CBSolverPlugin *solverPlugin = new CBRobinBoundaryGeneral();
-        solverPlugin->SetParameters(parameters);
-        plugins_.push_back(solverPlugin);
-    }
-    
-    if (parameters->Get<bool>("Solver.Plugins.ApplyPressureFromFunction", false)) {
-        CBSolverPlugin *solverPlugin = new CBApplyPressureFromFunction();
-        solverPlugin->SetParameters(parameters);
-        plugins_.push_back(solverPlugin);
-    }
-    
-    if (parameters->Get<bool>("Solver.Plugins.ApplyPressureFromFunctionNodeExport", false)) {
-        CBSolverPlugin *solverPlugin = new CBApplyPressureFromFunctionNodeExport();
-        solverPlugin->SetParameters(parameters);
-        plugins_.push_back(solverPlugin);
-    }
-    
-    if (parameters->Get<bool>("Solver.Plugins.ApplyPressure", false)) {
-        CBSolverPlugin *solverPlugin = new CBApplyPressure();
-        solverPlugin->SetParameters(parameters);
-        plugins_.push_back(solverPlugin);
-    }
+CBSolverPluginFactory::CBSolverPluginFactory() {
+    producers_["acCELLerate"]           = []() { return new CBacCELLerate(); };
+    producers_["LoadUnloadedState"]     = []() { return new CBLoadUnloadedState(); };
+    producers_["ReferenceRecovery"]     = []() { return new CBReferenceRecovery(); };
+    producers_["Circulation"]           = []() { return new CBCirculation(); };
+    producers_["ContactHandling"]       = []() { return new CBContactHandling(); };
+    producers_["RobinBoundary"]         = []() { return new CBRobinBoundary(); };
+    producers_["RobinBoundaryGeneral"]  = []() { return new CBRobinBoundaryGeneral(); };
+    producers_["ApplyPressureFromFunction"] = []() { return new CBApplyPressureFromFunction(); };
+    producers_["ApplyPressureFromFunctionNodeExport"] = []() { return new CBApplyPressureFromFunctionNodeExport(); };
+    producers_["ApplyPressure"]         = []() { return new CBApplyPressure(); };
+    producers_["PointsCtrl"]            = []() { return new CBPointsCtrl(); };
+}
 
-    if (parameters->Get<bool>("Solver.Plugins.PointsCtrl", false)) {
-        CBSolverPlugin *solverPlugin = new CBPointsCtrl();
-        solverPlugin->SetParameters(parameters);
-        plugins_.push_back(solverPlugin);
+std::unique_ptr<CBSolverPlugin> CBSolverPluginFactory::New(const std::string& pluginName) {
+    auto it = producers_.find(pluginName);
+    
+    if (it == producers_.end()) {
+        std::string available;
+        for (auto &producer : producers_)
+            available += "\t" + producer.first + "\n";
+        throw std::runtime_error("Unknown solver plugin: [" + pluginName +
+                                 "] You might have to extend CBSolverPluginFactory \n Available plugins are: \n" + available);
     }
+    return std::unique_ptr<CBSolverPlugin>(it->second());
+}
 
-    plugins = plugins_;
-} // CBSolverPluginFactory::LoadAllPlugins
+std::vector<std::unique_ptr<CBSolverPlugin>> CBSolverPluginFactory::LoadAllPlugins(ParameterMap *parameters) {
+    std::vector<std::unique_ptr<CBSolverPlugin>> plugins;
+    
+    for (auto &key : kPluginOrder) {
+        if (!parameters->Get<bool>("Solver.Plugins." + key, false))
+            continue;
+        auto plugin = New(key);
+        plugin->SetParameters(parameters);
+        plugins.push_back(std::move(plugin));
+    }
+    
+    return plugins;
+}
