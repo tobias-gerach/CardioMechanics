@@ -342,7 +342,7 @@ CBStatus CBSolverNewmarkBeta::CalcNodalForces(Vec displacement, Vec forces) {
         DCCtrl::cverbose << CBStatusToStr(rc);
     
     // add external nodal forces -f_ext (contribution of plugins)
-    for (auto p : plugins_)
+    for (auto &p : plugins_)
         p->ApplyToNodalForces();
     
     VecAssemblyBegin(Base::nodalForces_);
@@ -450,10 +450,10 @@ CBStatus CBSolverNewmarkBeta::CalcNodalForcesJacobianAndDamping(Vec displacement
     MatSetLocalToGlobalMapping(jacobian, Base::nodesIndicesMapping_, Base::nodesIndicesMapping_);
     Base::adapter_->LinkNodalForcesJacobian(jacobian);
     
-    for (std::vector<CBSolverPlugin *>::iterator it = Base::plugins_.begin(); it != Base::plugins_.end(); it++) {
+    for (auto &p : Base::plugins_) {
         t1 = MPI_Wtime();
-        DCCtrl::debug << "Plugin: " <<  (*it)->GetName() << " ...";
-        (*it)->ApplyToNodalForcesJacobian();
+        DCCtrl::debug << "Plugin: " <<  p->GetName() << " ...";
+        p->ApplyToNodalForcesJacobian();
         DCCtrl::debug << " done [" << MPI_Wtime() - t1 << " s]" << std::endl;
     }
     
@@ -579,7 +579,7 @@ CBStatus CBSolverNewmarkBeta::CalcNodalForcesJacobian(Vec displacement, Mat jaco
     DCCtrl::debug << " done [" << MPI_Wtime() - t1 << " s]" << std::endl;
     
     // add the derivative of the external nodal forces -f_ext w.r.t. current displacement
-    for (auto p : plugins_) {
+    for (auto &p : plugins_) {
         t1 = MPI_Wtime();
         DCCtrl::debug << "Plugin: " <<  p->GetName() << " ...";
         p->ApplyToNodalForcesJacobian();
@@ -798,7 +798,7 @@ CBStatus CBSolverNewmarkBeta::SolverStep(PetscScalar time, bool forceJacobianAnd
     
     UpdateGhostNodesAndLinkToAdapter();
     
-    for (auto p : plugins_)
+    for (auto &p : plugins_)
         p->Apply(time);
     
     // Predictor phase (see TJR Hughes 1978: Implicit-explicit Finite elements in nonlinear transient analysis):
@@ -892,7 +892,7 @@ CBStatus CBSolverNewmarkBeta::SolverStep(PetscScalar time, bool forceJacobianAnd
     
     bool evaluate = false;
     
-    for (auto p : plugins_)
+    for (auto &p : plugins_)
         if (p->WantsToAnalyzeResults())
             evaluate = true;
     
@@ -910,7 +910,7 @@ CBStatus CBSolverNewmarkBeta::SolverStep(PetscScalar time, bool forceJacobianAnd
             Base::adapter_->LinkNodes(tmpVector_);
         }
         
-        for (auto p : plugins_)
+        for (auto &p : plugins_)
             p->AnalyzeResults();
     }
     
@@ -918,7 +918,7 @@ CBStatus CBSolverNewmarkBeta::SolverStep(PetscScalar time, bool forceJacobianAnd
     
     CBStatus pluginsFeedback = CBStatus::DACCORD;
     
-    for (auto p : plugins_) {
+    for (auto &p : plugins_) {
         CBStatus f = p->GetStatus();
         
         if ((f == CBStatus::REPEAT) && (pluginsFeedback != CBStatus::FAILED))

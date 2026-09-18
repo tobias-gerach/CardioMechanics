@@ -12,6 +12,7 @@
  */
 
 #include "CBSolver.h"
+#include "CBSolverPluginFactory.h"
 
 #include "CBFileManager.h"
 #include "CBElementSurfaceT6.h"
@@ -287,7 +288,7 @@ void CBSolver::Init(ParameterMap *parameters, CBModel *model) {
     DCCtrl::print << "\n\n\t\t\tActive Plugins:\n";
     if (plugins_.size() == 0)
         DCCtrl::print << "\t\t\t - " << "None" << "\n";
-    for (auto it : plugins_)
+    for (auto &it : plugins_)
         DCCtrl::print << "\t\t\t - " << it->GetName() << "\n";
     
     if (LoadedModel_ != 0) {
@@ -361,10 +362,6 @@ const std::vector<CBElement *> & CBSolver::GetElementVector() {
 
 const std::vector<CBElementSolid *> & CBSolver::GetSolidElementVector() {
     return solidElements_;
-}
-
-const std::vector<CBSolverPlugin *> & CBSolver::GetPlugInVector() {
-    return plugins_;
 }
 
 void CBSolver::GetDomainDecomposition(ParameterMap *parameters, CBModel *model, std::vector<std::pair<int,
@@ -568,8 +565,8 @@ void CBSolver::SetBlock(Vec unknowns, IS dofs, Vec field) {
 void CBSolver::InitPlugins() {
     UpdateGhostNodesAndLinkToAdapter();
     adapter_->LinkNodalForcesJacobian(nodalForcesJacobian_);
-    pluginFactory_ = std::make_unique<CBSolverPluginFactory>();
-    pluginFactory_->LoadAllPlugins(plugins_, parameters_);
+    CBSolverPluginFactory pluginFactory;
+    plugins_ = pluginFactory.LoadAllPlugins(parameters_);
     
     for (auto &it : plugins_) {
         it->SetAdapter(adapter_);
@@ -1280,8 +1277,8 @@ void CBSolver::ExportLocalActivationTime() {
 } // CBSolver::ExportLocalActivationTime
 
 CBSolver::~CBSolver() {
-    // The factory owns the plugins, which hold the adapter, so it is released before the adapter is.
-    pluginFactory_.reset();
+    // The plugins hold the adapter, so they are released before the adapter is.
+    plugins_.clear();
     VecDestroy(&pressures_);
     VecDestroy(&trialPressures_);
     VecDestroy(&pressureResiduals_);

@@ -26,7 +26,6 @@
 #include "CBMaterialFactory.h"
 #include "CBFormulationTotalLagrangian.h"
 #include "CBSolverPlugin.h"
-#include "CBSolverPluginFactory.h"
 #include "CBDataPerMaterial.h"
 #include "CBDataCtrl.h"
 #include "CBTiming.h"
@@ -47,7 +46,6 @@ class CBElementSolid;
 class CBModel;
 class CBElementFactory;
 class CBSolverPlugin;
-class CBSolverPluginFactory;
 
 using Vector3f       = Vector3<TFloat>;
 using Vector3fVector = std::vector<Vector3f>;
@@ -160,7 +158,6 @@ public:
     
     const std::vector<CBElement *>      & GetElementVector();
     const std::vector<CBElementSolid *> & GetSolidElementVector();
-    const std::vector<CBSolverPlugin *> & GetPlugInVector();
     
     virtual void ExportSNESMatrix(TFloat time) {}
     
@@ -268,7 +265,6 @@ protected:
     std::vector<CBElementSurface *> surfaceElements_;
     
     CBMaterialFactory materialFactory_;
-    std::unique_ptr<CBSolverPluginFactory> pluginFactory_;
     
     TInt numElements_ = 0;
     TInt numNodes_    = 0;
@@ -377,7 +373,7 @@ protected:
     CBData *activeStressData_ = 0;
     TFloat  precision_        = 0;
     TFloat  epsilon_          = 0;
-    std::vector<CBSolverPlugin *> plugins_;
+    std::vector<std::unique_ptr<CBSolverPlugin>> plugins_;
     
     int ExportCounter_ = 0;
     

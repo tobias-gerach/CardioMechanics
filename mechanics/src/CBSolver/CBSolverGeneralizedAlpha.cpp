@@ -406,7 +406,7 @@ CBStatus CBSolverGeneralizedAlpha::CalcNodalForces(Vec unknowns, Vec residual) {
         DCCtrl::cverbose << CBStatusToStr(rc);
     
     // add external nodal forces -f_ext (contribution of plugins)
-    for (auto p : plugins_)
+    for (auto &p : plugins_)
         p->ApplyToNodalForces();
     
     VecAssemblyBegin(Base::nodalForces_);
@@ -515,7 +515,7 @@ CBStatus CBSolverGeneralizedAlpha::CalcNodalForcesJacobian(Vec unknowns, Mat jac
     DCCtrl::debug << " done [" << MPI_Wtime() - t1 << " s]" << std::endl;
     
     // add the derivative of the external nodal forces -f_ext w.r.t. the intermediate configuration
-    for (auto p : plugins_) {
+    for (auto &p : plugins_) {
         t1 = MPI_Wtime();
         DCCtrl::debug << "Plugin: " <<  p->GetName() << " ...";
         p->ApplyToNodalForcesJacobian();
@@ -724,7 +724,7 @@ CBStatus CBSolverGeneralizedAlpha::SolverStep(PetscScalar time, bool forceJacobi
     const PetscScalar intermediateTime = IntermediateTime(time);
     timing_.SetCurrentTime(intermediateTime);
     
-    for (auto p : plugins_)
+    for (auto &p : plugins_)
         p->Apply(intermediateTime);
     
     // Predictor phase (see TJR Hughes 1978: Implicit-explicit Finite elements in nonlinear transient analysis):
@@ -826,7 +826,7 @@ CBStatus CBSolverGeneralizedAlpha::SolverStep(PetscScalar time, bool forceJacobi
     
     bool evaluate = false;
     
-    for (auto p : plugins_)
+    for (auto &p : plugins_)
         if (p->WantsToAnalyzeResults())
             evaluate = true;
     
@@ -847,7 +847,7 @@ CBStatus CBSolverGeneralizedAlpha::SolverStep(PetscScalar time, bool forceJacobi
         // the plugins analyse the end of the step, the pressure field included
         LinkTrialPressures(unknowns_);
         
-        for (auto p : plugins_)
+        for (auto &p : plugins_)
             p->AnalyzeResults();
     }
     
@@ -855,7 +855,7 @@ CBStatus CBSolverGeneralizedAlpha::SolverStep(PetscScalar time, bool forceJacobi
     
     CBStatus pluginsFeedback = CBStatus::DACCORD;
     
-    for (auto p : plugins_) {
+    for (auto &p : plugins_) {
         CBStatus f = p->GetStatus();
         
         if ((f == CBStatus::REPEAT) && (pluginsFeedback != CBStatus::FAILED))

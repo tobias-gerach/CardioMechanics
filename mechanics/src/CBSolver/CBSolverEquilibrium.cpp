@@ -80,7 +80,7 @@ CBStatus CBSolverEquilibrium::CalcNodalForces(Vec displacement, Vec forces) {
     if (rc != CBStatus::SUCCESS)
         DCCtrl::cverbose << CBStatusToStr(rc);
     
-    for (auto p : plugins_)
+    for (auto &p : plugins_)
         p->ApplyToNodalForces();
     
     VecAssemblyBegin(Base::nodalForces_);
@@ -148,11 +148,11 @@ CBStatus CBSolverEquilibrium::CalcNodalForcesJacobian(Vec displacement, Mat jaco
         DCCtrl::cverbose << CBStatusToStr(rc);
     DCCtrl::debug << " done [" << MPI_Wtime() - t1 << " s]\n";
     
-    for (std::vector<CBSolverPlugin *>::iterator it = Base::plugins_.begin(); it != Base::plugins_.end(); it++) {
+    for (auto &p : Base::plugins_) {
         t1 = MPI_Wtime();
-        DCCtrl::debug << "\t Plugin: " <<  (*it)->GetName() << " ...";
+        DCCtrl::debug << "\t Plugin: " <<  p->GetName() << " ...";
         
-        (*it)->ApplyToNodalForcesJacobian();
+        p->ApplyToNodalForcesJacobian();
         
         DCCtrl::debug << " done [" << MPI_Wtime() - t1 << " s]\n";
     }
@@ -285,8 +285,8 @@ CBStatus CBSolverEquilibrium::SolverStep(PetscScalar time, bool forceJacobianAnd
     
     UpdateGhostNodesAndLinkToAdapter();
     
-    for (std::vector<CBSolverPlugin *>::iterator it = Base::plugins_.begin(); it != Base::plugins_.end(); it++)
-        (*it)->Apply(time);
+    for (auto &p : Base::plugins_)
+        p->Apply(time);
     
     SNESDestroy(&snes_);
     InitPETScSolver();
@@ -318,7 +318,7 @@ CBStatus CBSolverEquilibrium::SolverStep(PetscScalar time, bool forceJacobianAnd
     
     bool evaluate = false;
     
-    for (auto p : plugins_)
+    for (auto &p : plugins_)
         if (p->WantsToAnalyzeResults())
             evaluate = true;
     
@@ -336,7 +336,7 @@ CBStatus CBSolverEquilibrium::SolverStep(PetscScalar time, bool forceJacobianAnd
             Base::adapter_->LinkNodes(tmpVector_);
         }
         
-        for (auto p : plugins_)
+        for (auto &p : plugins_)
             p->AnalyzeResults();
     }
     
@@ -344,7 +344,7 @@ CBStatus CBSolverEquilibrium::SolverStep(PetscScalar time, bool forceJacobianAnd
     
     CBStatus pluginsFeedback = CBStatus::DACCORD;
     
-    for (auto p : plugins_) {
+    for (auto &p : plugins_) {
         CBStatus f = p->GetStatus();
         
         if ((f == CBStatus::REPEAT) && (pluginsFeedback != CBStatus::FAILED))
