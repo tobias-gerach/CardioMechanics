@@ -22,12 +22,8 @@
 
 CBCirculationCavity::CBCirculationCavity() {}
 
-CBCirculationCavity::~CBCirculationCavity() {
-    for (auto &element : targetElementsVolume_)
-        delete element;
-    
-    // this covers all elements, overset of targetElementsPressure_
-}
+// The target elements are borrowed from the solver, which owns and frees them.
+CBCirculationCavity::~CBCirculationCavity() {}
 
 void CBCirculationCavity::InsertNextElement(CBElementCavity *element) {
     // volume should be computed on all elements, pressure should be only applied on a certain subset
