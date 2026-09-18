@@ -40,7 +40,7 @@ MATERIALS = {
                  "<afs>0.3</afs><bfs>1</bfs><kappa>{kappa}</kappa></Holzapfel>",
     "Guccione": "<Guccione><C>1</C><bf>8</bf><bt>2</bt><bfs>4</bfs><K>{kappa}</K></Guccione>",
     "MooneyRivlin": "<MooneyRivlin><C10>1</C10><B>{kappa}</B></MooneyRivlin>",
-    "Usyk": "<Usyk><a>1</a><bff>8</bff><bss>2</bss><bnn>2</bnn><bfs>4</bfs><bfn>4</bfn><bns>2</bns>"
+    "Usyk": "<Usyk><a>1</a><bff>8</bff><bss>6</bss><bnn>3</bnn><bfs>4</bfs><bfn>2</bfn><bns>5</bns>"
             "<k>{kappa}</k></Usyk>",
 }
 
@@ -93,7 +93,7 @@ def test_unknown_element_type_lists_p2p1(binary, cm_env, tmp_path):
     assert "T10P1" in proc.stdout + proc.stderr, (proc.stdout + proc.stderr)[-2000:]
 
 
-@pytest.mark.parametrize("material", ["MooneyRivlin", "Usyk"])
+@pytest.mark.parametrize("material", ["MooneyRivlin"])
 def test_p2p1_refuses_material_without_mixed_formulation(binary, cm_env, tmp_path, material):
     proc, _ = _run(binary, cm_env, tmp_path, material=material, check=False)
     assert_refused(proc, material, "T10P1")
@@ -439,12 +439,13 @@ def test_p2p1_approaches_t10_as_kappa_decreases(binary, cm_env, tmp_path):
     assert gaps[0][1] < MAX_GAP_AT_SMALLEST_KAPPA, f"gap at the smallest kappa too large: {report}"
 
 
-@pytest.mark.parametrize("material", ["Holzapfel", "Guccione"])
+@pytest.mark.parametrize("material", ["Holzapfel", "Guccione", "Usyk"])
 def test_p2p1_matches_t10_at_small_kappa(binary, cm_env, tmp_path, material):
     """T10 uses the law's full stress, P2P1 its isochoric stress plus the pressure field, so the two
     agree at small kappa only if the isochoric stress is the law's stress minus its volumetric part.
-    Holzapfel's volumetric energy is kappa/4 (J^2 - 1 - 2 ln J) rather than the kappa/2 (J - 1)^2 of
-    the perturbed constraint; the two differ at third order in J - 1, far below this tolerance."""
+    Holzapfel's volumetric energy is kappa/4 (J^2 - 1 - 2 ln J) and Usyk's kappa/2 (ln J)^2, rather
+    than the kappa/2 (J - 1)^2 of the perturbed constraint; each differs from it at third order in
+    J - 1, far below this tolerance."""
     pytest.importorskip("meshio")
     gap, pid = _gap_to_t10(binary, cm_env, tmp_path, KAPPA_SWEEP[0], material)
     assert gap < MAX_GAP_AT_SMALLEST_KAPPA, f"{material}: P2P1 differs from T10 by {gap:.2e} at PointID={pid}"

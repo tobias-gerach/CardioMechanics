@@ -85,7 +85,7 @@ reference energies, with the values the GoogleTest hard-codes:
   families.
 - `sphere_convergence.py` — sphere errors and rates over the fine family and both
   quadrature rules, and the T10 rates.
-- `holzapfel_guccione_energy.py` — the reference energies hard-coded in the
+- `law_energies.py` — the reference energies hard-coded in the
   law-level GoogleTest.
 - `linear_solver.py` — Krylov iterations, solve time and peak memory of the
   `direct`, `amg` and `amg-hypre` presets over a refined displacement-only mesh

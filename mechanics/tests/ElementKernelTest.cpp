@@ -316,7 +316,8 @@ TEST_P(ElementKernelP2P1, PressureBlockIsPressureMassMatrix) {
                 << "pressures " << a << ", " << b;
 }
 
-const auto laws         = testing::Values(std::string("NeoHooke"), std::string("Holzapfel"), std::string("Guccione"));
+const auto laws         = testing::Values(std::string("NeoHooke"), std::string("Holzapfel"),
+                                          std::string("Guccione"), std::string("Usyk"));
 const auto lawsAndRules = testing::Combine(laws, testing::Values(4, 14));
 const auto paramName    = [](const auto &info) {
     return std::get<0>(info.param) + "_" + std::to_string(std::get<1>(info.param)) + "Points";

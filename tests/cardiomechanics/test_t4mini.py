@@ -22,10 +22,21 @@ def test_unknown_element_type_lists_t4mini(binary, cm_env, tmp_path):
     assert "T4MINI" in proc.stdout + proc.stderr, (proc.stdout + proc.stderr)[-2000:]
 
 
-@pytest.mark.parametrize("material", ["MooneyRivlin", "Usyk"])
+@pytest.mark.parametrize("material", ["MooneyRivlin"])
 def test_t4mini_refuses_material_without_mixed_formulation(binary, cm_env, tmp_path, material):
     proc, _ = _run(binary, cm_env, tmp_path, element_type="T4MINI", material=material, check=False)
     assert_refused(proc, material, "T4MINI")
+
+
+@pytest.mark.parametrize("material", ["Guccione", "Usyk"])
+def test_t4mini_runs_anisotropic_exponential_law(binary, cm_env, tmp_path, material):
+    """Both laws are admissible here only through their isochoric split, and neither is covered by
+    any other MINI test. The element condenses its bubble against the law's stress at every Newton
+    step, so a split the law cannot supply, or one that drives the local solve away, stops the run.
+    Whether the split is the right one is checked at the law level, by ConstitutiveModelTest."""
+    proc, vtu_dir = _run(binary, cm_env, tmp_path, element_type="T4MINI", material=material)
+    assert_no_petsc_error(proc.stdout + proc.stderr)
+    assert _last_vtu(vtu_dir).name == f"cantilever.{STEPS}.vtu", "run stopped before its stop time"
 
 
 def test_active_stress_estimator_refuses_t4mini(binary, cm_env, tmp_path):

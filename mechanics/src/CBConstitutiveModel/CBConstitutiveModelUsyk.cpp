@@ -104,25 +104,12 @@ void CBConstitutiveModelUsyk::Init(ParameterMap *parameters, TInt materialIndex)
 }  // CBConstitutiveModelUsyk::Init
 
 CBStatus CBConstitutiveModelUsyk::CalcEnergy(const Matrix3<TFloat> &deformationTensor, TFloat &energy) {
-    if (!Base::ignoreCorruptElements_) {
-        if (deformationTensor.Det() <= 0)
-            return CBStatus::CORRUPT_ELEMENT;
-    }
-    
-    /// multiplicative decomposition of F into volume-changing (vol) and volume-preserving (iso) parts.
-    TFloat J              = deformationTensor.Det();
-    Matrix3<TFloat> C     = deformationTensor.GetTranspose() * deformationTensor;
-    Matrix3<TFloat> E     = 0.5 * (C - identity_);
-    TFloat *e             = E.GetArray();
-    
-    /// strain energy function W
-    TFloat Q = bff_ * e[0] * e[0] + bss_ * e[4] * e[4] + bnn_ * e[8] * e[8] + bfs_ * (e[1] * e[1] + e[3] * e[3]) + bfn_ *
-    (e[2] * e[2] + e[6] * e[6]) + bns_ * (e[5] * e[5] + e[7] * e[7]);
-    
-    /// iso
-    energy = a_/2. * (exp(Q) - 1);
+    CBStatus rc = CalcIsochoricEnergy(deformationTensor, energy);
+    if (rc != CBStatus::SUCCESS)
+        return rc;
     
     /// vol
+    TFloat J = deformationTensor.Det();
     energy += k_/2. * log(J) * log(J);
     
     if (std::isinf(energy))
@@ -133,7 +120,7 @@ CBStatus CBConstitutiveModelUsyk::CalcEnergy(const Matrix3<TFloat> &deformationT
         return CBStatus::SUCCESS;
 }  // CBConstitutiveModelUsyk::CalcEnergy
 
-CBStatus CBConstitutiveModelUsyk::CalcPK2Stress(const Matrix3<TFloat> &deformationTensor, Matrix3<TFloat> &pk2Stress) {
+CBStatus CBConstitutiveModelUsyk::CalcIsochoricEnergy(const Matrix3<TFloat> &deformationTensor, TFloat &energy) {
     if (!Base::ignoreCorruptElements_) {
         if (deformationTensor.Det() <= 0)
             return CBStatus::CORRUPT_ELEMENT;
@@ -141,11 +128,49 @@ CBStatus CBConstitutiveModelUsyk::CalcPK2Stress(const Matrix3<TFloat> &deformati
     
     /// multiplicative decomposition of F into volume-changing (vol) and volume-preserving (iso) parts.
     TFloat J              = deformationTensor.Det();
+    TFloat Jm             = pow(J, -2.0 / 3.0);
     Matrix3<TFloat> C     = deformationTensor.GetTranspose() * deformationTensor;
-    Matrix3<TFloat> E     = 0.5 * (C - identity_);
+    Matrix3<TFloat> E     = 0.5 * (Jm * C - identity_);
     TFloat *e             = E.GetArray();
-    TFloat *p             = pk2Stress.GetArray();
-    TFloat *c             = C.GetInverse().GetArray();
+    
+    /// strain energy function W
+    TFloat Q = bff_ * e[0] * e[0] + bss_ * e[4] * e[4] + bnn_ * e[8] * e[8] + bfs_ * (e[1] * e[1] + e[3] * e[3]) + bfn_ *
+    (e[2] * e[2] + e[6] * e[6]) + bns_ * (e[5] * e[5] + e[7] * e[7]);
+    
+    /// iso
+    energy = a_/2. * (exp(Q) - 1);
+    
+    return CBStatus::SUCCESS;
+}  // CBConstitutiveModelUsyk::CalcIsochoricEnergy
+
+CBStatus CBConstitutiveModelUsyk::CalcPK2Stress(const Matrix3<TFloat> &deformationTensor, Matrix3<TFloat> &pk2Stress) {
+    CBStatus rc = CalcIsochoricPK2Stress(deformationTensor, pk2Stress);
+    if (rc != CBStatus::SUCCESS)
+        return rc;
+    
+    /// vol
+    TFloat J = deformationTensor.Det();
+    pk2Stress += k_ * log(J) * (deformationTensor.GetTranspose() * deformationTensor).GetInverse();
+    
+    return CBStatus::SUCCESS;
+}  // CBConstitutiveModelUsyk::CalcPK2Stress
+
+CBStatus CBConstitutiveModelUsyk::CalcIsochoricPK2Stress(const Matrix3<TFloat> &deformationTensor,
+                                                         Matrix3<TFloat> &pk2Stress) {
+    if (!Base::ignoreCorruptElements_) {
+        if (deformationTensor.Det() <= 0)
+            return CBStatus::CORRUPT_ELEMENT;
+    }
+    
+    /// multiplicative decomposition of F into volume-changing (vol) and volume-preserving (iso) parts.
+    TFloat J              = deformationTensor.Det();
+    TFloat Jm             = pow(J, -2.0 / 3.0);
+    Matrix3<TFloat> C     = deformationTensor.GetTranspose() * deformationTensor;
+    Matrix3<TFloat> E     = 0.5 * (Jm * C - identity_);
+    TFloat *e             = E.GetArray();
+    Matrix3<TFloat> pk2Iso;
+    TFloat *p             = pk2Iso.GetArray();
+    Matrix3<TFloat> C_inv = C.GetInverse();
     
     /// second Piola Kirchoff stress tensor
     TFloat Q = bff_ * e[0] * e[0] + bss_ * e[4] * e[4] + bnn_ * e[8] * e[8] + bfs_ * (e[1] * e[1] + e[3] * e[3]) + bfn_ *
@@ -163,16 +188,10 @@ CBStatus CBConstitutiveModelUsyk::CalcPK2Stress(const Matrix3<TFloat> &deformati
     p[7] = a_ * bns_ * e[7] * expQ;
     p[8] = a_ * bnn_ * e[8] * expQ;
     
-    /// vol
-    p[0] += k_ * log(J) * c[0];
-    p[1] += k_ * log(J) * c[1];
-    p[2] += k_ * log(J) * c[2];
-    p[3] += k_ * log(J) * c[3];
-    p[4] += k_ * log(J) * c[4];
-    p[5] += k_ * log(J) * c[5];
-    p[6] += k_ * log(J) * c[6];
-    p[7] += k_ * log(J) * c[7];
-    p[8] += k_ * log(J) * c[8];
+    /// pk2Iso is conjugate to the volume-preserving strain, so it is mapped back to the full
+    /// configuration through the deviatoric projection DEV(S) = S - 1/3 (S:C) C^-1. Without it
+    /// the isochoric term would still do volumetric work and compete with the volumetric term.
+    pk2Stress = Jm * (pk2Iso - (1.0 / 3.0) * (pk2Iso * C).Trace() * C_inv);
     
     return CBStatus::SUCCESS;
-}  // CBConstitutiveModelUsyk::CalcPK2Stress
+}  // CBConstitutiveModelUsyk::CalcIsochoricPK2Stress

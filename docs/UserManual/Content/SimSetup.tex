@@ -182,7 +182,7 @@ Active stress is added to the stress unchanged, as for displacement-only element
     \toprule
         Setting & Supported & Refused with an error \\
         \midrule
-        Constitutive law & NeoHooke, Holzapfel, Guccione & every other law, \eg MooneyRivlin, Usyk \\
+        Constitutive law & NeoHooke, Holzapfel, Guccione, Usyk & every other law, \eg MooneyRivlin \\
         \verb|Solver.Type| & Static, GeneralizedAlpha & NewmarkBeta, ActiveStressEstimator \\
         \verb|QuadratureDegree| & 2 (default), 5 & any other value \\
         \bottomrule
@@ -429,15 +429,21 @@ The incompressible strain energy density by Usyk et al.~\cite{Usyk-2000-ID14569}
          + b_\text{fs} (E_\text{fs}^2 + E_\text{sf}^2) + b_\text{fn} (E_\text{fn}^2 + E_\text{nf}^2)
          + b_\text{ns} (E_\text{ns}^2 + E_\text{sn}^2) \,, \label{eq:usyk}
 \end{align}
-where $E_\text{ij} = \vec E \vec i_0 \cdot \vec j_0$ for $i,j \in \{f,s,n\}$ are the entries of the Green-Lagrange strain tensor ${\vec E = \frac{1}{2}(\vec C - \mathds{1})}$.
+where $E_\text{ij} = \vec E \vec i_0 \cdot \vec j_0$ for $i,j \in \{f,s,n\}$ are the entries of the Green-Lagrange strain tensor of the volume-preserving part of the deformation, ${\vec E = \frac{1}{2}(J^{-2/3} \vec C - \mathds{1})}$.
+Up to and including release 1.1, $Q$ was built on the unsplit ${\vec E = \frac{1}{2}(\vec C - \mathds{1})}$, so that deviatoric strain entered the volumetric response as a second, unintended incompressibility penalty.
+Results produced before this correction are not comparable with results produced after it.
 The 2nd Piola-Kirchhoff stress is given by
 \begin{equation}
     \vec S = 
-    \mu \exp(Q) (b \odot E)_{ij} + \kappa \ln(J) \vec C^{-1} \qq{with} \vec b = \mqty( b_\text{ff} &  b_\text{fs} &  b_\text{fn} \\ 
+    J^{-2/3} \left[ \bar{\vec S} - \frac{1}{3} (\bar{\vec S} : \vec C) \vec C^{-1} \right]
+    + \kappa \ln(J) \vec C^{-1}
+    \qq{with} \bar{\vec S}_{ij} = \mu \exp(Q) (b \odot E)_{ij} \qc
+    \vec b = \mqty( b_\text{ff} &  b_\text{fs} &  b_\text{fn} \\ 
     b_\text{sf} &  b_\text{ss} &  b_\text{sn} \\ 
     b_\text{nf} &  b_\text{ns} &  b_\text{nn}) \,,
 \end{equation}
 where $(A \odot B)_{ij} = (A)_{ij}(B)_{ij}$ is the Hadamard or Schur product of the matrices $\vec A$ and $\vec B$.
+The bracketed projection removes the volumetric work of the exponential term, which is conjugate to the volume-preserving strain alone.
 In general, the shear stress components are assumed to be of equal contribution 
 \begin{equation}
     b_{ij} = b_{ji} \qfor i \neq j \,.

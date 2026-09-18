@@ -8,6 +8,7 @@
 #include "CBConstitutiveModelGuccione.h"
 #include "CBConstitutiveModelHolzapfel.h"
 #include "CBConstitutiveModelNeoHooke.h"
+#include "CBConstitutiveModelUsyk.h"
 
 // The settings of the verification tests (tests/helpers/materials.py), with bulk modulus 10.
 inline std::unique_ptr<CBConstitutiveModel> MakeLaw(const std::string &name, ParameterMap &parameters) {
@@ -26,6 +27,11 @@ inline std::unique_ptr<CBConstitutiveModel> MakeLaw(const std::string &name, Par
         for (const auto &[key, value] : {std::pair<std::string, double>{"C", 1}, {"bf", 8}, {"bt", 2}, {"bfs", 4}, {"K", 10}})
             parameters.Set(prefix + key, value);
         law = std::make_unique<CBConstitutiveModelGuccione>();
+    } else if (name == "Usyk") {
+        for (const auto &[key, value] : {std::pair<std::string, double>{"a", 1}, {"bff", 8}, {"bss", 6}, {"bnn", 3},
+                                         {"bfs", 4}, {"bfn", 2}, {"bns", 5}, {"k", 10}})
+            parameters.Set(prefix + key, value);
+        law = std::make_unique<CBConstitutiveModelUsyk>();
     } else {
         throw std::invalid_argument("no settings for material law " + name);
     }

@@ -34,6 +34,11 @@ public:
     std::string GetType() {return "Usyk";}
     CBStatus CalcEnergy(const Matrix3<TFloat> &deformationTensor, TFloat &energy);
     CBStatus CalcPK2Stress(const Matrix3<TFloat> &deformationTensor, Matrix3<TFloat> &pk2Stress);
+    CBStatus CalcIsochoricEnergy(const Matrix3<TFloat> &deformationTensor, TFloat &energy);
+    CBStatus CalcIsochoricPK2Stress(const Matrix3<TFloat> &deformationTensor, Matrix3<TFloat> &pk2Stress);
+    /// A mixed element replaces the volumetric energy k/2 (ln J)^2 by the kappa/2 (J - 1)^2 of its
+    /// perturbed constraint. Both have bulk modulus k at J = 1 and differ at O((J - 1)^3).
+    TFloat   GetBulkModulus() {return k_;}
     void     Init(ParameterMap *parameters, TInt materialIndex);
     
 protected:
