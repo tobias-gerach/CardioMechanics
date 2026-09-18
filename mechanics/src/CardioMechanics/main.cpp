@@ -94,11 +94,6 @@ CBStatus InitAndRunSimulation(CardioMechanics& cardio, bool shouldCheckSettingsO
     return CBStatus::SUCCESS;
 }
 
-void Finalize(bool exitCode) {
-    DCCtrl::Finalize();
-    exit(exitCode);
-}
-
 /// returns false if CardioMechanics should stop after this function
 bool DigestCommandline(int argc, std::string parameterFile, bool &shouldCheckSettingsOnly,
                        char* argv[], CardioMechanics& cardio, bool &shouldTryAndCatch) {
@@ -174,16 +169,15 @@ bool DigestCommandline(int argc, std::string parameterFile, bool &shouldCheckSet
     return true;
 }
 
-int main(int argc, char* argv[])
+/// Returns the exit code of the run. The CardioMechanics object is scoped to this
+/// function so that every return releases the model, solver and exporter before main
+/// tears PETSc down.
+int RunCardioMechanics(int argc, char* argv[])
 {
     std::string    parameterFile("");
     
     bool shouldTryAndCatch       = true;
     bool shouldCheckSettingsOnly = false;
-    
-    DCCtrl::Init(argc, argv);
-    
-    PrintCardioMechanicsBanner();
     
     CardioMechanics cardio;
     
@@ -197,23 +191,23 @@ int main(int argc, char* argv[])
         
         if (!continueToSimulation) {
             DCCtrl::print << "Stop requested.\n";
-            Finalize(0);
+            return 0;
         }
     }
     catch(const char* e) {
         if(DCCtrl::IsProcessZero())
             cerr << "\nError during initialization: " << e << "\n";
-        Finalize(1);
+        return 1;
     }
     catch(std::exception& e) {
         if(DCCtrl::IsProcessZero())
             cerr << "\nError during initialization: " << e.what() << "\n";
-        Finalize(1);
+        return 1;
     }
     catch(...) {
         if(DCCtrl::IsProcessZero())
             cerr << "\nError during initialization: Exception of unknown type!\n";
-        Finalize(1);
+        return 1;
     }
     
     
@@ -230,7 +224,7 @@ int main(int argc, char* argv[])
                 ShowImageYouAreStupid();
                 cerr << "\n\tRuntime error: " << e.what() << "\n";
             }
-            Finalize(1);
+            return 1;
         }
         
         catch(kaBaseException& e) {
@@ -239,7 +233,7 @@ int main(int argc, char* argv[])
                 ShowImageYouAreStupid();
                 cerr << "\n\tRuntime error: " << e << "\n";
             }
-            Finalize(1);
+            return 1;
         }
         
         catch(...)
@@ -249,7 +243,7 @@ int main(int argc, char* argv[])
                 ShowImageYouAreStupid();
                 cerr << "\n\tRuntime error with unkown exception type: " << std::endl;
             }
-            Finalize(1);
+            return 1;
         }
     }
     else
@@ -258,6 +252,18 @@ int main(int argc, char* argv[])
     }
     cardio.PrintParameters();
     DCCtrl::print << "\n\n\nLooking forward to the next job, Semper fi\n\n";
-    cardio.DeInit(); // this is a workaround because cardio's destructor does not get called
-    Finalize(0);
+    return 0;
+}
+
+int main(int argc, char* argv[])
+{
+    DCCtrl::Init(argc, argv);
+    
+    PrintCardioMechanicsBanner();
+    
+    int exitCode = RunCardioMechanics(argc, argv);
+    
+    DCCtrl::Finalize(); // Finalizes PETSc, hence it has to outlive every PETSc object
+    
+    return exitCode;
 }
