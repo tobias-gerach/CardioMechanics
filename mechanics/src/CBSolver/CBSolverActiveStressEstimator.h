@@ -29,6 +29,7 @@
 class CBSolverActiveStressEstimator : public CBSolverEquilibrium {
 public:
     CBSolverActiveStressEstimator() : CBSolverEquilibrium() {}
+    ~CBSolverActiveStressEstimator() override;
     std::string GetType() override { return "Active Stress Estimator (Static)"; }
     // The sensitivity of the nodal forces to element tension has no pressure counterpart yet.
     bool SupportsPressureField() override { return false; }

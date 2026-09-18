@@ -43,23 +43,22 @@ void CBSolverGeneralizedAlpha::Init(ParameterMap *_parameter, CBModel *_model) {
     Base::status_ = CBStatus::WAITING;
 }
 
-void CBSolverGeneralizedAlpha::DeInit() {
+CBSolverGeneralizedAlpha::~CBSolverGeneralizedAlpha() {
     VecDestroy(&residuum_);
     VecDestroy(&unknowns_);
     VecDestroy(&displacement_);
     VecDestroy(&absDisplacement_);
     VecDestroy(&tmpDisplacement_);
     VecDestroy(&tmpVelocity_);
-    
+    VecDestroy(&initialGuess_);
     VecDestroy(&velocity_);
     VecDestroy(&acceleration_);
     VecDestroy(&tmpVector_);
+    MatDestroy(&massMatrix_);
+    MatDestroy(&dampingMatrix_);
     MatDestroy(&elementsJacobian_);
     MatDestroy(&displacementBlock_);
     SNESDestroy(&snes_);
-    KSPDestroy(&ksp_);
-    PCDestroy(&pc_);
-    Base::DeInit();
 }
 
 void CBSolverGeneralizedAlpha::InitVectors() {

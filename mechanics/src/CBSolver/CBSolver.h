@@ -58,12 +58,11 @@ public:
     CBSolver()
     {}
     
-    virtual ~CBSolver() {
-        DeInit();
-    }
+    /// Frees the PETSc objects, the heap arrays and the helpers this class creates. Teardown
+    /// follows ownership down the hierarchy, so the chain runs each destructor exactly once.
+    virtual ~CBSolver();
     
     virtual void        Init(ParameterMap *parameters, CBModel *model);
-    virtual void        DeInit();
     virtual void        Run();
     virtual CBStatus    PrepareSimulation();
     virtual std::string GetType() = 0;
@@ -328,7 +327,8 @@ protected:
     Vec nodalForces_         = 0;
     Mat nodalForcesJacobian_ = 0;
     MatNullSpace rigidBodyModes_ = 0;
-    PC  pc_                  = nullptr;  // of the linear solve of the derived solver, set in InitPETScSolver
+    PC  pc_                  = nullptr;  // of the linear solve of the derived solver, set in InitPETScSolver;
+                                         // borrowed from its KSP, so it is never destroyed here
     Vec pressures_           = 0; // converged pressure field, the counterpart of nodes_
     Vec trialPressures_      = 0;
     Vec pressureResiduals_   = 0;
