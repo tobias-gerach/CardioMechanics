@@ -41,7 +41,9 @@ public:
     
     void Init1();
     void Init2();
-    void Run();
+    /// Runs the simulation and returns its terminal status: anything but SUCCESS means the
+    /// time stepping gave up.
+    CBStatus Run();
     
     void ReadParameterFile(std::string parameterFile);
     void SetParameter(std::string key, std::string value);

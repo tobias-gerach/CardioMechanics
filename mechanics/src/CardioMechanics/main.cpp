@@ -89,9 +89,7 @@ CBStatus InitAndRunSimulation(CardioMechanics& cardio, bool shouldCheckSettingsO
         return CBStatus::SUCCESS;
     }
     
-    cardio.Run();
-    
-    return CBStatus::SUCCESS;
+    return cardio.Run();
 }
 
 /// returns false if CardioMechanics should stop after this function
@@ -213,10 +211,12 @@ int RunCardioMechanics(int argc, char* argv[])
     
     //===== run simulation =====//
     
+    CBStatus status = CBStatus::NOT_INITIALIZED;
+    
     if(shouldTryAndCatch || shouldCheckSettingsOnly)
     {
         try {
-            InitAndRunSimulation(cardio, shouldCheckSettingsOnly);
+            status = InitAndRunSimulation(cardio, shouldCheckSettingsOnly);
         }
         catch(std::exception& e) {
             if(DCCtrl::IsProcessZero())
@@ -248,11 +248,14 @@ int RunCardioMechanics(int argc, char* argv[])
     }
     else
     {
-        InitAndRunSimulation(cardio, shouldCheckSettingsOnly);
+        status = InitAndRunSimulation(cardio, shouldCheckSettingsOnly);
     }
     cardio.PrintParameters();
     DCCtrl::print << "\n\n\nLooking forward to the next job, Semper fi\n\n";
-    return 0;
+    
+    // CBSolver::Run prints the SIMULATION FAILED banner on exactly this condition, so a run that
+    // reaches here reports the same verdict in its output and in its exit code.
+    return status == CBStatus::SUCCESS ? 0 : 1;
 }
 
 int main(int argc, char* argv[])

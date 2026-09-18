@@ -89,13 +89,14 @@ void CardioMechanics::DeInit()
         delete parameters_;
 }
 
-void CardioMechanics::Run()
+CBStatus CardioMechanics::Run()
 {
     DCCtrl::print << "\n\n       Solver: " << solver_->GetType() << "\n\n";
     DCCtrl::print << "       Writing results to: " << parameters_->Get<std::string>("Export.Prefix","") << ".[timestep].vtu\n\n";
     
     solver_->Run();
     
+    return solver_->GetStatus();
 }
 
 void CardioMechanics::ReadParameterFile(std::string parameterFile)
