@@ -37,18 +37,46 @@ def tetrahedron_quadrature(rule, order):
     return weights, N.reshape(q, n)[:, from_gmsh], dN.reshape(q, n, 3)[:, from_gmsh], L.reshape(q, 4)
 
 
-def write_tetgen(directory, stem, surfaces, fixations):
+def closed_surface(directory, stem, surface):
+    """Whether the faces of surface index `surface` in the tetgen files enclose a volume that does not
+    depend on the point the tetrahedra spanning it are taken from, which holds exactly when the faces
+    close. This is the criterion of CBCirculationCavity::ClosedSurfaceCheck, applied to the files the
+    solver reads, in its units: coordinates in metres, volume in millilitres."""
+    nodes = 1e-3 * np.loadtxt(directory / f"{stem}.node", skiprows=1, usecols=(1, 2, 3))
+    rows = np.loadtxt(directory / f"{stem}.sur", skiprows=1, dtype=int)
+    faces = rows[rows[:, -1] == surface][:, 1:-2] - 1
+    # The solver spans a face by a fan from its first node, over the polygon through all of its nodes:
+    # the triangle itself for a three-node face, the hexagon of vertices and mid-edge nodes for a six.
+    polygon = nodes[faces][:, [0, 3, 1, 4, 2, 5] if faces.shape[1] == 6 else [0, 1, 2]]
+    a, b, c = polygon[:, :1], polygon[:, 1:-1], polygon[:, 2:]
+    areas = np.cross(b - a, c - a)
+
+    def volume(reference):
+        return 1e6 * np.einsum("fkj,fkj->", a - reference, areas) / 6
+
+    return abs(volume(np.ones(3)) - volume(np.zeros(3))) <= 1e-10
+
+
+def write_tetgen(directory, stem, surfaces, fixations, inward=()):
     """Write the tetrahedra of the current gmsh model, first- or second-order, as tetgen stem.node,
     stem.ele and stem.sur into directory.
 
-    Each element carries the tag of its 3D physical group as material. The triangles of every 2D
-    physical group in surfaces, of the order of the tetrahedra and required to lie on the boundary
-    of the volume, are written with the group tag as surface index, ordered so that their normals
-    point out of the volume. fixations maps a 2D physical group to the fixed components of its nodes
-    as a bit mask, 1 for x, 2 for y and 4 for z, combined over the groups a node lies in.
+    Each element carries the tag of its 3D physical group as material. surfaces maps a 2D physical
+    group to the surface index its triangles carry, or is an iterable of groups, which gives each
+    its own tag; the tag is always written as the material index, so groups that share a surface
+    index stay distinguishable there. The triangles are of the order of the tetrahedra and are
+    ordered so that their normals point out of the volume, or into it for a group listed in inward,
+    which is what a cavity surface needs: it bounds the cavity on its other side, and the cavity
+    encloses a positive volume only if the normals point out of the cavity and so into the wall. A
+    group off the boundary of the volume, such as the surface closing a cavity, has no outward side
+    and keeps the orientation gmsh gave it. fixations maps a 2D physical group to the fixed
+    components of its nodes as a bit mask, 1 for x, 2 for y and 4 for z, combined over the groups a
+    node lies in.
     """
     import gmsh
 
+    if not isinstance(surfaces, dict):
+        surfaces = {group: group for group in surfaces}
     (volume,) = gmsh.model.mesh.getElementTypes(3)
     tetrahedron, triangle, from_gmsh, reversed_face = LAYOUTS[gmsh.model.mesh.getElementProperties(volume)[2]]
     assert volume == tetrahedron, f"the volume is meshed with gmsh element type {volume}, not tetrahedra"
@@ -60,8 +88,10 @@ def write_tetgen(directory, stem, surfaces, fixations):
             materials.append(np.full(len(nodes), group))
     elements, materials = np.vstack(elements), np.concatenate(materials)
 
-    # Nodes numbered from 1 in tag order. Nodes outside every element would carry no stiffness.
-    used = np.unique(elements)
+    # Nodes numbered from 1 in tag order. A node of a written surface is kept even when no element
+    # holds it, as on a cavity lid; a node in neither carries no stiffness and is dropped.
+    surface_nodes = [gmsh.model.mesh.getNodesForPhysicalGroup(2, group)[0] for group in surfaces]
+    used = np.unique(np.concatenate([elements.ravel().astype(int)] + [n.astype(int) for n in surface_nodes]))
     index = np.zeros(used.max() + 1, dtype=int)
     index[used] = np.arange(1, len(used) + 1)
     tags, coords, _ = gmsh.model.mesh.getNodes()
@@ -71,22 +101,25 @@ def write_tetgen(directory, stem, surfaces, fixations):
 
     fixed = np.zeros(len(used), dtype=int)
     for group, mask in fixations.items():
-        fixed[index[gmsh.model.mesh.getNodesForPhysicalGroup(2, group)[0]] - 1] |= mask
+        rows = index[gmsh.model.mesh.getNodesForPhysicalGroup(2, group)[0]] - 1
+        assert np.all(rows >= 0), f"fixation group {group} has a node in no element and no written surface"
+        fixed[rows] |= mask
 
     opposite = {}                      # vertices opposite each tetrahedron face, keyed by the sorted face vertices
     for e in elements[:, :4]:
         for k in range(4):
             opposite.setdefault(tuple(sorted(np.delete(e, k))), []).append(e[k])
     faces = []
-    for group in surfaces:
+    for group, surface in surfaces.items():
         for entity in gmsh.model.getEntitiesForPhysicalGroup(2, group):
             for f in gmsh.model.mesh.getElementsByType(triangle, entity)[1].reshape(-1, len(reversed_face)):
-                inside = opposite[tuple(sorted(f[:3]))]
-                assert len(inside) == 1, f"surface group {group} has a face inside the volume, with no outward side"
-                a, b, c, d = (position[index[n] - 1] for n in (*f[:3], inside[0]))
-                if np.cross(b - a, c - a) @ (d - a) > 0:
-                    f = f[reversed_face]
-                faces.append((f, group))
+                inside = opposite.get(tuple(sorted(f[:3])), ())
+                assert len(inside) < 2, f"surface group {group} has a face inside the volume, with two outward sides"
+                if inside:
+                    a, b, c, d = (position[index[n] - 1] for n in (*f[:3], inside[0]))
+                    if (np.cross(b - a, c - a) @ (d - a) > 0) != (group in inward):
+                        f = f[reversed_face]
+                faces.append((f, group, surface))
 
     with open(directory / f"{stem}.node", "w") as out:
         out.write(f"{len(used)} 3 1 0\n")
@@ -98,6 +131,6 @@ def write_tetgen(directory, stem, surfaces, fixations):
             out.write(f"{n} {' '.join(map(str, e))} {m}\n")
     with open(directory / f"{stem}.sur", "w") as out:
         out.write(f"{len(faces)} {len(reversed_face)} 2\n")
-        for n, (f, group) in enumerate(faces, 1):
-            out.write(f"{n} {' '.join(map(str, index[f]))} {group} {group}\n")
+        for n, (f, group, surface) in enumerate(faces, 1):
+            out.write(f"{n} {' '.join(map(str, index[f]))} {group} {surface}\n")
 
