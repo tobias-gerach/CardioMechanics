@@ -26,7 +26,7 @@ using namespace math_pack;
 class CBRobinBoundary : public CBSolverPlugin {
 public:
     CBRobinBoundary();
-    ~CBRobinBoundary();
+    ~CBRobinBoundary() {}
     
     std::string GetName() override { return "RobinBoundary"; }
     

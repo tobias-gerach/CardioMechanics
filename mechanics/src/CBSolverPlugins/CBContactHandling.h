@@ -29,15 +29,7 @@ using namespace math_pack;
 class CBContactHandling : public CBSolverPlugin {
 public:
     CBContactHandling();
-    virtual ~CBContactHandling() {
-        for (auto it : masterElements_)
-            delete it;
-        
-        for (auto it : slaveElements_)
-            delete it;
-        
-        delete jacobianBuffer_;
-    }
+    virtual ~CBContactHandling() {}
     
     void Init() override;
     void Apply(PetscScalar time) override;
@@ -98,7 +90,6 @@ private:
     PetscInt numGlobalSlaveElements_;
     
     VecScatter scatter_;
-    PetscScalar *jacobianBuffer_;
     
     std::string filename_;
     std::string initType_;
