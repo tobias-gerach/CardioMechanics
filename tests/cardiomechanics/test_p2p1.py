@@ -70,8 +70,6 @@ def _run(binary, cm_env, wd, element_type="T10P1", kappa=100, material="NeoHooke
     (wd / fixture.name).write_text(text)
     proc = run_binary(binary("CardioMechanics"), ["-settings", fixture.name],
                       cwd=wd, env=env or cm_env, timeout=600, check=check, np=ranks)
-    if check:
-        assert "SIMULATION FAILED" not in proc.stdout, f"{element_type} kappa={kappa}\n{proc.stdout[-2000:]}"
     return proc, wd / "Results" / "cantilever_vtu"
 
 
@@ -450,3 +448,16 @@ def test_p2p1_matches_t10_at_small_kappa(binary, cm_env, tmp_path, material):
     pytest.importorskip("meshio")
     gap, pid = _gap_to_t10(binary, cm_env, tmp_path, KAPPA_SWEEP[0], material)
     assert gap < MAX_GAP_AT_SMALLEST_KAPPA, f"{material}: P2P1 differs from T10 by {gap:.2e} at PointID={pid}"
+
+
+def test_diverged_run_exits_non_zero(binary, cm_env, tmp_path):
+    """A load far beyond what the cantilever can carry makes the time stepping give up at the minimum
+    step; the exit code has to say so, since a caller cannot be expected to read stdout.
+
+    The minimum step is raised from its default of 1e-9, which the run would reach only after about
+    thirty bisections of the step, each one a failed Newton solve."""
+    proc, _ = _run(binary, cm_env, tmp_path, check=False,
+                   replace=[("<Amplitude>0.003</Amplitude>", "<Amplitude>1e3</Amplitude>"),
+                            ("<StopTime>1</StopTime>", "<StopTime>1</StopTime><MinTimeStep>0.1</MinTimeStep>")])
+    assert "SIMULATION FAILED" in proc.stdout, proc.stdout[-2000:]
+    assert proc.returncode != 0, f"a failed run exited {proc.returncode}\n{proc.stdout[-2000:]}"

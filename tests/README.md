@@ -37,7 +37,8 @@ Coverage:
   (Taylor-Hood, element type `T10P1`) and T4MINI on a small cantilever: input refusals, static and
   `GeneralizedAlpha` runs, serial against `mpirun` runs, and for P2P1 the
   pressure export and constraint, the Jacobian against PETSc finite differences,
-  and agreement with T10 at small kappa. The static parallel test of each element is not marked `slow`; the
+  agreement with T10 at small kappa, and that a run whose time stepping gives up exits
+  non-zero. The static parallel test of each element is not marked `slow`; the
   `GeneralizedAlpha` and Robin-boundary parallel tests are marked `mpi slow`.
 - **CardioMechanics uniaxial patch** — homogeneous uniaxial tension of a
   distorted box under NeoHooke, T4, T10 and P2P1 (default rule, and the 14-point

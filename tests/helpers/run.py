@@ -6,8 +6,9 @@ def run_binary(binary, args, cwd, env, timeout=300, np=None, check=True):
 
     args entries are stringified so Paths and numbers can be passed directly.
     Pass np=<ranks> to launch under `mpirun -np <ranks>`. On failure the
-    assertion carries the exit code and the tail of stderr. Pass check=False to
-    return the completed process untouched, for runs that are meant to abort.
+    assertion carries the exit code and the tail of both streams; the binaries
+    report a diverged run on stdout, not stderr. Pass check=False to return the
+    completed process untouched, for runs that are meant to abort.
     """
     cmd = ["mpirun", "-np", str(np)] if np else []
     cmd += [str(binary), *(str(a) for a in args)]
@@ -27,7 +28,8 @@ def run_binary(binary, args, cwd, env, timeout=300, np=None, check=True):
     if check:
         assert proc.returncode == 0, (
             f"{binary} exited {proc.returncode}\n"
-            f"args: {args}\n--- stderr (tail) ---\n{proc.stderr[-2000:]}"
+            f"args: {args}\n--- stdout (tail) ---\n{proc.stdout[-2000:]}"
+            f"\n--- stderr (tail) ---\n{proc.stderr[-2000:]}"
         )
     return proc
 
