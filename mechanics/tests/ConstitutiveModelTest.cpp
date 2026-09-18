@@ -31,9 +31,10 @@ TFloat EnergyAtGreenStrain(CBConstitutiveModel &law, const Matrix3<TFloat> &E) {
 }  // namespace
 
 // The strain energy functions of Holzapfel (exponential isotropic and fibre-sheet terms, fibre and
-// sheet terms behind a logistic switch in I4, kappa/4 (J^2 - 1 - 2 ln J)) and Guccione
-// (C/2 (exp(Q) - 1) in the isochoric Green strain, K/2 (J - 1)^2), evaluated independently of the
-// code by tools/python/verification/holzapfel_guccione_energy.py, which prints these values. In the
+// sheet terms behind a logistic switch in I4, kappa/4 (J^2 - 1 - 2 ln J)), Guccione
+// (C/2 (exp(Q) - 1) in the isochoric Green strain, K/2 (J - 1)^2) and Usyk (the same exponential
+// form with six independent b-coefficients, k/2 (ln J)^2), evaluated independently of the
+// code by tools/python/verification/law_energies.py, which prints these values. In the
 // diagonal deformations Holzapfel's fibre is stretched in the first and compressed in the other two,
 // its sheet compressed in the first and third, so each switch is evaluated below and above I4 = 1.
 // The last deformation shears every pair of axes, so every coupling term contributes.
@@ -73,7 +74,11 @@ INSTANTIATE_TEST_SUITE_P(Reference, LawEnergy,
                                          EnergyReference{"Guccione", stretchedFibre, 0.071628040076660987},
                                          EnergyReference{"Guccione", stretchedSheet, 0.044595977761871061},
                                          EnergyReference{"Guccione", compressed, 0.023640652394328145},
-                                         EnergyReference{"Guccione", sheared, 0.046267635831757067}),
+                                         EnergyReference{"Guccione", sheared, 0.046267635831757067},
+                                         EnergyReference{"Usyk", stretchedFibre, 0.083718887549784821},
+                                         EnergyReference{"Usyk", stretchedSheet, 0.061455442878426705},
+                                         EnergyReference{"Usyk", compressed, 0.031250197003878995},
+                                         EnergyReference{"Usyk", sheared, 0.065812615908727973}),
                          [](const testing::TestParamInfo<EnergyReference> &info) {
                              return info.param.law + std::to_string(info.index);
                          });
@@ -105,5 +110,7 @@ TEST_P(LawStress, PK2StressIsEnergyDerivativeWrtGreenStrain) {
     }
 }
 
-INSTANTIATE_TEST_SUITE_P(Laws, LawStress, testing::Values(std::string("NeoHooke"), std::string("Holzapfel"), std::string("Guccione")),
+INSTANTIATE_TEST_SUITE_P(Laws, LawStress,
+                         testing::Values(std::string("NeoHooke"), std::string("Holzapfel"),
+                                         std::string("Guccione"), std::string("Usyk")),
                          [](const testing::TestParamInfo<std::string> &info) { return info.param; });
