@@ -16,9 +16,9 @@
 #define CB_SOLVER_PLUGIN_FACTORY
 
 #include <functional>
-#include <map>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "ParameterMap.h"
@@ -33,16 +33,14 @@ public:
     
     CBSolverPluginFactory();
     
-    /// Creates a plugin of the given type. Ownership passes to the caller.
-    std::unique_ptr<CBSolverPlugin> New(const std::string& pluginName);
-    
-    /// Creates every plugin enabled in the parameters, in the fixed order the solver
-    /// initializes them in. Ownership passes to the caller.
+    /// Creates every plugin enabled in the parameters, in producer order. Ownership passes to the caller.
     std::vector<std::unique_ptr<CBSolverPlugin>> LoadAllPlugins(ParameterMap* parameters);
     
 protected:
 private:
-    std::map<std::string, FactoryFunction> producers_;
+    /// Parameter key and producer for each plugin. A sequence rather than a map because the
+    /// order is load-bearing: CBSolver::PrepareSimulation initialises the plugins in it.
+    std::vector<std::pair<std::string, FactoryFunction>> producers_;
 };
 
 #endif
