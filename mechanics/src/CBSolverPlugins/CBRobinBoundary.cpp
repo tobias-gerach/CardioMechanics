@@ -17,12 +17,6 @@
 
 CBRobinBoundary::CBRobinBoundary() : CBSolverPlugin() {}
 
-CBRobinBoundary::~CBRobinBoundary() {
-    for (auto it : contactSurfaceElements_) {
-        delete it;
-    }
-}
-
 void CBRobinBoundary::Init() {
 #pragma message("Implementation only works for T3 surface elements at the moment")
     

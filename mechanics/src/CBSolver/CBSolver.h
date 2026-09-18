@@ -36,6 +36,7 @@
 #include "DCCtrl.h"
 
 #include <vector>
+#include <memory>
 #include <functional>
 #include <petscsnes.h>
 
@@ -267,7 +268,7 @@ protected:
     std::vector<CBElementSurface *> surfaceElements_;
     
     CBMaterialFactory materialFactory_;
-    CBSolverPluginFactory *pluginFactory_ = 0;
+    std::unique_ptr<CBSolverPluginFactory> pluginFactory_;
     
     TInt numElements_ = 0;
     TInt numNodes_    = 0;

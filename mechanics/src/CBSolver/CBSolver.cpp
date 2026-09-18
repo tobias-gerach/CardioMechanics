@@ -568,7 +568,7 @@ void CBSolver::SetBlock(Vec unknowns, IS dofs, Vec field) {
 void CBSolver::InitPlugins() {
     UpdateGhostNodesAndLinkToAdapter();
     adapter_->LinkNodalForcesJacobian(nodalForcesJacobian_);
-    pluginFactory_ = new CBSolverPluginFactory();
+    pluginFactory_ = std::make_unique<CBSolverPluginFactory>();
     pluginFactory_->LoadAllPlugins(plugins_, parameters_);
     
     for (auto &it : plugins_) {
@@ -1280,6 +1280,8 @@ void CBSolver::ExportLocalActivationTime() {
 } // CBSolver::ExportLocalActivationTime
 
 CBSolver::~CBSolver() {
+    // The factory owns the plugins, which hold the adapter, so it is released before the adapter is.
+    pluginFactory_.reset();
     VecDestroy(&pressures_);
     VecDestroy(&trialPressures_);
     VecDestroy(&pressureResiduals_);
