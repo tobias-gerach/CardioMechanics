@@ -29,14 +29,13 @@ class CBSolverGeneralizedAlpha : public CBSolver {
 public:
     CBSolverGeneralizedAlpha() : CBSolver(), isInitDampingParametersDone_(false), isInitMassMatrixDone_(false) {}
     
-    ~CBSolverGeneralizedAlpha() {}
+    ~CBSolverGeneralizedAlpha() override;
     
     TFloat GetKineticEnergy() override {return kineticEnergy_;}
     
     TFloat GetDampingEnergyDissipation() override {return dampingEnergyDissipation_;}
     
     void Init(ParameterMap *_parameter, CBModel *_model) override;
-    void DeInit() override;
     
     std::string GetType() override {return "Generalized Alpha Solver";  }
     
@@ -60,16 +59,16 @@ protected:
     bool        useConsistentMassMatrix_;
     // The unknowns hold the displacement increment, then the pressure increment (ADR-0001). All
     // other vectors are laid out like the nodes: pressure has no time derivative.
-    Vec         unknowns_;
-    Vec         velocity_;
-    Vec         acceleration_;
-    Vec         displacement_;
-    Vec         absDisplacement_;
-    Vec         residuum_;
-    Vec         tmpDisplacement_;
-    Vec         tmpVelocity_;
-    Vec         tmpVector_;
-    Vec         initialGuess_;
+    Vec         unknowns_ = nullptr;
+    Vec         velocity_ = nullptr;
+    Vec         acceleration_ = nullptr;
+    Vec         displacement_ = nullptr;
+    Vec         absDisplacement_ = nullptr;
+    Vec         residuum_ = nullptr;
+    Vec         tmpDisplacement_ = nullptr;
+    Vec         tmpVelocity_ = nullptr;
+    Vec         tmpVector_ = nullptr;
+    Vec         initialGuess_ = nullptr;
     PetscScalar kineticEnergy_;
     PetscScalar dampingEnergyDissipation_ = 0;
     PetscScalar alphaM_;
@@ -107,12 +106,12 @@ private:
     
     typedef CBSolver   Base;
     
-    SNES        snes_;
+    SNES        snes_ = nullptr;
     int         snesStep_ = 0;
-    KSP         ksp_;
+    KSP         ksp_ = nullptr;  // borrowed from snes_, which releases it and its PC
     
-    Mat         massMatrix_;
-    Mat         dampingMatrix_;
+    Mat         massMatrix_ = nullptr;
+    Mat         dampingMatrix_ = nullptr;
     Mat         elementsJacobian_ = 0; // unknown layout, the source of the damping stiffness K_uu
     Mat         displacementBlock_ = 0; // K_uu, kept so that each update refills its storage
     

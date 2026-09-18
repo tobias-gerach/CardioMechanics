@@ -24,14 +24,13 @@ class CBSolverNewmarkBeta : public CBSolver {
 public:
     CBSolverNewmarkBeta() : CBSolver(), isInitDampingParametersDone_(false), isInitMassMatrixDone_(false) {}
     
-    ~CBSolverNewmarkBeta() {}
+    ~CBSolverNewmarkBeta() override;
     
     TFloat GetKineticEnergy() override {return kineticEnergy_;}
     
     TFloat GetDampingEnergyDissipation() override {return dampingEnergyDissipation_;}
     
     void Init(ParameterMap *_parameter, CBModel *_model) override;
-    void DeInit() override;
     
     std::string GetType() override {return "Newmark Beta Solver";  }
     
@@ -51,15 +50,15 @@ protected:
     CBStatus CalcDampingMatrix();
     
     bool        useConsistentMassMatrix_;
-    Vec         velocity_;
-    Vec         acceleration_;
-    Vec         displacement_;
-    Vec         absDisplacement_;
-    Vec         residuum_;
-    Vec         tmpDisplacement_;
-    Vec         tmpVelocity_;
-    Vec         tmpVector_;
-    Vec         initialGuess_;
+    Vec         velocity_ = nullptr;
+    Vec         acceleration_ = nullptr;
+    Vec         displacement_ = nullptr;
+    Vec         absDisplacement_ = nullptr;
+    Vec         residuum_ = nullptr;
+    Vec         tmpDisplacement_ = nullptr;
+    Vec         tmpVelocity_ = nullptr;
+    Vec         tmpVector_ = nullptr;
+    Vec         initialGuess_ = nullptr;
     PetscScalar kineticEnergy_;
     PetscScalar dampingEnergyDissipation_ = 0;
     PetscScalar beta_;
@@ -84,12 +83,12 @@ private:
     
     typedef CBSolver   Base;
     
-    SNES        snes_;
+    SNES        snes_ = nullptr;
     int         snesStep_ = 0;
-    KSP         ksp_;
+    KSP         ksp_ = nullptr;  // borrowed from snes_, which releases it and its PC
     
-    Mat         massMatrix_;
-    Mat         dampingMatrix_;
+    Mat         massMatrix_ = nullptr;
+    Mat         dampingMatrix_ = nullptr;
     
     PetscScalar prevTime_ = INFINITY;
     

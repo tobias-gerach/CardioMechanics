@@ -24,8 +24,8 @@ class CBSolverEquilibrium : public CBSolver
 public:
     
     CBSolverEquilibrium() : CBSolver(){}
+    ~CBSolverEquilibrium() override;
     virtual void Init(ParameterMap* parameters, CBModel* model);
-    void DeInit();
     virtual std::string GetType(){return("Static Solver"); }
     bool SupportsPressureField(){return true; }
     friend PetscErrorCode CBSolverEquilibriumSNESHelperFunctionForces(SNES snes, Vec x, Vec f, void* solver);
@@ -45,14 +45,14 @@ protected:
     void ApplyIncrement(Vec unknowns, Vec displacedNodes);
     typedef CBSolver   Base;
     
-    SNES snes_;
+    SNES snes_ = nullptr;
     int snesStep_ = 0;
-    KSP  ksp_;
+    KSP  ksp_ = nullptr;  // borrowed from snes_, which releases it and its PC
     // Unknown vectors hold the displacement increment, then the pressure increment (ADR-0001).
-    Vec  residuum_;
-    Vec  displacement_;
-    Vec  initialGuess_;
-    Vec  tmpVector_;
+    Vec  residuum_ = nullptr;
+    Vec  displacement_ = nullptr;
+    Vec  initialGuess_ = nullptr;
+    Vec  tmpVector_ = nullptr;
     
     // time tracking variables, for initial guess computation
     TFloat timeLast_;

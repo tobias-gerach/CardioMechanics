@@ -1279,7 +1279,7 @@ void CBSolver::ExportLocalActivationTime() {
     }
 } // CBSolver::ExportLocalActivationTime
 
-void CBSolver::DeInit() {
+CBSolver::~CBSolver() {
     VecDestroy(&pressures_);
     VecDestroy(&trialPressures_);
     VecDestroy(&pressureResiduals_);
@@ -1314,8 +1314,11 @@ void CBSolver::DeInit() {
     }
     
     MatDestroy(&boundaryConditionsNodalForcesJacobianDiagonalComponents_);
+    // The Jacobian carries the rigid body modes as its near null space, so it goes first.
+    MatDestroy(&nodalForcesJacobian_);
     MatNullSpaceDestroy(&rigidBodyModes_);
     VecDestroy(&nodes_);
+    VecDestroy(&refNodes_);
     
     if (nodesSeq_)
         VecDestroy(&nodesSeq_);
@@ -1324,10 +1327,11 @@ void CBSolver::DeInit() {
         VecDestroy(&refNodesSeq_);
     
     VecDestroy(&activeStress_);
+    VecDestroy(&exportActiveStress_);
     VecDestroy(&nodalForces_);
     if (corruptElements_ != 0)
         VecDestroy(&corruptElements_);
-} // CBSolver::DeInit
+} // CBSolver::~CBSolver
 
 void CBSolver::LoadMesh() {
     numElements_ = model_->GetElements().size();

@@ -43,20 +43,19 @@ void CBSolverNewmarkBeta::Init(ParameterMap *_parameter, CBModel *_model) {
     Base::status_ = CBStatus::WAITING;
 }
 
-void CBSolverNewmarkBeta::DeInit() {
+CBSolverNewmarkBeta::~CBSolverNewmarkBeta() {
     VecDestroy(&residuum_);
     VecDestroy(&displacement_);
     VecDestroy(&absDisplacement_);
     VecDestroy(&tmpDisplacement_);
     VecDestroy(&tmpVelocity_);
-    
+    VecDestroy(&initialGuess_);
     VecDestroy(&velocity_);
     VecDestroy(&acceleration_);
     VecDestroy(&tmpVector_);
+    MatDestroy(&massMatrix_);
+    MatDestroy(&dampingMatrix_);
     SNESDestroy(&snes_);
-    KSPDestroy(&ksp_);
-    PCDestroy(&pc_);
-    Base::DeInit();
 }
 
 void CBSolverNewmarkBeta::InitVectors() {

@@ -18,6 +18,20 @@
 
 #include "CBSolverActiveStressEstimator.h"
 
+CBSolverActiveStressEstimator::~CBSolverActiveStressEstimator() {
+    ISDestroy(&masterNodesIndices_);
+    ISDestroy(&nodesOfInterestIndices_);
+    ISDestroy(&elementsOfInterestIndices_);
+    MatDestroy(&lTl_);
+    MatDestroy(&elementLaplacian_);
+    MatDestroy(&inv_);
+    VecDestroy(&dist_);
+    VecDestroy(&tmpNodes_);
+    VecDestroy(&ti_);
+    VecDestroy(&ti1_);
+    VecDestroy(&ti2_);
+}
+
 void CBSolverActiveStressEstimator::Init(ParameterMap *parameters, CBModel *model) {
     CBSolverEquilibrium::Init(parameters, model);
 

@@ -231,15 +231,12 @@ void CBSolverEquilibrium::InitMatrices() {
     Base::InitNodalForcesJacobian();
 }
 
-void CBSolverEquilibrium::DeInit() {
+CBSolverEquilibrium::~CBSolverEquilibrium() {
     VecDestroy(&residuum_);
     VecDestroy(&displacement_);
     VecDestroy(&initialGuess_);
     VecDestroy(&tmpVector_);
     SNESDestroy(&snes_);
-    KSPDestroy(&ksp_);
-    PCDestroy(&pc_);
-    Base::DeInit();
 }
 
 void CBSolverEquilibrium::UpdateInitialGuess(TFloat time) {
