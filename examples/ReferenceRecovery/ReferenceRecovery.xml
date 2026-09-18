@@ -1,0 +1,103 @@
+<settings>Reference configuration recovery on the scaled benchmark ellipsoid</settings>
+
+<General>
+    <LogFile>./Results/Ellipsoid.log</LogFile>
+</General>
+
+<Mesh>
+    <Type>T10P1</Type>
+    <Format>Tetgen</Format>
+    <Sorting>PCA</Sorting>
+
+    <Tetgen>
+        <Unit>1e-3</Unit>
+        <Nodes>./tetgen/ellipsoid.node</Nodes>
+        <Elements>./tetgen/ellipsoid.ele</Elements>
+        <Surfaces>./tetgen/ellipsoid.sur</Surfaces>
+        <Bases>./tetgen/ellipsoid.bases</Bases>
+        <DetermineNeighbors>true</DetermineNeighbors>
+        <EnforceOrthonormalBases>true</EnforceOrthonormalBases>
+    </Tetgen>
+
+    <Surfaces>
+        <!-- Endocardium and the lid that closes it. Both carry surface index 1, which is what
+             cavity membership goes by, and are told apart by their material index. Declaring them
+             CAVITY would force 3-node faces on this quadratic mesh, which put the load of a
+             uniformly loaded face on the mid-edge nodes rather than the vertices; the plugin needs
+             no such declaration, since it selects cavity elements by element type and a 6-node
+             surface already is one. -->
+        <Surface_1><Type>T6</Type></Surface_1>
+        <!-- Epicardium -->
+        <Surface_2><Type>T6</Type></Surface_2>
+        <!-- Base, fixed in all directions in the node file -->
+        <Surface_3><Type>T6</Type></Surface_3>
+    </Surfaces>
+</Mesh>
+
+<Materials>
+    <Mat_30>
+        <Type>Usyk</Type>
+        <Density>1082</Density>
+        <!-- Usyk et al. (2002). The bulk modulus is the numerical penalty that enforces
+             incompressibility, not a material property; 1e7 Pa is the value at which the deformation
+             of this geometry stops changing with it. -->
+        <Usyk>
+            <a>880</a>
+            <bff>8</bff>
+            <bss>6</bss>
+            <bnn>3</bnn>
+            <bfs>12</bfs>
+            <bfn>3</bfn>
+            <bns>3</bns>
+            <k>1e7</k>
+        </Usyk>
+        <TensionMax>0</TensionMax>
+    </Mat_30>
+</Materials>
+
+<Export>
+    <Format>VTK</Format>
+    <Prefix>./Results/Ellipsoid</Prefix>
+    <!-- One snapshot per inflation; the deliverable is the node file, not the time series. -->
+    <TimeStep>0.1</TimeStep>
+</Export>
+
+<Solver>
+    <NonZeros>2000</NonZeros>
+    <DomainDecomposition>false</DomainDecomposition>
+    <Precision>1e-8</Precision>
+
+    <Type>Static</Type>
+    <Formulation>TotalLagrangian</Formulation>
+
+    <StartTime>0</StartTime>
+    <!-- Room for the six inflations the cycle cap allows. The first costs one step more than the
+         other five, because the step at the start time carries no pressure yet, so the last cycle
+         ends at 0.61 rather than at 0.6. -->
+    <StopTime>0.7</StopTime>
+    <TimeStep>0.01</TimeStep>
+
+    <Plugins>
+        <ReferenceRecovery>true</ReferenceRecovery>
+    </Plugins>
+</Solver>
+
+<Plugins>
+    <ReferenceRecovery>
+        <ExportDir>./Results/ReferenceRecovery</ExportDir>
+        <Surfaces>1</Surfaces>
+        <!-- 8 mmHg. A positive entry inflates: the faces of a lidded endocardium point out of the
+             cavity, so that it encloses a positive volume, and the load follows their normals. -->
+        <Pressures>1066.58</Pressures>
+        <!-- The lid's material index. It closes the cavity so that the volume is well defined and
+             must not carry the pressure load. -->
+        <IgnoredSurfaceIndices>4</IgnoredSurfaceIndices>
+        <NumberOfIncrements>1</NumberOfIncrements>
+        <CycleMax>5</CycleMax>
+        <Augmentation>true</Augmentation>
+        <DisplacementFactor>1</DisplacementFactor>
+        <!-- Infinity norm of the nodal residual, in metres. -->
+        <Tolerance>1e-4</Tolerance>
+        <InflationDuration>0.1</InflationDuration>
+    </ReferenceRecovery>
+</Plugins>
