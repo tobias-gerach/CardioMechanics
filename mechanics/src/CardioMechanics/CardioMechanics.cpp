@@ -74,15 +74,19 @@ void CardioMechanics::Init2()
 
 void CardioMechanics::DeInit()
 {
+    // Order is load-bearing: the exporter writes the model from its own thread, so it is
+    // stopped and destroyed while the model it points at is still alive.
     if(modelExporter_)
+    {
         modelExporter_->DeInit(); // Very important since the exporter thread might still be active;
+        delete modelExporter_;    // Aborts unless DeInit() ran first;
+    }
     if(model_)
         delete model_;
     if(solver_)
         delete solver_;
     if(parameters_)
         delete parameters_;
-    
 }
 
 void CardioMechanics::Run()

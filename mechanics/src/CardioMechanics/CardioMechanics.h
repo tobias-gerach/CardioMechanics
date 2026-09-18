@@ -41,7 +41,6 @@ public:
     
     void Init1();
     void Init2();
-    void DeInit();
     void Run();
     
     void ReadParameterFile(std::string parameterFile);
@@ -50,6 +49,7 @@ public:
     
 protected:
 private:
+    void DeInit(); // Only the destructor tears down, so nothing can be released twice
     void InitModel();
     void InitSolver();
     void InitModelExporter();
