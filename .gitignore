@@ -55,11 +55,14 @@ CONTEXT.md
 docs/UserManual/Manual.pdf
 docs/UserManual/*.log
 
-# example run output (the settings files write here; inputs live in tetgen/ and geometry/)
+# example run output (the settings files write here; committed inputs live in tetgen/ and
+# geometry/, except for ReferenceRecovery, whose mesh is generated on first use)
 examples/benchmark2015/Problem1/
 examples/benchmark2015/Problem2/
 examples/benchmark2015/Problem3/
 examples/inverseEllipsoid/Results/
+examples/ReferenceRecovery/tetgen/
+examples/ReferenceRecovery/Results/
 
 # misc
 *.swp
