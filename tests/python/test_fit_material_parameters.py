@@ -10,6 +10,8 @@ volume to check is one whose volume is known in closed form, the arithmetic is c
 published anchors and against curves generated from known parameters, and the records the recovery
 plugin writes are built by hand rather than run.
 """
+import csv
+
 import numpy as np
 import pytest
 
@@ -584,3 +586,58 @@ def test_a_recovery_that_did_not_reach_the_target_is_not_fitted():
                                               cycles=5)
     assert fmp.reached_target(ended_at(9e-5), 1e-4)
     assert not fmp.reached_target(ended_at(1.2e-3), 1e-4)
+
+
+# What a run leaves in its work directory.
+
+
+def test_the_record_carries_one_column_per_scaled_parameter(settings_file):
+    _, blocks = fmp.material_law(fmp.read_settings(settings_file))
+    keys = fmp.parameter_keys(blocks, *fmp.law_parameters("Usyk"))
+    assert keys[:2] == ["Materials.Mat_30.Usyk.a", "Materials.Mat_30.Usyk.bff"]
+    # The bulk modulus is not scaled, so it is not one of the columns the record follows.
+    assert "Materials.Mat_30.Usyk.k" not in keys
+
+
+def test_a_row_records_the_parameters_that_produced_its_own_numbers(settings_file, tmp_path):
+    root = fmp.read_settings(settings_file)
+    _, blocks = fmp.material_law(root)
+    keys = fmp.parameter_keys(blocks, *fmp.law_parameters("Usyk"))
+    inflation = fmp.Inflation(volumes=[60.0, 100.0], pressures=[0.0, 8.0], residual_norm=5e-5,
+                              cycles=3)
+    scalings = fmp.Scalings(stiffness=2.0, exponent=5.0, clamped=("exponent",))
+    state = fmp.convergence(60.0, 55.0, 100.0, 100.0, scalings)
+    parameters = {key: float(fmp.get_parameter(root, key)) for key in keys}
+    row = fmp.iteration_row(2, parameters, inflation, state, scalings, walltime=123.0)
+
+    fmp.write_iterations(tmp_path / "iterations.csv", [row])
+    with open(tmp_path / "iterations.csv", newline="") as handle:
+        written, = csv.DictReader(handle)
+    assert written["iteration"] == "2" and written["cycles"] == "3"
+    assert float(written["unloaded_ml"]) == 60.0 and float(written["end_diastolic_ml"]) == 100.0
+    assert float(written["unloaded_residual_ml"]) == 5.0
+    assert float(written["walltime_s"]) == 123.0 and written["next_clamped"] == "exponent"
+    # The parameters of the run that produced the row, not the ones its scalings ask for next.
+    assert float(written["Materials.Mat_30.Usyk.a"]) == 88.0
+
+
+def test_the_recovered_configuration_is_the_last_increment(tmp_path):
+    for increment in (1, 2, 10):
+        (tmp_path / f"UnloadedState_Incr{increment}.node").write_text("0 3 1 0\n")
+    (tmp_path / "InflatedState_Incr10.node").write_text("0 3 1 0\n")
+    assert fmp.recovered_node_file(tmp_path).name == "UnloadedState_Incr10.node"
+
+
+def test_a_recovery_that_wrote_no_unloaded_configuration_raises(tmp_path):
+    with pytest.raises(AssertionError):
+        fmp.recovered_node_file(tmp_path)
+
+
+def test_a_figure_is_written_for_the_klotz_relation_and_every_iteration(tmp_path):
+    klotz = fmp.klotz_curve(8.0, 120.0)
+    klotz_fit = fmp.fit_exponential(*klotz, klotz[0][0])
+    inflations = [fmp.Inflation([70.0, 120.0], [0.0, 8.0], 5e-5, 3),
+                  fmp.Inflation([65.0, 120.0], [0.0, 8.0], 4e-5, 2)]
+    figure = tmp_path / "PressureVolume.png"
+    fmp.plot_curves(figure, klotz, klotz_fit, inflations)
+    assert figure.stat().st_size > 0

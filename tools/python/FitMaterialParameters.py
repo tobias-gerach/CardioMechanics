@@ -31,11 +31,18 @@ material parameters by the ratio of the two fits. Only the parameters carry forw
 convergence or on parameter stagnation, and fails - with a non-zero exit status and the path of the
 log - on a run that did not finish, on a recovery that did not reach the target configuration, and on
 the iteration cap.
+
+Every run leaves in its work directory a record of each outer iteration, a figure overlaying the
+Klotz relation with the simulated curves, and the recovered unloaded node file, which is the
+deliverable: it is what the `LoadUnloadedState` plugin consumes.
 """
 
 import argparse
+import csv
 import re
+import shutil
 import subprocess
+import time
 import xml.etree.ElementTree as ET
 from collections import namedtuple
 from pathlib import Path
@@ -397,6 +404,12 @@ def retarget_outputs(root, directory):
     return root
 
 
+def parameter_keys(blocks, stiffness, exponents):
+    """The keys of the parameters the optimizer scales, in a fixed order, so that a record of several
+    iterations carries one column per parameter."""
+    return [f"{block}.{name}" for block in blocks for name in (*stiffness, *exponents)]
+
+
 def scaled_parameters(root, blocks, stiffness, exponents, scalings):
     """The material parameters of every block of `blocks` after one scaling step, as their keys and
     their new values. The stiffness parameters named in `stiffness` take the stiffness scaling and the
@@ -414,6 +427,76 @@ def reached_target(inflation, tolerance):
     its cycle cap just as it does when it converges, so the existence of that file says nothing; the
     residual the tolerance is on is what says it."""
     return inflation.residual_norm <= tolerance
+
+
+# The three outputs sit in the work directory itself, beside the per-iteration directories, and all
+# three are rewritten after every iteration, so a loop that a later iteration ends still leaves what
+# the ones before it produced.
+ITERATIONS_CSV = "iterations.csv"
+FIGURE_NAME = "PressureVolume.png"
+UNLOADED_NAME = "UnloadedState.node"
+
+
+def iteration_row(iteration, parameters, inflation, state, scalings, walltime):
+    """One row of the iteration record: the volumes and residuals the run produced, the wall time it
+    took and the material parameters it was given. What the fit asks for next is named for the
+    iteration it applies to rather than the one that produced it, so that a reader of the record is
+    not left to infer which side of a scaling a row stands on."""
+    return {"iteration": iteration, "cycles": inflation.cycles,
+            "residual_m": inflation.residual_norm, "unloaded_ml": inflation.volumes[0],
+            "end_diastolic_ml": inflation.volumes[-1], "unloaded_residual_ml": state.unloaded,
+            "end_diastolic_residual_ml": state.end_diastolic,
+            "next_stiffness_scaling": scalings.stiffness,
+            "next_exponent_scaling": scalings.exponent,
+            "next_parameter_move": state.stagnation, "next_clamped": " ".join(scalings.clamped),
+            "walltime_s": walltime, **parameters}
+
+
+def write_iterations(path, rows):
+    """The iteration record at `path`. The columns follow the first row, so the parameters carry the
+    names the settings file gives them and a law with other parameters needs nothing here."""
+    with open(path, "w", newline="") as handle:
+        writer = csv.DictWriter(handle, rows[0].keys())
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def plot_curves(path, klotz, klotz_fit, inflations):
+    """The figure at `path`: the Klotz relation, the exponential model fitted to it and the simulated
+    pressure-volume curve of every outer iteration, over volume in ml and pressure in mmHg. The
+    iterations run dark to light in the order they were run, so the figure reads as the material
+    parameters moving the simulated relation onto the empirical one."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    volumes, pressures = klotz
+    figure, axes = plt.subplots(figsize=(5.4, 4.0), layout="constrained")
+    axes.plot(volumes, pressures, color="0.1", lw=1.6, label="Klotz EDPVR")
+    axes.plot(volumes, exponential_pressure(volumes, volumes[0], *klotz_fit), color="0.1", lw=1.0,
+              ls="--", label="exponential fit")
+    shades = matplotlib.colormaps["viridis"](np.linspace(0.15, 0.85, len(inflations)))
+    for iteration, (inflation, shade) in enumerate(zip(inflations, shades), 1):
+        axes.plot(inflation.volumes, inflation.pressures, color=shade, lw=1.2, marker="o", ms=3,
+                  label=f"iteration {iteration}")
+    # The Klotz relation is sampled to 30 mmHg, which is the range it is fitted over, while a run
+    # stops at the target pressure. The axes are held to what the runs reached, since that is the
+    # range over which the two curves are compared.
+    right = max(max(inflation.volumes) for inflation in inflations)
+    top = max(max(inflation.pressures) for inflation in inflations)
+    axes.set(xlabel="cavity volume (ml)", ylabel="pressure (mmHg)",
+             xlim=(None, 1.02 * right), ylim=(-0.03 * top, 1.10 * top))
+    axes.legend(frameon=False, fontsize=8)
+    figure.savefig(path, dpi=200)
+    plt.close(figure)
+
+
+def recovered_node_file(records):
+    """The unloaded node file a recovery run left in `records`. The plugin writes one per pressure
+    increment, so the highest increment carries the recovered reference configuration."""
+    files = sorted(Path(records).glob("UnloadedState_Incr*.node"),
+                   key=lambda path: int(path.stem.rpartition("Incr")[2]))
+    assert files, f"the recovery wrote no unloaded node file in {records}"
+    return files[-1]
 
 
 def run_cardiomechanics(binary, settings, directory, ranks, log):
@@ -484,61 +567,84 @@ def main(argv=None):
     tolerance = float(get_parameter(root, "Plugins.ReferenceRecovery.Tolerance", 1e-3))
 
     klotz_unloaded = klotz_volumes(arguments.pressure, measured)[0]
-    klotz_fit = fit_exponential(*klotz_curve(arguments.pressure, measured), klotz_unloaded)
+    klotz = klotz_curve(arguments.pressure, measured)
+    klotz_fit = fit_exponential(*klotz, klotz_unloaded)
     print(f"{law} against Klotz from {arguments.pressure:g} mmHg in {measured:.2f} ml: "
           f"unloaded volume {klotz_unloaded:.2f} ml, "
           f"tolerance {VOLUME_TOLERANCE * measured:.2f} ml")
 
     work = Path(arguments.work_dir).resolve()
-    for iteration in range(1, arguments.iterations + 1):
-        directory = work / f"iteration_{iteration:02d}"
-        (directory / EXPORT_DIR).mkdir(parents=True, exist_ok=True)
-        current = directory / settings.name
-        write_settings(retarget_outputs(root, directory), current)
-        run_cardiomechanics(arguments.binary, current, settings.parent, arguments.ranks,
-                            directory / LOG_NAME)
+    keys = parameter_keys(blocks, stiffness, exponents)
+    rows, inflations = [], []
+    try:
+        for iteration in range(1, arguments.iterations + 1):
+            directory = work / f"iteration_{iteration:02d}"
+            (directory / EXPORT_DIR).mkdir(parents=True, exist_ok=True)
+            current = directory / settings.name
+            write_settings(retarget_outputs(root, directory), current)
+            started = time.perf_counter()
+            run_cardiomechanics(arguments.binary, current, settings.parent, arguments.ranks,
+                                directory / LOG_NAME)
+            walltime = time.perf_counter() - started
 
-        records = directory / RECOVERY_DIR
-        inflation = last_inflation((records / "PressureVolumeInfo.dat").read_text(),
-                                   (records / "CycleInfo.dat").read_text(), arguments.surface)
-        if not reached_target(inflation, tolerance):
-            raise SystemExit(
-                f"iteration {iteration}: the recovery stopped after {inflation.cycles} cycles at a "
-                f"residual of {inflation.residual_norm:.3e} m, above the plugin's tolerance of "
-                f"{tolerance:.3e} m. Its pressure-volume curve does not end at the target geometry "
-                f"and nothing is fitted to it; see {directory / LOG_NAME}")
+            records = directory / RECOVERY_DIR
+            inflation = last_inflation((records / "PressureVolumeInfo.dat").read_text(),
+                                       (records / "CycleInfo.dat").read_text(), arguments.surface)
+            if not reached_target(inflation, tolerance):
+                raise SystemExit(
+                    f"iteration {iteration}: the recovery stopped after {inflation.cycles} cycles at a "
+                    f"residual of {inflation.residual_norm:.3e} m, above the plugin's tolerance of "
+                    f"{tolerance:.3e} m. Its pressure-volume curve does not end at the target geometry "
+                    f"and nothing is fitted to it; see {directory / LOG_NAME}")
 
-        # A row of the pressure-volume record pairs the pressure a step was solved at with the volume
-        # that step produced, so the curve is fitted as it stands. What the last row does carry is the
-        # inner loop's own bias: the recovery drives its residual onto the configuration one step
-        # behind, so the end-diastolic volume overshoots the target by about one step of the ramp.
-        # That is the bias the end-diastolic residual reports and the fit cannot influence.
-        simulated_fit = fit_exponential(inflation.volumes, inflation.pressures, inflation.volumes[0])
-        scalings = parameter_scalings(klotz_fit, simulated_fit)
-        state = convergence(inflation.volumes[0], klotz_unloaded, inflation.volumes[-1], measured,
-                            scalings)
-        print(f"iteration {iteration}: {inflation.cycles} cycles at a residual of "
-              f"{inflation.residual_norm:.3e} m, unloaded {inflation.volumes[0]:.2f} ml "
-              f"(residual {state.unloaded:.2f} ml), end-diastolic {inflation.volumes[-1]:.2f} ml "
-              f"(residual {state.end_diastolic:.2f} ml), stiffness x{scalings.stiffness:.3f}, "
-              f"exponents x{scalings.exponent:.3f}")
-        if scalings.clamped:
-            print(f"  the {' and '.join(scalings.clamped)} scaling the fit asked for was outside "
-                  f"{SCALING_BOUNDS} and was clamped")
-        if state.converged:
-            print(f"converged: the unloaded volume is within {VOLUME_TOLERANCE * measured:.2f} ml of "
-                  f"the Klotz prediction. The parameters are in {current}")
-            return
-        if state.stagnated:
-            print(f"stagnated: no parameter moved by more than {STAGNATION_TOLERANCE:g}, with the "
-                  f"unloaded volume still {state.unloaded:.2f} ml from the Klotz prediction. "
-                  f"The parameters are in {current}")
-            return
-        for key, value in scaled_parameters(root, blocks, stiffness, exponents, scalings).items():
-            set_parameter(root, key, format(value, PARAMETER_FORMAT))
+            # A row of the pressure-volume record pairs the pressure a step was solved at with the
+            # volume that step produced, so the curve is fitted as it stands. What the last row does
+            # carry is the inner loop's own bias: the recovery drives its residual onto the
+            # configuration one step behind, so the end-diastolic volume overshoots the target by
+            # about one step of the ramp. That is the bias the end-diastolic residual reports and the
+            # fit cannot influence.
+            simulated_fit = fit_exponential(inflation.volumes, inflation.pressures,
+                                            inflation.volumes[0])
+            scalings = parameter_scalings(klotz_fit, simulated_fit)
+            state = convergence(inflation.volumes[0], klotz_unloaded, inflation.volumes[-1], measured,
+                                scalings)
+            parameters = {key: float(get_parameter(root, key)) for key in keys}
+            rows.append(iteration_row(iteration, parameters, inflation, state, scalings, walltime))
+            inflations.append(inflation)
+            write_iterations(work / ITERATIONS_CSV, rows)
+            plot_curves(work / FIGURE_NAME, klotz, klotz_fit, inflations)
+            shutil.copyfile(recovered_node_file(records), work / UNLOADED_NAME)
 
-    raise SystemExit(f"the loop reached its cap of {arguments.iterations} outer iterations without "
-                     f"converging; the parameters of the last one are in {current}")
+            print(f"iteration {iteration}: {inflation.cycles} cycles at a residual of "
+                  f"{inflation.residual_norm:.3e} m, unloaded {inflation.volumes[0]:.2f} ml "
+                  f"(residual {state.unloaded:.2f} ml), end-diastolic {inflation.volumes[-1]:.2f} ml "
+                  f"(residual {state.end_diastolic:.2f} ml), stiffness x{scalings.stiffness:.3f}, "
+                  f"exponents x{scalings.exponent:.3f}")
+            if scalings.clamped:
+                print(f"  the {' and '.join(scalings.clamped)} scaling the fit asked for was outside "
+                      f"{SCALING_BOUNDS} and was clamped")
+            if state.converged:
+                print(f"converged: the unloaded volume is within "
+                      f"{VOLUME_TOLERANCE * measured:.2f} ml of the Klotz prediction. "
+                      f"The parameters are in {current}")
+                break
+            if state.stagnated:
+                print(f"stagnated: no parameter moved by more than {STAGNATION_TOLERANCE:g}, with the "
+                      f"unloaded volume still {state.unloaded:.2f} ml from the Klotz prediction. "
+                      f"The parameters are in {current}")
+                break
+            for key, value in scaled_parameters(root, blocks, stiffness, exponents, scalings).items():
+                set_parameter(root, key, format(value, PARAMETER_FORMAT))
+        else:
+            raise SystemExit(f"the loop reached its cap of {arguments.iterations} outer iterations "
+                             f"without converging; the parameters of the last one are in {current}")
+
+    finally:
+        # Every ending names the outputs, the failures among them: an iteration that ran left its
+        # record, its figure and its recovered configuration behind whatever stopped the loop.
+        if rows:
+            print(f"the recovered unloaded configuration is {work / UNLOADED_NAME}, the iterations "
+                  f"are recorded in {work / ITERATIONS_CSV} and plotted in {work / FIGURE_NAME}")
 
 
 if __name__ == "__main__":
