@@ -18,11 +18,9 @@ P2P1 elements, the Usyk law, the base clamped in all directions, and a target pr
 
 ## Cost
 
-About 20 minutes per outer iteration on four ranks, and 12 iterations to reach its ending, so
-roughly 4 hours. One outer iteration is one complete recovery, which is up to six inflations of the
-ellipsoid under the cycle cap of five, so the cost per iteration tracks the number of cycles the
-inner loop needs and ranges from 7 to 25 minutes. Pass `--iterations 12`: the default cap of 10 stops this example one
-iteration short of its own ending, and reaching the cap is an error exit.
+About an hour on four ranks: five outer iterations of 7 to 14 minutes each. One outer iteration is
+one complete recovery, up to six inflations of the ellipsoid under the cycle cap of five, so the
+cost per iteration tracks the number of cycles the inner loop needs.
 
 ## Run
 
@@ -33,7 +31,7 @@ iteration short of its own ending, and reaching the cap is an error exit.
 
 # 2. the loop: recover, fit, rescale, repeat
 python3 ../../tools/python/FitMaterialParameters.py ReferenceRecovery.xml \
-    --pressure 8 --ranks 4 --iterations 12
+    --pressure 8 --ranks 4
 ```
 
 `--pressure` is the measured end-diastolic pressure in mmHg. The measured volume defaults to the
@@ -76,64 +74,43 @@ residual norm you can watch fall across the cycles of a single run.
 
 ## What the authors observed
 
-**The loop terminated on parameter stagnation, not on volume.** It took 12 outer iterations, the
-last two of them resumed from the tenth's parameters after the default cap stopped the first run,
-and the twelfth asked for a parameter change of 0.08 %, under the tenth of a percent below which the
-loop calls the fit stagnant. The
-parameters settle on
+**The loop converged in five outer iterations.** The unloaded volume ends at 66.93 ml against the
+66.65 ml the Klotz relation predicts from the measured pair: a residual of 0.27 ml, where convergence
+asks for 0.60, half a percent of the end-diastolic volume. The parameters of that last run are
 
 | | a [Pa] | bff | bss | bnn | bfs | bfn | bns |
 |---|---|---|---|---|---|---|---|
 | Usyk et al. (2002) | 880 | 8 | 6 | 3 | 12 | 3 | 3 |
-| fitted | 171 | 16.3 | 12.2 | 6.1 | 24.5 | 6.1 | 6.1 |
+| fitted | 156 | 17.1 | 12.8 | 6.4 | 25.7 | 6.4 | 6.4 |
 
-a fifth of the stiffness level at twice the exponents, with the law's anisotropy ratios preserved,
-since one factor scales the stiffness and one scales every exponent.
+a sixth of the stiffness level at a little over twice the exponents, with the law's anisotropy ratios
+preserved, since one factor scales the stiffness and one scales every exponent.
 
-The unloaded volume it converges to is 68.0 ml against the 66.65 ml the Klotz relation predicts
-from the measured pair: a residual of 1.36 ml, where convergence asks for 0.60, half a percent of
-the end-diastolic volume. That residual stopped moving at iteration 5 and did not fall again over
-the seven iterations that followed.
+| iteration | cycles | unloaded [ml] | residual [ml] | stiffness scaling | exponent scaling |
+|---|---|---|---|---|---|
+| 1 | 5 | 73.23 | 6.58 | 0.200 (clamped) | 4.714 |
+| 2 | 4 | 86.22 | 19.57 | 0.573 | 0.635 |
+| 3 | 6 | 70.60 | 3.95 | 1.866 | 0.698 |
+| 4 | 6 | 68.51 | 1.86 | 0.829 | 1.023 |
+| 5 | 6 | 66.93 | 0.27 | - | - |
 
-Two things hold it there, and the run measures both.
+The first step asks for a stiffness level five times lower than Usyk's and is clamped; together with
+the near fivefold rise of the exponents it overshoots, and the iterations after it close in on the
+Klotz prediction from alternating sides. The end-diastolic volume is within 0.02 ml of the target in
+every iteration, so the recovery lands on the target geometry and the fit sees the curve the material
+produces.
 
-**The fit is at its own fixed point.** Fitting the exponential model to the last iteration's curve
-and to the Klotz relation gives
-
-    Klotz      V0 = 66.65 ml   prefactor = 1.0077 mmHg   exponent = 2.7013
-    simulated  V0 = 68.02 ml   prefactor = 1.0095 mmHg   exponent = 2.6997
-
-The two relations have the same shape to 0.2 %; the simulated one is the empirical one scaled up by
-about 2 % in volume. The model measures a curve's dilation from its own unloaded volume, so its
-coefficients describe shape and not size, and once the shapes agree both scalings are 1 however far
-apart the two unloaded volumes are. The update rule has no term that closes an absolute offset, so
-this is where any run of it ends.
-
-**Most of the offset is the recovery's own pressure bias.** The simulated curve ends at 122.84 ml
-where the target is 120.747, the one-step lag described under Notes below. A curve pinned 1.7 % too
-large at the loaded end and matched in shape sits about 1.2 % too large at the unloaded end, which
-is 1.15 ml of the 1.36 ml residual. The rest is within the scatter of the fits. The bias is
-proportional to `Solver.TimeStep / InflationDuration`, so a tenfold smaller time step would remove
-most of what separates this run from its convergence criterion, at ten times the cost per
-iteration.
-
-A base clamped in all directions carries load and limits how far the cavity can shrink, which is
-the reason to expect a residual of this kind on this geometry. On the numbers above it is not the
-leading term; the pressure bias is.
-
-Stagnation is an outcome, not a failure: the loop exits zero and the recovered unloaded
-configuration it leaves is the deliverable either way.
+Convergence is on the unloaded volume, not on the parameters: the last iteration still asked for a
+12 % change of the stiffness level. A tighter volume tolerance moves the parameters further; the
+update rule's own fixed point, where the simulated relation has the shape of the Klotz one, is the
+loop's other ending, stagnation, which also exits zero and reports the unloaded-volume residual it
+leaves.
 
 ## Notes
 
-The exported node file and the residual are one solver step behind the volume the plugin reports:
-the residual is computed on the configuration at the *start* of the step, while the volume is read
-off the freshly displaced one. In every cycle after the first the ramp's last step is the finishing
-one, so the recovered reference is the one whose 90 %-of-target-pressure configuration matches the
-target - a 10 % pressure bias, exactly one step of the ramp, `Solver.TimeStep / InflationDuration`.
-It shrinks with the time step. The end-diastolic volume of the last inflation therefore overshoots
-the target by about that much, which is why the loop's convergence criterion is the unloaded-volume
-residual alone and the end-diastolic residual is reported as a sanity check on the inner loop.
+The loop's convergence criterion is the unloaded-volume residual alone. The end-diastolic residual is
+near-tautological, since the recovery drives the loaded configuration onto the target, and is
+reported as a check on the inner loop.
 
 The endocardium and the lid are declared as 6-node surfaces, **not** as the `CAVITY` type. `CAVITY`
 is registered against a 3-node triangle, and forcing flat 3-node faces on a quadratic mesh would

@@ -647,11 +647,7 @@ def main(argv=None):
                     f"and nothing is fitted to it; see {directory / LOG_NAME}")
 
             # A row of the pressure-volume record pairs the pressure a step was solved at with the
-            # volume that step produced, so the curve is fitted as it stands. What the last row does
-            # carry is the inner loop's own bias: the recovery drives its residual onto the
-            # configuration one step behind, so the end-diastolic volume overshoots the target by
-            # about one step of the ramp. That is the bias the end-diastolic residual reports and the
-            # fit cannot influence.
+            # volume that step produced, so the curve is fitted as it stands.
             simulated_fit = fit_exponential(inflation.volumes, inflation.pressures,
                                             inflation.volumes[0])
             scalings = parameter_scalings(klotz_fit, simulated_fit)
