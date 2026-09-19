@@ -221,7 +221,7 @@ The material law is read from the settings file, and the parameters of \verb|Usy
 The bulk modulus is a numerical incompressibility penalty rather than a property of the tissue and is never scaled.
 The settings file given on the command line is never written: each iteration gets its own copy under the work directory, together with its log, its plugin records and its exports.
 The run leaves there a record of every iteration as a CSV, a figure overlaying the Klotz relation with the simulated curves, and the recovered unloaded \nameref{nodeFile}, which is what the \verb|LoadUnloadedState| plugin consumes.
-A complete, runnable setup is provided in \verb|examples/ReferenceRecovery|.
+A complete, runnable setup is provided in \verb|examples/ReferenceRecovery|; it converges in five outer iterations.
 
 \begin{lstlisting}[language=bash,caption=Syntax for FitMaterialParameters.py]
 usage: FitMaterialParameters [-h] --pressure PRESSURE [--volume VOLUME]
