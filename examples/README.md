@@ -88,3 +88,21 @@ To give you an idea on expected simulation times, simulating a single heart beat
 
 > [!IMPORTANT]
 > For simulation scenarios I and III you need to deactivate the troponin C feedback formulation in the source code of the ionic models by commenting the line containing `#define TRPN` in the files [OHaraRudyParameters.h](/electrophysiology/src/CellModel/OHaraRudyParameters.h) and [CourtemancheParameters.h](/electrophysiology/src/CellModel/CourtemancheParameters.h).
+
+## ReferenceRecovery
+
+[ReferenceRecovery](./ReferenceRecovery) recovers the unloaded reference configuration of a ventricle and fits its passive material parameters to the empirical Klotz end-diastolic pressure-volume relation.
+The geometry is the benchmark ellipsoid scaled to a cavity of 120.7 ml and closed by a lid, discretized with P2P1 elements and inflated to 8 mmHg with the Usyk material.
+The mesh is generated on first use and is not committed:
+```
+cd ReferenceRecovery
+(cd ../../tests && python3 -m helpers.ellipsoid ../examples/ReferenceRecovery/tetgen \
+     --level 1 --lid --scale 3.65)
+
+python3 ../../tools/python/FitMaterialParameters.py ReferenceRecovery.xml \
+    --pressure 8 --ranks 4 --iterations 12
+```
+Each outer iteration runs the `ReferenceRecovery` plugin from the target geometry, fits an exponential pressure-volume function to the last inflation and to the Klotz relation, and scales the material parameters by the ratio of the two fits.
+It costs about 20 minutes per outer iteration on four ranks and takes 12 of them to reach its ending, so plan for roughly 4 hours.
+The run leaves the recovered unloaded configuration as a node file, a record of every iteration and a figure of the fit in its work directory.
+See the [example README](./ReferenceRecovery/README.md) for the outcome the authors observed and for the sources of the algorithm.
