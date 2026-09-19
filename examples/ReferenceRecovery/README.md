@@ -55,10 +55,20 @@ Everything lands in the work directory, `FitMaterialParameters/` by default:
   the `LoadUnloadedState` plugin consumes.
 - `iterations.csv`: one row per outer iteration, with the material parameters that row's run used,
   the scalings applied to the row below, the unloaded and end-diastolic volumes, both residuals, the
-  inner cycle count and the wall time.
+  inner cycle count, the wall time and the number of corrupt-element reports the run printed.
 - `PressureVolume.png`: the Klotz relation, its exponential fit, and each iteration's simulated
   pressure-volume curve.
-- `iteration_NN/`: each run's settings file, log, plugin records and exported VTUs.
+- `iteration_NN/`: each run's settings file, log, plugin records and exported VTUs, and
+  `CardioMechanics.out`, everything the run printed.
+
+The solver's output goes to `CardioMechanics.out` rather than to the terminal, which carries the
+loop's own lines and a single progress line of the run in flight.
+
+A non-zero corrupt-element count, printed with each iteration's summary, is the Newton line search
+meeting an inverted element, `det F <= 0` at a quadrature point, and cutting the step back. The run
+recovers from it and the iteration's numbers stand. It says the fit asked for more than the geometry
+takes: parameters scaled far enough that a full Newton step inverts elements. The reports themselves,
+one per element, rank and evaluation, are in `CardioMechanics.out` and in no log.
 
 The plugin's own records are under `iteration_NN/ReferenceRecovery/`: `PressureVolumeInfo.dat` holds
 the pressure and volume of every step, and `CycleInfo.dat` summarizes each fixed-point cycle, whose

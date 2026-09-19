@@ -29,8 +29,8 @@ CardioMechanics with the `ReferenceRecovery` plugin from the target geometry, fi
 model to the pressure-volume curve of the last inflation and to the Klotz relation, and scales the
 material parameters by the ratio of the two fits. Only the parameters carry forward. The loop ends on
 convergence or on parameter stagnation, and fails - with a non-zero exit status and the path of the
-log - on a run that did not finish, on a recovery that did not reach the target configuration, and on
-the iteration cap.
+run's output or log - on a run that did not finish, on a recovery that did not reach the target
+configuration, and on the iteration cap.
 
 Every run leaves in its work directory a record of each outer iteration, a figure overlaying the
 Klotz relation with the simulated curves, and the recovered unloaded node file, which is the
@@ -375,6 +375,7 @@ def convergence(unloaded, klotz_unloaded, end_diastolic, measured, scalings):
 # the records read back after a run are unambiguously that run's, and nothing a long loop produces
 # lands in the tree the settings file was read from.
 LOG_NAME = "CardioMechanics.log"
+OUTPUT_NAME = "CardioMechanics.out"
 RECOVERY_DIR = "ReferenceRecovery"
 EXPORT_DIR = "Export"
 # Enough digits that a scaling of the size the loop applies is visible in the written settings file,
@@ -437,11 +438,11 @@ FIGURE_NAME = "PressureVolume.png"
 UNLOADED_NAME = "UnloadedState.node"
 
 
-def iteration_row(iteration, parameters, inflation, state, scalings, walltime):
+def iteration_row(iteration, parameters, inflation, state, scalings, walltime, corrupt):
     """One row of the iteration record: the volumes and residuals the run produced, the wall time it
-    took and the material parameters it was given. What the fit asks for next is named for the
-    iteration it applies to rather than the one that produced it, so that a reader of the record is
-    not left to infer which side of a scaling a row stands on."""
+    took, the corrupt-element reports it printed and the material parameters it was given. What the
+    fit asks for next is named for the iteration it applies to rather than the one that produced it,
+    so that a reader of the record is not left to infer which side of a scaling a row stands on."""
     return {"iteration": iteration, "cycles": inflation.cycles,
             "residual_m": inflation.residual_norm, "unloaded_ml": inflation.volumes[0],
             "end_diastolic_ml": inflation.volumes[-1], "unloaded_residual_ml": state.unloaded,
@@ -449,7 +450,7 @@ def iteration_row(iteration, parameters, inflation, state, scalings, walltime):
             "next_stiffness_scaling": scalings.stiffness,
             "next_exponent_scaling": scalings.exponent,
             "next_parameter_move": state.stagnation, "next_clamped": " ".join(scalings.clamped),
-            "walltime_s": walltime, **parameters}
+            "walltime_s": walltime, "corrupt_reports": corrupt, **parameters}
 
 
 def write_iterations(path, rows):
@@ -499,16 +500,56 @@ def recovered_node_file(records):
     return files[-1]
 
 
-def run_cardiomechanics(binary, settings, directory, ranks, log):
+# The solver's runtime estimate, and the report a solid element makes from whichever rank holds it
+# when the material law finds det F <= 0 at a quadrature point. Neither is anchored at the start of
+# the line, so a launcher that prefixes each line with its rank does not hide them.
+PROGRESS_LINE = re.compile(r"([-+.\deE]+)% done !!.*Estimated remaining time: (\d+:\d\d:\d\d)")
+CORRUPT_REPORT = re.compile(r"Element with index \d+ is corrupt\.")
+
+
+def follow_output(lines, record, show):
+    """Write every line of a run's output `lines` to `record`, pass the solver's progress to `show`
+    as a short text, and return the number of corrupt-element reports among the lines.
+
+    Each report is the line search meeting an inverted element and cutting the step back. The run
+    recovers from them, so they end nothing, but a count of them tells a fit that asked for more
+    than the geometry takes apart from one that did not."""
+    corrupt = 0
+    for line in lines:
+        record.write(line)
+        progress = PROGRESS_LINE.search(line)
+        if progress:
+            show(f"{float(progress[1]):.0f}% done, {progress[2]} remaining")
+        corrupt += len(CORRUPT_REPORT.findall(line))
+    return corrupt
+
+
+def run_cardiomechanics(binary, settings, directory, ranks, output):
     """Run `binary` on the settings file `settings` from the working directory `directory`, on
-    `ranks` ranks. Raises SystemExit naming `log` when the run fails, so that a diverged forward solve
-    is debugged from its own log rather than read as a fit. The run's output is left on the terminal:
-    an iteration takes minutes, and the user is watching it."""
+    `ranks` ranks, and return the number of corrupt-element reports it printed. Raises SystemExit
+    naming `output` when the run fails, so that a diverged forward solve is debugged from what it
+    printed rather than read as a fit.
+
+    The run's standard output goes to `output` rather than to the terminal, where the thousands of
+    lines of an iteration would scroll the loop's own lines away within seconds. The file is a
+    superset of the solver's log: it also carries the per-rank corrupt-element reports, which reach
+    no log. The terminal keeps a single line of the solver's progress, redrawn in place, so a run in
+    flight can be told from a hung one; it is cleared when the run ends. The standard error is left
+    on the terminal, since what reaches it is an error of the solver or of the launcher."""
     command = (["mpirun", "-np", str(ranks)] if ranks > 1 else []) + \
         [str(binary), "-settings", str(settings)]
-    code = subprocess.run(command, cwd=str(directory)).returncode
-    if code:
-        raise SystemExit(f"CardioMechanics exited {code}; its log is {log}")
+    label = Path(output).parent.name
+
+    def show(progress):
+        print(f"\r{label}: {progress}\x1b[K", end="", flush=True)
+
+    with open(output, "w") as record, subprocess.Popen(
+            command, cwd=str(directory), stdout=subprocess.PIPE, text=True) as run:
+        corrupt = follow_output(run.stdout, record, show)
+    print("\r\x1b[K", end="", flush=True)
+    if run.returncode:
+        raise SystemExit(f"CardioMechanics exited {run.returncode}; its output is {output}")
+    return corrupt
 
 
 def parse_arguments(argv=None):
@@ -583,8 +624,8 @@ def main(argv=None):
             current = directory / settings.name
             write_settings(retarget_outputs(root, directory), current)
             started = time.perf_counter()
-            run_cardiomechanics(arguments.binary, current, settings.parent, arguments.ranks,
-                                directory / LOG_NAME)
+            corrupt = run_cardiomechanics(arguments.binary, current, settings.parent,
+                                          arguments.ranks, directory / OUTPUT_NAME)
             walltime = time.perf_counter() - started
 
             records = directory / RECOVERY_DIR
@@ -609,7 +650,8 @@ def main(argv=None):
             state = convergence(inflation.volumes[0], klotz_unloaded, inflation.volumes[-1], measured,
                                 scalings)
             parameters = {key: float(get_parameter(root, key)) for key in keys}
-            rows.append(iteration_row(iteration, parameters, inflation, state, scalings, walltime))
+            rows.append(iteration_row(iteration, parameters, inflation, state, scalings, walltime,
+                                      corrupt))
             inflations.append(inflation)
             write_iterations(work / ITERATIONS_CSV, rows)
             plot_curves(work / FIGURE_NAME, klotz, klotz_fit, inflations)
@@ -619,7 +661,7 @@ def main(argv=None):
                   f"{inflation.residual_norm:.3e} m, unloaded {inflation.volumes[0]:.2f} ml "
                   f"(residual {state.unloaded:.2f} ml), end-diastolic {inflation.volumes[-1]:.2f} ml "
                   f"(residual {state.end_diastolic:.2f} ml), stiffness x{scalings.stiffness:.3f}, "
-                  f"exponents x{scalings.exponent:.3f}")
+                  f"exponents x{scalings.exponent:.3f}, {corrupt} corrupt-element reports")
             if scalings.clamped:
                 print(f"  the {' and '.join(scalings.clamped)} scaling the fit asked for was outside "
                       f"{SCALING_BOUNDS} and was clamped")
