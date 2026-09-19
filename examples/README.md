@@ -100,9 +100,9 @@ cd ReferenceRecovery
      --level 1 --lid --scale 3.65)
 
 python3 ../../tools/python/FitMaterialParameters.py ReferenceRecovery.xml \
-    --pressure 8 --ranks 4 --iterations 12
+    --pressure 8 --ranks 4
 ```
 Each outer iteration runs the `ReferenceRecovery` plugin from the target geometry, fits an exponential pressure-volume function to the last inflation and to the Klotz relation, and scales the material parameters by the ratio of the two fits.
-It costs about 20 minutes per outer iteration on four ranks and takes 12 of them to reach its ending, so plan for roughly 4 hours.
+It converges in five outer iterations of 5 to 9 minutes each on four ranks, about forty minutes in all.
 The run leaves the recovered unloaded configuration as a node file, a record of every iteration and a figure of the fit in its work directory.
 See the [example README](./ReferenceRecovery/README.md) for the outcome the authors observed and for the sources of the algorithm.

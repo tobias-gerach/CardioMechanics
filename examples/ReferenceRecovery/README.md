@@ -18,9 +18,35 @@ P2P1 elements, the Usyk law, the base clamped in all directions, and a target pr
 
 ## Cost
 
-About an hour on four ranks: five outer iterations of 7 to 14 minutes each. One outer iteration is
-one complete recovery, up to six inflations of the ellipsoid under the cycle cap of five, so the
-cost per iteration tracks the number of cycles the inner loop needs.
+About forty minutes on four ranks: five outer iterations of 5 to 9 minutes each. One outer
+iteration is one complete recovery, up to six inflations of the ellipsoid under the cycle cap of
+five, so the cost per iteration tracks the number of cycles the inner loop needs.
+
+That number is set by the plugin's `Tolerance`, the infinity norm of the nodal residual the recovery
+stops at. The settings file puts it at 3e-4 m, where it serves the loop: a recovery at 1e-4 m takes
+up to six cycles where this one takes four, and ends at an unloaded volume 0.08 ml away, an eighth
+of the loop's volume tolerance. The same run at 1e-4 m took 57 minutes and arrived at the same
+parameters. The tolerance is also the accuracy of the deliverable, 0.3 mm on a ventricle 91 mm
+long, and the recovered configuration inflates to within 0.3 ml of the target volume rather than
+the 0.02 ml of a recovery at 1e-4 m. A reader who needs it tighter lowers `Tolerance` in the last
+iteration's settings file and runs that file once more, about 14 minutes at 1e-4 m:
+
+```sh
+mpirun -np 4 CardioMechanics -settings FitMaterialParameters/iteration_05/ReferenceRecovery.xml
+```
+
+The run overwrites that iteration's records, and the tighter configuration is
+`iteration_05/ReferenceRecovery/UnloadedState_Incr1.node`; the work directory's
+`UnloadedState.node` stays the loop's.
+
+The loop's own stopping rules are command-line options, since a different geometry or measurement
+is a different judgement: `--volume-tolerance`, the unloaded-volume residual it converges at as a
+fraction of the measured volume (default 0.005, 0.60 ml here); `--stagnation-tolerance`, the
+largest parameter move at which it has stagnated (default 0.01); and `--scaling-bounds`, the
+interval each iteration's scalings are clamped to (default 0.2 to 5). The example converges on the
+volume and does not reach the stagnation ending. Near the fixed point the parameter move roughly
+halves with each iteration; on a run the volume tolerance could not end, a threshold of 0.01 rather
+than 0.001 would have saved three iterations that moved the unloaded volume by 0.03 ml.
 
 ## Run
 
@@ -74,8 +100,8 @@ residual norm you can watch fall across the cycles of a single run.
 
 ## What the authors observed
 
-**The loop converged in five outer iterations.** The unloaded volume ends at 66.93 ml against the
-66.65 ml the Klotz relation predicts from the measured pair: a residual of 0.27 ml, where convergence
+**The loop converged in five outer iterations.** The unloaded volume ends at 66.86 ml against the
+66.65 ml the Klotz relation predicts from the measured pair: a residual of 0.21 ml, where convergence
 asks for 0.60, half a percent of the end-diastolic volume. The parameters of that last run are
 
 | | a [Pa] | bff | bss | bnn | bfs | bfn | bns |
@@ -88,15 +114,15 @@ preserved, since one factor scales the stiffness and one scales every exponent.
 
 | iteration | cycles | unloaded [ml] | residual [ml] | stiffness scaling | exponent scaling |
 |---|---|---|---|---|---|
-| 1 | 5 | 73.23 | 6.58 | 0.200 (clamped) | 4.714 |
-| 2 | 4 | 86.22 | 19.57 | 0.573 | 0.635 |
-| 3 | 6 | 70.60 | 3.95 | 1.866 | 0.698 |
-| 4 | 6 | 68.51 | 1.86 | 0.829 | 1.023 |
-| 5 | 6 | 66.93 | 0.27 | - | - |
+| 1 | 4 | 73.16 | 6.51 | 0.200 (clamped) | 4.713 |
+| 2 | 3 | 86.01 | 19.35 | 0.573 | 0.636 |
+| 3 | 4 | 70.56 | 3.91 | 1.867 | 0.698 |
+| 4 | 4 | 68.46 | 1.81 | 0.829 | 1.023 |
+| 5 | 4 | 66.86 | 0.21 | - | - |
 
 The first step asks for a stiffness level five times lower than Usyk's and is clamped; together with
 the near fivefold rise of the exponents it overshoots, and the iterations after it close in on the
-Klotz prediction from alternating sides. The end-diastolic volume is within 0.02 ml of the target in
+Klotz prediction from alternating sides. The end-diastolic volume is within 0.3 ml of the target in
 every iteration, so the recovery lands on the target geometry and the fit sees the curve the material
 produces.
 
