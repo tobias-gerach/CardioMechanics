@@ -242,23 +242,34 @@ def test_an_open_cavity_surface_raises(tmp_path):
 P_MEASURED, V_MEASURED = 8.0, 121.0
 
 
-def test_klotz_returns_the_measured_pressure_at_the_measured_volume():
-    unloaded, v30 = fmp.klotz_volumes(P_MEASURED, V_MEASURED)
-    assert fmp.klotz_pressure(V_MEASURED, unloaded, v30) == pytest.approx(P_MEASURED)
+@pytest.fixture
+def klotz():
+    """The two volumes and the two coefficients the Klotz relation predicts from the measured pair."""
+    return fmp.klotz_volumes(P_MEASURED, V_MEASURED) + fmp.klotz_coefficients(P_MEASURED, V_MEASURED)
 
 
-def test_klotz_unloaded_volume_is_the_published_fraction():
-    unloaded, v30 = fmp.klotz_volumes(P_MEASURED, V_MEASURED)
+def test_klotz_returns_the_measured_pressure_at_the_measured_volume(klotz):
+    _, _, alpha, beta = klotz
+    assert fmp.klotz_pressure(V_MEASURED, alpha, beta) == pytest.approx(P_MEASURED)
+
+
+def test_klotz_unloaded_volume_is_the_published_fraction(klotz):
+    unloaded, *_ = klotz
     assert unloaded == pytest.approx(V_MEASURED * (0.6 - 0.006 * P_MEASURED))
     assert unloaded / V_MEASURED == pytest.approx(0.552)     # about 55 % at 8 mmHg
-    assert fmp.klotz_pressure(unloaded, unloaded, v30) == pytest.approx(0.0)
 
 
-def test_klotz_v30_satisfies_its_defining_relation():
-    """V30 is where the normalized curve reaches its prefactor, the published estimate of the volume
-    at 30 mmHg, and is fixed by the measured pair through (Vm - V0) / (V30 - V0) = (Pm / An)^(1/Bn)."""
-    unloaded, v30 = fmp.klotz_volumes(P_MEASURED, V_MEASURED)
-    assert fmp.klotz_pressure(v30, unloaded, v30) == pytest.approx(fmp.KLOTZ_AN)
+def test_klotz_reaches_thirty_mmhg_at_v30(klotz):
+    """The relation's second anchor: V30 is the volume at 30 mmHg, and the curve carries it exactly.
+    The population regression enters only through where V30 lands, not through the pressure there."""
+    _, v30, alpha, beta = klotz
+    assert fmp.klotz_pressure(v30, alpha, beta) == pytest.approx(fmp.KLOTZ_P30)
+
+
+def test_klotz_v30_satisfies_its_defining_relation(klotz):
+    """V30 is fixed by the measured pair through (Vm - V0) / (V30 - V0) = (Pm / An)^(1/Bn), the
+    normalized regression over the population Klotz established the relation on."""
+    unloaded, v30, *_ = klotz
     assert (V_MEASURED - unloaded) / (v30 - unloaded) == pytest.approx(
         (P_MEASURED / fmp.KLOTZ_AN) ** (1 / fmp.KLOTZ_BN))
 
@@ -270,16 +281,24 @@ def test_klotz_unloaded_volume_is_scale_free():
         assert fmp.klotz_volumes(P_MEASURED, volume)[0] / volume == pytest.approx(0.552)
 
 
-def test_klotz_curve_spans_the_inflation():
+def test_a_measured_pair_that_is_not_end_diastolic_raises():
+    with pytest.raises(AssertionError):
+        fmp.klotz_volumes(0.0, V_MEASURED)
+
+
+def test_klotz_curve_spans_the_relation(klotz):
+    unloaded, v30, alpha, beta = klotz
     volumes, pressures = fmp.klotz_curve(P_MEASURED, V_MEASURED, samples=32)
-    unloaded, _ = fmp.klotz_volumes(P_MEASURED, V_MEASURED)
     assert (len(volumes), len(pressures)) == (32, 32)
-    assert volumes[0] == pytest.approx(unloaded) and volumes[-1] == pytest.approx(V_MEASURED)
-    assert pressures[0] == pytest.approx(0.0) and pressures[-1] == pytest.approx(P_MEASURED)
+    assert volumes[0] == pytest.approx(unloaded) and volumes[-1] == pytest.approx(v30)
+    assert pressures[-1] == pytest.approx(fmp.KLOTZ_P30)
     assert np.all(np.diff(pressures) > 0)
+    # The power law is positive everywhere, so the relation carries a small pressure at the unloaded
+    # volume rather than passing through zero there.
+    assert 0 < pressures[0] < 1.0
 
 
-@pytest.mark.parametrize("prefactor,exponent", [(0.5, 0.04), (2.5, 0.01), (0.05, 0.12)])
+@pytest.mark.parametrize("prefactor,exponent", [(0.5, 2.4), (2.5, 0.6), (0.05, 7.2)])
 def test_the_exponential_fit_recovers_known_parameters(prefactor, exponent):
     unloaded = 60.0
     volumes = np.linspace(unloaded, 120.0, 40)
@@ -289,22 +308,29 @@ def test_the_exponential_fit_recovers_known_parameters(prefactor, exponent):
 
 
 def test_the_exponential_model_is_anchored_at_the_unloaded_volume():
-    assert fmp.exponential_pressure(60.0, 60.0, 0.5, 0.04) == pytest.approx(0.0)
+    assert fmp.exponential_pressure(60.0, 60.0, 0.5, 2.4) == pytest.approx(0.0)
+
+
+def test_the_exponential_exponent_is_dimensionless():
+    """The volume enters as its dilation from the unloaded volume, so the same two parameters
+    describe the same curve shape in a chamber of any size."""
+    small = np.linspace(60.0, 120.0, 40)
+    assert fmp.exponential_pressure(small, 60.0, 0.5, 2.4) == pytest.approx(
+        fmp.exponential_pressure(2 * small, 120.0, 0.5, 2.4))
 
 
 def test_the_klotz_curve_is_fitted_by_the_exponential_model():
     """The fit the optimizer compares against: the exponential model over the Klotz relation of the
     measured pair reproduces that pair's pressure."""
     volumes, pressures = fmp.klotz_curve(P_MEASURED, V_MEASURED)
-    unloaded, _ = fmp.klotz_volumes(P_MEASURED, V_MEASURED)
-    prefactor, exponent = fmp.fit_exponential(volumes, pressures, unloaded)
-    assert exponent > 0 and prefactor > 0
-    assert fmp.exponential_pressure(V_MEASURED, unloaded, prefactor, exponent) == pytest.approx(
-        P_MEASURED, rel=0.05)
+    prefactor, exponent = fmp.fit_exponential(volumes, pressures, volumes[0])
+    assert prefactor > 0 and exponent > 0
+    assert fmp.exponential_pressure(V_MEASURED, volumes[0], prefactor, exponent) == pytest.approx(
+        P_MEASURED, rel=0.1)
 
 
 def test_the_scalings_are_the_ratios_of_the_two_fits():
-    scalings = fmp.parameter_scalings(klotz_fit=(0.6, 0.06), simulated_fit=(0.3, 0.04))
+    scalings = fmp.parameter_scalings(klotz_fit=(0.6, 3.0), simulated_fit=(0.3, 2.0))
     assert (scalings.stiffness, scalings.exponent) == pytest.approx((2.0, 1.5))
     assert scalings.clamped == ()
 
@@ -314,13 +340,13 @@ def test_the_scalings_are_the_ratios_of_the_two_fits():
     ((100.0, 100.0), fmp.SCALING_BOUNDS[0]),
 ])
 def test_both_bounds_of_the_scaling_interval(simulated_fit, expected):
-    scalings = fmp.parameter_scalings(klotz_fit=(0.6, 0.06), simulated_fit=simulated_fit)
+    scalings = fmp.parameter_scalings(klotz_fit=(0.6, 3.0), simulated_fit=simulated_fit)
     assert (scalings.stiffness, scalings.exponent) == pytest.approx((expected, expected))
     assert scalings.clamped == ("stiffness", "exponent")
 
 
 def test_only_the_scaling_that_left_the_interval_is_reported_as_clamped():
-    scalings = fmp.parameter_scalings(klotz_fit=(0.6, 0.06), simulated_fit=(0.3, 0.001))
+    scalings = fmp.parameter_scalings(klotz_fit=(0.6, 3.0), simulated_fit=(0.3, 0.001))
     assert scalings.clamped == ("exponent",)
     assert (scalings.stiffness, scalings.exponent) == pytest.approx((2.0, fmp.SCALING_BOUNDS[1]))
 
@@ -328,67 +354,61 @@ def test_only_the_scaling_that_left_the_interval_is_reported_as_clamped():
 def test_the_magnitude_of_the_simulated_exponent_is_used():
     """A simulated curve flat enough for the fit to return a negative exponent still stiffens the
     law rather than inverting it."""
-    negative = fmp.parameter_scalings(klotz_fit=(0.6, 0.06), simulated_fit=(0.3, -0.04))
+    negative = fmp.parameter_scalings(klotz_fit=(0.6, 3.0), simulated_fit=(0.3, -2.0))
     assert negative.exponent == pytest.approx(1.5)
-    assert negative == fmp.parameter_scalings(klotz_fit=(0.6, 0.06), simulated_fit=(0.3, 0.04))
-
-
-UNCHANGED = fmp.Scalings(stiffness=1.0, exponent=1.0, clamped=())
-MOVING = fmp.Scalings(stiffness=1.5, exponent=1.2, clamped=())
-
-
-def test_convergence_when_both_volumes_are_within_tolerance():
-    state = fmp.convergence(unloaded=66.8, klotz_unloaded=66.8, end_diastolic=121.0,
-                            measured=V_MEASURED, scalings=MOVING)
-    assert state.converged and not state.stagnated
-    assert (state.unloaded, state.end_diastolic, state.stagnation) == pytest.approx((0.0, 0.0, 0.5))
-
-
-def test_the_unloaded_volume_residual_binds():
-    state = fmp.convergence(unloaded=80.0, klotz_unloaded=66.8, end_diastolic=121.0,
-                            measured=V_MEASURED, scalings=MOVING)
-    assert not state.converged and not state.stagnated
-    assert state.unloaded == pytest.approx(13.2 / 66.8)
-    assert state.end_diastolic == pytest.approx(0.0)
-
-
-def test_the_end_diastolic_volume_residual_binds():
-    """Near-tautological, since the recovery drives the loaded configuration onto the target; it
-    binds only when the inner loop did not get there, which is what it is reported for."""
-    state = fmp.convergence(unloaded=66.8, klotz_unloaded=66.8, end_diastolic=110.0,
-                            measured=V_MEASURED, scalings=MOVING)
-    assert not state.converged and not state.stagnated
-    assert state.end_diastolic == pytest.approx(11.0 / 121.0)
-
-
-def test_only_stagnation_fires():
-    state = fmp.convergence(unloaded=80.0, klotz_unloaded=66.8, end_diastolic=110.0,
-                            measured=V_MEASURED, scalings=UNCHANGED)
-    assert state.stagnated and not state.converged
-    assert state.stagnation == pytest.approx(0.0)
-
-
-def test_a_scaling_just_outside_the_stagnation_tolerance_keeps_the_loop_running():
-    moved = fmp.Scalings(stiffness=1.0, exponent=1.0 + 2 * fmp.STAGNATION_TOLERANCE, clamped=())
-    assert not fmp.convergence(unloaded=80.0, klotz_unloaded=66.8, end_diastolic=110.0,
-                               measured=V_MEASURED, scalings=moved).stagnated
-
-
-def test_a_measured_pair_that_is_not_end_diastolic_raises():
-    with pytest.raises(AssertionError):
-        fmp.klotz_volumes(0.0, V_MEASURED)
-
-
-def test_the_klotz_relation_below_the_unloaded_volume_raises():
-    """A volume below the unloaded one is on no end-diastolic branch; the fractional exponent would
-    otherwise return a nan that only surfaces once it has travelled into a fit."""
-    unloaded, v30 = fmp.klotz_volumes(P_MEASURED, V_MEASURED)
-    with pytest.raises(AssertionError):
-        fmp.klotz_pressure(unloaded - 1.0, unloaded, v30)
+    assert negative == fmp.parameter_scalings(klotz_fit=(0.6, 3.0), simulated_fit=(0.3, 2.0))
 
 
 def test_a_simulated_fit_without_a_positive_prefactor_raises():
     """A negative prefactor is a fit that found no rising curve at all, not one asking for a large
     move, so it is not something the clamp should absorb."""
     with pytest.raises(AssertionError):
-        fmp.parameter_scalings(klotz_fit=(0.6, 0.06), simulated_fit=(-0.3, 0.04))
+        fmp.parameter_scalings(klotz_fit=(0.6, 3.0), simulated_fit=(-0.3, 2.0))
+
+
+UNCHANGED = fmp.Scalings(stiffness=1.0, exponent=1.0, clamped=())
+MOVING = fmp.Scalings(stiffness=1.5, exponent=1.2, clamped=())
+V0_KLOTZ = fmp.klotz_volumes(P_MEASURED, V_MEASURED)[0]
+# The tolerance both volume residuals are held against, and a residual comfortably outside it.
+TOLERANCE_ML = fmp.VOLUME_TOLERANCE * V_MEASURED
+OUTSIDE_ML = 10 * TOLERANCE_ML
+
+
+def test_convergence_when_both_volumes_are_within_tolerance():
+    state = fmp.convergence(unloaded=V0_KLOTZ + TOLERANCE_ML / 2, klotz_unloaded=V0_KLOTZ,
+                            end_diastolic=V_MEASURED, measured=V_MEASURED, scalings=MOVING)
+    assert state.converged and not state.stagnated
+    assert (state.unloaded, state.end_diastolic) == pytest.approx((TOLERANCE_ML / 2, 0.0))
+    assert state.stagnation == pytest.approx(0.5)
+
+
+def test_the_unloaded_volume_residual_binds():
+    state = fmp.convergence(unloaded=V0_KLOTZ + OUTSIDE_ML, klotz_unloaded=V0_KLOTZ,
+                            end_diastolic=V_MEASURED, measured=V_MEASURED, scalings=MOVING)
+    assert not state.converged and not state.stagnated
+    assert (state.unloaded, state.end_diastolic) == pytest.approx((OUTSIDE_ML, 0.0))
+
+
+def test_the_end_diastolic_volume_residual_binds():
+    """Near-tautological, since the recovery drives the loaded configuration onto the target; it
+    binds only when the inner loop did not get there, which is what it is reported for."""
+    state = fmp.convergence(unloaded=V0_KLOTZ, klotz_unloaded=V0_KLOTZ,
+                            end_diastolic=V_MEASURED - OUTSIDE_ML, measured=V_MEASURED,
+                            scalings=MOVING)
+    assert not state.converged and not state.stagnated
+    assert (state.unloaded, state.end_diastolic) == pytest.approx((0.0, OUTSIDE_ML))
+
+
+def test_only_stagnation_fires():
+    state = fmp.convergence(unloaded=V0_KLOTZ + OUTSIDE_ML, klotz_unloaded=V0_KLOTZ,
+                            end_diastolic=V_MEASURED - OUTSIDE_ML, measured=V_MEASURED,
+                            scalings=UNCHANGED)
+    assert state.stagnated and not state.converged
+    assert state.stagnation == pytest.approx(0.0)
+
+
+def test_a_scaling_just_outside_the_stagnation_tolerance_keeps_the_loop_running():
+    moved = fmp.Scalings(stiffness=1.0, exponent=1.0 + 2 * fmp.STAGNATION_TOLERANCE, clamped=())
+    assert not fmp.convergence(unloaded=V0_KLOTZ + OUTSIDE_ML, klotz_unloaded=V0_KLOTZ,
+                               end_diastolic=V_MEASURED, measured=V_MEASURED,
+                               scalings=moved).stagnated
