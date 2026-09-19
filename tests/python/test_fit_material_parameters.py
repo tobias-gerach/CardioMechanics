@@ -6,8 +6,9 @@ mesh the settings file names - and the decisions it then makes: the Klotz end-di
 pressure-volume relation, the exponential fit, the parameter scalings and where the loop stands.
 
 No binary, no mesh generation, no gmsh: the meshes here are written by hand, the only geometry with a
-volume to check is one whose volume is known in closed form, and the arithmetic is checked against
-published anchors and against curves generated from known parameters.
+volume to check is one whose volume is known in closed form, the arithmetic is checked against
+published anchors and against curves generated from known parameters, and the records the recovery
+plugin writes are built by hand rather than run.
 """
 import numpy as np
 import pytest
@@ -412,3 +413,98 @@ def test_a_scaling_just_outside_the_stagnation_tolerance_keeps_the_loop_running(
     assert not fmp.convergence(unloaded=V0_KLOTZ + OUTSIDE_ML, klotz_unloaded=V0_KLOTZ,
                                end_diastolic=V_MEASURED, measured=V_MEASURED,
                                scalings=moved).stagnated
+
+
+# Synthetic plugin output, built row by row as the plugin writes it rather than copied from a run, so
+# the expected curve is known: inner cycle c inflates the configuration of volume UNLOADED_ML[c] to
+# TARGET_PA over STEPS time steps of DT, the volume growing linearly with the pressure. The rows carry
+# the six significant digits the plugin writes, which is the accuracy the expected volumes are held
+# to. The first cycle carries the target pressure twice: its ramp ends one time step before the cycle
+# does, so the plugin writes a row finishing the inflation, while every later cycle starts its ramp at
+# the previous cycle's boundary and reaches the target exactly at its own.
+TARGET_PA, DT, STEPS = 1066.58, 0.01, 10
+UNLOADED_ML = [120.0, 64.0, 74.0, 75.3]
+COMPLIANCE = 0.08                                        # ml per pascal, a rising curve per cycle
+
+
+def plugin_records(cycles, surface=1, trailing=0):
+    """The pressure-volume and cycle records the plugin would write for the first `cycles` entries of
+    UNLOADED_ML, plus `trailing` rows of an inflation that was cut off before its cycle finished."""
+    pv = [f"Time    Pressure{surface}    Volume{surface}", f"0    0    {UNLOADED_ML[0]}"]
+    info = ["Cycle    Increment    Time    ResidualNorm    ResidualNormL2"
+            f"    UnloadedVolume{surface}    CurrentPressure{surface}"]
+    time = 0.0
+    for cycle in range(cycles + (trailing > 0)):
+        start, steps = time, STEPS if cycle < cycles else trailing
+        # The cut-off inflation reuses the last configuration; which one it inflates does not matter.
+        unloaded = UNLOADED_ML[min(cycle, len(UNLOADED_ML) - 1)]
+        for step in range(1, steps + 1):
+            pressure = step * TARGET_PA / STEPS
+            time = start + step * DT
+            pv.append(f"{time:g}    {pressure:g}    {unloaded + COMPLIANCE * pressure:g}")
+        if cycle < cycles:
+            if cycle == 0:
+                time += DT
+                pv.append(f"{time:g}    {' '.join(pv[-1].split()[1:])}")
+            info.append(f"{cycle}    1    {time:g}    {1e-2 / 4**cycle:g}    1    "
+                        f"{unloaded}    {TARGET_PA}")
+    return "\n".join(pv) + "\n", "\n".join(info) + "\n"
+
+
+def same_inflation(one, other):
+    return (one.volumes == pytest.approx(other.volumes)
+            and one.pressures == pytest.approx(other.pressures)
+            and (one.residual_norm, one.cycles) == (other.residual_norm, other.cycles))
+
+
+def test_the_last_of_several_inflations_is_returned():
+    inflation = fmp.last_inflation(*plugin_records(cycles=4))
+    assert len(inflation.volumes) == STEPS
+    assert inflation.volumes[-1] == pytest.approx(UNLOADED_ML[3] + COMPLIANCE * TARGET_PA, rel=1e-5)
+    assert inflation.pressures[-1] == pytest.approx(TARGET_PA / fmp.PASCAL_PER_MMHG)
+    assert np.all(np.diff(inflation.volumes) > 0)
+    assert inflation.cycles == 4
+
+
+def test_a_single_cycle_record_yields_that_one_inflation():
+    """The case where the material is already good enough for the inner loop to converge at once. The
+    record of the first cycle is the one that reaches the target pressure in two rows, and both are
+    returned: a pressure the run held for two time steps is a measurement, not a defect."""
+    inflation = fmp.last_inflation(*plugin_records(cycles=1))
+    assert len(inflation.volumes) == STEPS + 2
+    assert inflation.volumes[-1] == inflation.volumes[-2] == pytest.approx(
+        UNLOADED_ML[0] + COMPLIANCE * TARGET_PA, rel=1e-5)
+    assert inflation.cycles == 1
+
+
+def test_the_first_point_is_the_unloaded_volume_at_zero_pressure():
+    for cycles in (1, 4):
+        inflation = fmp.last_inflation(*plugin_records(cycles=cycles))
+        assert inflation.pressures[0] == 0.0
+        assert inflation.volumes[0] == pytest.approx(UNLOADED_ML[cycles - 1])
+
+
+def test_an_inflation_the_run_did_not_finish_is_not_returned():
+    """The boundary is the time the cycle record carries, so rows of an inflation whose cycle never
+    finished - a run that was cut off - are not fitted as though they reached the target pressure."""
+    complete = fmp.last_inflation(*plugin_records(cycles=4))
+    cut_off = fmp.last_inflation(*plugin_records(cycles=4, trailing=3))
+    assert same_inflation(cut_off, complete)
+
+
+def test_the_residual_norm_reaches_the_caller():
+    """What tells the outer loop whether the recovery arrived at the target configuration."""
+    assert fmp.last_inflation(*plugin_records(cycles=4)).residual_norm == pytest.approx(1e-2 / 4**3)
+
+
+def test_the_curve_of_a_second_cavity_is_selected_by_its_surface_index():
+    pv, info = plugin_records(cycles=2, surface=7)
+    assert same_inflation(fmp.last_inflation(pv, info, surface=7),
+                          fmp.last_inflation(*plugin_records(cycles=2)))
+    with pytest.raises(KeyError):
+        fmp.last_inflation(pv, info, surface=1)
+
+
+def test_a_record_of_no_finished_cycle_raises():
+    with pytest.raises(AssertionError):
+        fmp.last_inflation(*plugin_records(cycles=0, trailing=4))

@@ -5,8 +5,9 @@ The module holds the optimizer's inputs - the settings file it edits, the materi
 declares together with the parameters of that law which carry the stiffness level and the exponents,
 and the cavity volume of the mesh the file names - and its arithmetic: the empirical Klotz
 end-diastolic pressure-volume relation, the exponential model fitted to a pressure-volume curve, the
-parameter scalings that follow from two such fits, and where the outer loop stands. Each of those is
-a function that takes data and returns data, so the loop that drives the runs holds no decisions.
+parameter scalings that follow from two such fits, the curve that fit is taken over, cut out of the
+records the recovery plugin writes, and where the outer loop stands. Each of those is a function that
+takes data and returns data, so the loop that drives the runs holds no decisions.
 
 Volumes are in millilitres and pressures in mmHg throughout the arithmetic: the Klotz relation is
 published in those units, and mmHg is the number a clinical source reports.
@@ -169,6 +170,55 @@ def cavity_volume(nodes, surfaces, surface, unit):
     enclosed = volume(np.zeros(3))
     assert abs(volume(np.ones(3)) - enclosed) <= 1e-10, f"surface {surface} does not close"
     return enclosed
+
+
+# The plugin writes its pressures in pascal and its volumes in millilitres, while the arithmetic here
+# works in mmHg, so the records are converted on the way in.
+PASCAL_PER_MMHG = 133.322387415
+
+Inflation = namedtuple("Inflation", "volumes pressures residual_norm cycles")
+
+
+def _columns(record):
+    """The columns of a whitespace-separated record with one header line, by their header names."""
+    lines = [line for line in record.splitlines() if line.strip()]
+    names = lines[0].split() if lines else []
+    rows = np.array([[float(field) for field in line.split()] for line in lines[1:]])
+    assert len(rows), f"the record carries no data, only the header {' '.join(names)!r}"
+    assert rows.shape[1] == len(names), f"{rows.shape[1]} columns under {len(names)} header names"
+    return dict(zip(names, rows.T))
+
+
+def last_inflation(pressure_volume_record, cycle_record, surface=1):
+    """The pressure-volume curve of the last complete inflation of cavity `surface`, in volumes in ml
+    and pressures in mmHg, which is the curve the fit is taken over, together with the infinity norm
+    in metres of the nodal residual the recovery ended at - the norm the plugin's own tolerance is on,
+    so the caller can tell whether the recovery reached the target configuration - and the number of
+    inner cycles it took, which is one more than the zero-based counter the record carries.
+
+    Each inner cycle of the recovery inflates its current guess of the unloaded configuration once,
+    and the cycle record carries the time each of those inflations finished. The curve is therefore
+    cut out of the pressure-volume record by those times rather than by counting rows, so a run whose
+    inner loop converged in a single cycle needs no separate treatment, and rows of an inflation whose
+    cycle never finished - a run that was cut off - fall outside the last boundary and are dropped.
+
+    The first row of an inflation stands at the first pressure increment rather than at zero, since
+    the plugin writes a row per time step of the ramp. It is replaced by the unloaded volume the cycle
+    record carries at zero pressure, which is the configuration that inflation started from, so the
+    curve is anchored where the exponential model carries no pressure. The rows are otherwise returned
+    as they stand, including the target pressure that the first cycle alone carries twice, since a
+    repeated measurement is not a wrong one."""
+    cycles = _columns(cycle_record)
+    record = _columns(pressure_volume_record)
+    boundaries, time = cycles["Time"], record["Time"]
+    window = time <= boundaries[-1]
+    if len(boundaries) > 1:
+        window &= time > boundaries[-2]
+    volumes = record[f"Volume{surface}"][window]
+    pressures = record[f"Pressure{surface}"][window] / PASCAL_PER_MMHG
+    assert len(volumes) > 1, f"the last inflation of surface {surface} holds fewer than two rows"
+    volumes[0], pressures[0] = cycles[f"UnloadedVolume{surface}"][-1], 0.0
+    return Inflation(volumes, pressures, cycles["ResidualNorm"][-1], int(cycles["Cycle"][-1]) + 1)
 
 
 # Klotz et al. (2006), the empirical end-diastolic pressure-volume relation, in mmHg and ml. It is
