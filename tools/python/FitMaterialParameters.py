@@ -171,22 +171,24 @@ def cavity_volume(nodes, surfaces, surface, unit):
     return enclosed
 
 
-# Klotz et al. (2006), the empirical end-diastolic pressure-volume relation. From one measured pair
-# it predicts the whole relation, normalized by the unloaded volume V0 and the volume V30 at about
-# 30 mmHg: p = KLOTZ_AN * ((V - V0) / (V30 - V0)) ** KLOTZ_BN, with p in mmHg. The prefactor is the
-# pressure the normalized curve reaches at V30 and is 27.8 rather than 30 because it is a regression
-# over a population rather than a definition.
-KLOTZ_AN, KLOTZ_BN = 27.8, 2.76
-# The unloaded volume is the published affine fraction of the measured volume, in mmHg and ml.
+# Klotz et al. (2006), the empirical end-diastolic pressure-volume relation, in mmHg and ml. It is
+# built in two steps. First the measured pair fixes two volumes: the unloaded volume, a published
+# affine fraction of the measured volume, and V30, the volume at KLOTZ_P30, reached through the
+# population regression p = KLOTZ_AN * ((V - V0) / (V30 - V0)) ** KLOTZ_BN. The relation itself is
+# then the power law p = alpha * V ** beta through the two anchors (V30, KLOTZ_P30) and the measured
+# pair, so it carries the measurement exactly and the regression only as far as V30.
+KLOTZ_AN, KLOTZ_BN = 27.78, 2.76
 KLOTZ_V0_INTERCEPT, KLOTZ_V0_SLOPE = 0.6, 0.006
+KLOTZ_P30 = 30.0
 
 # Both parameter scalings are clamped to this interval. A fit that asks for more than a fivefold
 # move in one outer iteration is extrapolating far outside the pressure range it saw, and a forward
 # solve with such parameters diverges rather than informing the next iteration.
 SCALING_BOUNDS = (0.2, 5.0)
-# Convergence of the outer loop: both volume residuals are relative, and the loop has stagnated once
-# no scaling asks for a move of more than a tenth of a percent.
-VOLUME_TOLERANCE = 1e-2
+# Convergence of the outer loop: both volume residuals are held against the same half a percent of
+# the measured end-diastolic volume, and the loop has stagnated once no scaling asks for a move of
+# more than a tenth of a percent.
+VOLUME_TOLERANCE = 0.005
 STAGNATION_TOLERANCE = 1e-3
 
 Scalings = namedtuple("Scalings", "stiffness exponent clamped")
@@ -194,47 +196,54 @@ Convergence = namedtuple("Convergence", "unloaded end_diastolic stagnation conve
 
 
 def klotz_volumes(pressure, volume):
-    """The unloaded volume and the volume at about 30 mmHg, in ml, that the Klotz relation predicts
-    from the measured pair `pressure` in mmHg and `volume` in ml."""
+    """The unloaded volume and the volume at KLOTZ_P30, in ml, that the Klotz relation predicts from
+    the measured pair `pressure` in mmHg and `volume` in ml."""
     assert pressure > 0 and volume > 0, f"{pressure} mmHg in {volume} ml is not an end-diastolic pair"
     unloaded = volume * (KLOTZ_V0_INTERCEPT - KLOTZ_V0_SLOPE * pressure)
     return unloaded, unloaded + (volume - unloaded) / (pressure / KLOTZ_AN) ** (1 / KLOTZ_BN)
 
 
-def klotz_pressure(volumes, unloaded, v30):
-    """The Klotz pressure in mmHg at `volumes` in ml, given the two volumes that normalize the
-    relation. The relation is defined from the unloaded volume upwards: below it the chamber is on
-    no end-diastolic branch, and the fractional exponent would quietly return a nan that only
-    surfaces once it has travelled into a fit."""
-    normalized = (np.asarray(volumes, float) - unloaded) / (v30 - unloaded)
-    assert np.all(normalized >= 0), "the Klotz relation is asked for a volume below the unloaded one"
-    return KLOTZ_AN * normalized ** KLOTZ_BN
+def klotz_coefficients(pressure, volume):
+    """The coefficients alpha and beta of the Klotz relation p = alpha * V ** beta predicted from the
+    measured pair, with p in mmHg and V in ml. They are fixed by the two anchors the relation is
+    built on, so the curve carries the measured pair and KLOTZ_P30 at V30 exactly."""
+    v30 = klotz_volumes(pressure, volume)[1]
+    beta = np.log(pressure / KLOTZ_P30) / np.log(volume / v30)
+    return KLOTZ_P30 / v30 ** beta, beta
 
 
-def klotz_curve(pressure, volume, samples=64):
+def klotz_pressure(volumes, alpha, beta):
+    """The Klotz pressure in mmHg at `volumes` in ml, given the coefficients of the relation."""
+    return alpha * np.asarray(volumes, float) ** beta
+
+
+def klotz_curve(pressure, volume, samples=100):
     """The Klotz relation predicted from the measured pair, as volumes in ml and pressures in mmHg,
-    sampled over the range the simulated inflation covers: the unloaded to the measured volume."""
+    sampled from the unloaded volume to V30. That is the range the relation is built over, and so the
+    range the exponential model is fitted across."""
     unloaded, v30 = klotz_volumes(pressure, volume)
-    volumes = np.linspace(unloaded, volume, samples)
-    return volumes, klotz_pressure(volumes, unloaded, v30)
+    volumes = np.linspace(unloaded, v30, samples)
+    return volumes, klotz_pressure(volumes, *klotz_coefficients(pressure, volume))
 
 
 def exponential_pressure(volumes, unloaded, prefactor, exponent):
-    """The exponential pressure-volume model, in mmHg at `volumes` in ml. It is anchored at the
-    unloaded volume, where every curve the optimizer fits carries zero pressure by construction, so
-    the two parameters left describe the shape alone and are the ones the scalings compare."""
-    return prefactor * (np.exp(exponent * (np.asarray(volumes, float) - unloaded)) - 1.0)
+    """The exponential pressure-volume model, in mmHg at `volumes` in ml. The volume enters as its
+    dilation from the unloaded volume, where the model carries zero pressure, so the prefactor is a
+    pressure and the exponent is dimensionless. That is what lets the scalings compare the fits of
+    two curves that do not share a size."""
+    volumes = np.asarray(volumes, float)
+    return prefactor * (np.exp(exponent * (volumes - unloaded) / unloaded) - 1.0)
 
 
 def fit_exponential(volumes, pressures, unloaded):
-    """The prefactor in mmHg and the exponent in 1/ml of the exponential model fitted to the
+    """The prefactor in mmHg and the dimensionless exponent of the exponential model fitted to the
     pressure-volume curve (`volumes` in ml, `pressures` in mmHg) anchored at `unloaded` in ml."""
     volumes, pressures = np.asarray(volumes, float), np.asarray(pressures, float)
-    span = volumes.max() - unloaded
-    assert span > 0, "the curve reaches no volume above the unloaded one"
-    # An exponent spending one e-fold over the curve's span, and the prefactor that then carries the
-    # curve's peak pressure. Far enough from a flat start that the fit sees curvature to work on.
-    guess = (pressures.max() / np.expm1(1.0), 1.0 / span)
+    dilation = volumes.max() / unloaded - 1.0
+    assert dilation > 0, "the curve reaches no volume above the unloaded one"
+    # An exponent spending one e-fold over the curve's dilation, and the prefactor that then carries
+    # the curve's peak pressure. Far enough from a flat start that the fit sees curvature to work on.
+    guess = (pressures.max() / np.expm1(1.0), 1.0 / dilation)
     (prefactor, exponent), _ = curve_fit(
         lambda v, a, b: exponential_pressure(v, unloaded, a, b), volumes, pressures, p0=guess)
     return prefactor, exponent
@@ -270,9 +279,12 @@ def convergence(unloaded, klotz_unloaded, end_diastolic, measured, scalings):
     is near-tautological - the recovery drives the loaded configuration onto the target to within the
     plugin's own tolerance - and is reported as a sanity check on the inner loop rather than as a
     criterion the fit can influence. Stagnation is reported separately from convergence, so a run
-    that stopped moving is not mistaken for one that met its target."""
-    residuals = (abs(unloaded - klotz_unloaded) / klotz_unloaded, abs(end_diastolic - measured) / measured)
+    that stopped moving is not mistaken for one that met its target. Both volume residuals are in ml
+    and are held against one tolerance, a fraction of the measured end-diastolic volume, which is the
+    one length scale of the problem that does not move between iterations."""
+    tolerance = VOLUME_TOLERANCE * measured
+    residuals = (abs(unloaded - klotz_unloaded), abs(end_diastolic - measured))
     stagnation = max(abs(scalings.stiffness - 1.0), abs(scalings.exponent - 1.0))
     return Convergence(*residuals, stagnation,
-                       converged=all(residual <= VOLUME_TOLERANCE for residual in residuals),
+                       converged=all(residual <= tolerance for residual in residuals),
                        stagnated=stagnation <= STAGNATION_TOLERANCE)
