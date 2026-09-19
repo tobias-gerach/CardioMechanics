@@ -412,6 +412,26 @@ def test_only_stagnation_fires():
     assert state.stagnation == pytest.approx(0.0)
 
 
+def test_a_matched_shape_carries_the_end_diastolic_overshoot_to_the_unloaded_volume():
+    """The shape fixed point with a volume residual outside the tolerance: a relation of the Klotz
+    shape that is 2 % too large ends 2 % too large at both ends, and the overshoot at the loaded end
+    predicts the whole of the unloaded residual."""
+    oversize = 1.02
+    state = fmp.convergence(unloaded=oversize * V0_KLOTZ, klotz_unloaded=V0_KLOTZ,
+                            end_diastolic=oversize * V_MEASURED, measured=V_MEASURED,
+                            scalings=UNCHANGED)
+    assert state.stagnated and not state.converged
+    assert state.unloaded > TOLERANCE_ML
+    assert state.explained == pytest.approx(state.unloaded)
+
+
+def test_the_explained_offset_carries_the_sign_of_the_end_diastolic_residual():
+    state = fmp.convergence(unloaded=V0_KLOTZ, klotz_unloaded=V0_KLOTZ,
+                            end_diastolic=V_MEASURED - OUTSIDE_ML, measured=V_MEASURED,
+                            scalings=UNCHANGED)
+    assert state.explained < 0
+
+
 def test_a_scaling_just_outside_the_stagnation_tolerance_keeps_the_loop_running():
     moved = fmp.Scalings(stiffness=1.0, exponent=1.0 + 2 * fmp.STAGNATION_TOLERANCE, clamped=())
     assert not fmp.convergence(unloaded=V0_KLOTZ + OUTSIDE_ML, klotz_unloaded=V0_KLOTZ,

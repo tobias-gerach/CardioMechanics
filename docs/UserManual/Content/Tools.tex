@@ -214,6 +214,8 @@ Each outer iteration runs CardioMechanics with the \nameref{plugin:ReferenceReco
 The stiffness parameters take one factor and the exponents another, so the anisotropy ratios of the law are preserved, and both factors are clamped to $[0.2, 5]$.
 Only the parameters carry forward: every iteration restarts the recovery from the target geometry.
 The loop ends when the unloaded volume differs from the Klotz prediction by less than half a percent of the measured end-diastolic volume, or when no scaling asks for a parameter change greater than a tenth of a percent, and fails - with a non-zero exit status and the path of the log - on a run that did not finish, on a recovery that did not reach the target configuration, and on the iteration cap.
+The second ending is the fixed point of the update rule: the simulated relation has the shape of the Klotz relation.
+The exponential function measures a curve's dilation from its own unloaded volume, so a matched shape leaves the unloaded volume off by the same fraction as the end-diastolic volume; the loop exits zero and reports the unloaded-volume residual split into the part the end-diastolic overshoot accounts for and the part the fit leaves.
 
 The material law is read from the settings file, and the parameters of \verb|Usyk|, \verb|Guccione| and \verb|Holzapfel| that carry the stiffness level and the exponents are known by name; \verb|--stiffness| and \verb|--exponents| cover a law that is not in that table.
 The bulk modulus is a numerical incompressibility penalty rather than a property of the tissue and is never scaled.

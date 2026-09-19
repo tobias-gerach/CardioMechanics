@@ -272,7 +272,8 @@ VOLUME_TOLERANCE = 0.005
 STAGNATION_TOLERANCE = 1e-3
 
 Scalings = namedtuple("Scalings", "stiffness exponent clamped")
-Convergence = namedtuple("Convergence", "unloaded end_diastolic stagnation converged stagnated")
+Convergence = namedtuple("Convergence",
+                         "unloaded end_diastolic explained stagnation converged stagnated")
 
 
 def klotz_volumes(pressure, volume):
@@ -363,10 +364,17 @@ def convergence(unloaded, klotz_unloaded, end_diastolic, measured, scalings):
     reported separately from convergence, so a run that stopped moving is not mistaken for one that
     met its target. Both volume residuals are in ml and are held against one tolerance, a fraction of
     the measured end-diastolic volume, which is the one length scale of the problem that does not move
-    between iterations."""
+    between iterations.
+
+    Stagnation is the fixed point of the update rule: both scalings at 1, the simulated relation
+    having the Klotz shape. The exponential model has no size of its own, but a shape and the one
+    point it must carry fix its unloaded volume, so a matched shape leaves the unloaded volume off by
+    the same fraction the end-diastolic volume is. `explained` is that offset in ml, signed, which tells a
+    stagnated run whose residual the inner loop's overshoot explains from one it does not."""
     unloaded_residual = abs(unloaded - klotz_unloaded)
+    explained = unloaded * (end_diastolic - measured) / end_diastolic
     stagnation = max(abs(scalings.stiffness - 1.0), abs(scalings.exponent - 1.0))
-    return Convergence(unloaded_residual, abs(end_diastolic - measured), stagnation,
+    return Convergence(unloaded_residual, abs(end_diastolic - measured), explained, stagnation,
                        converged=unloaded_residual <= VOLUME_TOLERANCE * measured,
                        stagnated=stagnation <= STAGNATION_TOLERANCE)
 
@@ -671,9 +679,13 @@ def main(argv=None):
                       f"The parameters are in {current}")
                 break
             if state.stagnated:
-                print(f"stagnated: no parameter moved by more than {STAGNATION_TOLERANCE:g}, with the "
-                      f"unloaded volume still {state.unloaded:.2f} ml from the Klotz prediction. "
-                      f"The parameters are in {current}")
+                offset = inflation.volumes[0] - klotz_unloaded
+                print(f"stagnated: the simulated relation has the shape of the Klotz relation, no "
+                      f"parameter moving by more than {STAGNATION_TOLERANCE:g}. The unloaded volume "
+                      f"is {offset:+.2f} ml from the Klotz prediction: the end-diastolic volume, "
+                      f"{inflation.volumes[-1] - measured:+.2f} ml from the target, explains "
+                      f"{state.explained:+.2f} ml and the fit leaves {offset - state.explained:+.2f} "
+                      f"ml. The parameters are in {current}")
                 break
             for key, value in scaled_parameters(root, blocks, stiffness, exponents, scalings).items():
                 set_parameter(root, key, format(value, PARAMETER_FORMAT))
