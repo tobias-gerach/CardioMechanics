@@ -363,6 +363,13 @@ def test_the_magnitude_of_the_simulated_exponent_is_used():
     assert negative == fmp.parameter_scalings(klotz_fit=(0.6, 3.0), simulated_fit=(0.3, 2.0))
 
 
+def test_the_scaling_interval_can_be_given():
+    scalings = fmp.parameter_scalings(klotz_fit=(0.6, 3.0), simulated_fit=(0.3, 2.0),
+                                      bounds=(0.5, 1.8))
+    assert (scalings.stiffness, scalings.exponent) == pytest.approx((1.8, 1.5))
+    assert scalings.clamped == ("stiffness",)
+
+
 def test_a_simulated_fit_without_a_positive_prefactor_raises():
     """A negative prefactor is a fit that found no rising curve at all, not one asking for a large
     move, so it is not something the clamp should absorb."""
@@ -437,6 +444,13 @@ def test_a_scaling_just_outside_the_stagnation_tolerance_keeps_the_loop_running(
     assert not fmp.convergence(unloaded=V0_KLOTZ + OUTSIDE_ML, klotz_unloaded=V0_KLOTZ,
                                end_diastolic=V_MEASURED, measured=V_MEASURED,
                                scalings=moved).stagnated
+
+
+def test_both_tolerances_can_be_given():
+    state = fmp.convergence(unloaded=V0_KLOTZ + TOLERANCE_ML / 2, klotz_unloaded=V0_KLOTZ,
+                            end_diastolic=V_MEASURED, measured=V_MEASURED, scalings=MOVING,
+                            volume_tolerance=fmp.VOLUME_TOLERANCE / 4, stagnation_tolerance=0.5)
+    assert state.stagnated and not state.converged
 
 
 # Synthetic plugin output, built row by row as the plugin writes it rather than copied from a run, so
@@ -591,6 +605,28 @@ def test_the_pressure_is_taken_in_mmhg_and_the_cavity_surface_is_nameable():
     assert (arguments.pressure, arguments.surface) == (8.0, 3)
     # Left to the mesh the settings file names and to the law it declares.
     assert arguments.volume is None and arguments.stiffness is None and arguments.exponents is None
+    assert (arguments.volume_tolerance, arguments.stagnation_tolerance, arguments.scaling_bounds) \
+        == (fmp.VOLUME_TOLERANCE, fmp.STAGNATION_TOLERANCE, fmp.SCALING_BOUNDS)
+
+
+def test_the_tolerances_and_the_scaling_interval_can_be_set_on_the_command_line():
+    arguments = fmp.parse_arguments(["recovery.xml", "--pressure", "8",
+                                     "--volume-tolerance", "0.01", "--stagnation-tolerance", "0.03",
+                                     "--scaling-bounds", "0.5", "2"])
+    assert (arguments.volume_tolerance, arguments.stagnation_tolerance, arguments.scaling_bounds) \
+        == (0.01, 0.03, (0.5, 2.0))
+
+
+@pytest.mark.parametrize("option", [
+    ["--volume-tolerance", "0"],
+    ["--stagnation-tolerance", "-0.01"],
+    # An interval that excludes 1 excludes the fixed point of the update rule.
+    ["--scaling-bounds", "1.2", "5"],
+    ["--scaling-bounds", "0.2", "0.9"],
+])
+def test_a_tolerance_or_interval_the_loop_cannot_end_on_is_rejected(option):
+    with pytest.raises(SystemExit):
+        fmp.parse_arguments(["recovery.xml", "--pressure", "8", *option])
 
 
 def test_the_parameter_names_of_an_unlisted_law_can_be_named_on_the_command_line():

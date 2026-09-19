@@ -261,15 +261,20 @@ KLOTZ_AN, KLOTZ_BN = 27.78, 2.76
 KLOTZ_V0_INTERCEPT, KLOTZ_V0_SLOPE = 0.6, 0.006
 KLOTZ_P30 = 30.0
 
-# Both parameter scalings are clamped to this interval. A fit that asks for more than a fivefold
-# move in one outer iteration is extrapolating far outside the pressure range it saw, and a forward
-# solve with such parameters diverges rather than informing the next iteration.
+# The defaults of the three numbers a fit of another geometry is most likely to move, since a
+# different geometry or measurement is a different judgement. Both scalings are clamped to
+# SCALING_BOUNDS: a fit that asks for more than a fivefold move in one outer iteration is
+# extrapolating far outside the pressure range it saw, and a forward solve with such parameters
+# diverges rather than informing the next iteration. Both volume residuals are reported against
+# VOLUME_TOLERANCE, half a percent of the measured volume. The loop has stagnated once no scaling
+# asks for a move of more than STAGNATION_TOLERANCE. Near the fixed point the move roughly halves
+# with each iteration. In a run of the example that the volume tolerance could not end, a threshold
+# of a percent would have stopped it at the eighth iteration and one of a tenth of a percent did at
+# the eleventh, and the unloaded volumes of the two differ by 0.03 ml, a twentieth of the volume
+# tolerance.
 SCALING_BOUNDS = (0.2, 5.0)
-# Convergence of the outer loop: both volume residuals are reported against the same half a percent of
-# the measured end-diastolic volume, and the loop has stagnated once no scaling asks for a move of
-# more than a tenth of a percent.
 VOLUME_TOLERANCE = 0.005
-STAGNATION_TOLERANCE = 1e-3
+STAGNATION_TOLERANCE = 1e-2
 
 Scalings = namedtuple("Scalings", "stiffness exponent clamped")
 Convergence = namedtuple("Convergence",
@@ -330,7 +335,7 @@ def fit_exponential(volumes, pressures, unloaded):
     return prefactor, exponent
 
 
-def parameter_scalings(klotz_fit, simulated_fit):
+def parameter_scalings(klotz_fit, simulated_fit, bounds=SCALING_BOUNDS):
     """The factors the stiffness parameter and every exponent parameter are multiplied by, from the
     exponential fits to the Klotz relation and to the simulated curve, each as (prefactor, exponent).
 
@@ -338,7 +343,7 @@ def parameter_scalings(klotz_fit, simulated_fit):
     is along the fibres than across them is a property of the model and not of this fit. The
     magnitude of the simulated exponent is used, so that a simulated curve flat enough for the fit to
     return a negative exponent still yields a positive factor and stiffens rather than inverts the
-    law. Both factors are clamped to SCALING_BOUNDS, and the names of those that were clamped are
+    law. Both factors are clamped to `bounds`, and the names of those that were clamped are
     returned so the caller can say when the fit asked for a jump the algorithm refuses to take."""
     klotz_prefactor, klotz_exponent = klotz_fit
     simulated_prefactor, simulated_exponent = simulated_fit
@@ -348,11 +353,12 @@ def parameter_scalings(klotz_fit, simulated_fit):
     assert simulated_prefactor > 0, f"the simulated fit has no positive prefactor: {simulated_fit}"
     asked = (klotz_prefactor / simulated_prefactor, klotz_exponent / abs(simulated_exponent))
     clamped = tuple(name for name, factor in zip(("stiffness", "exponent"), asked)
-                    if not SCALING_BOUNDS[0] <= factor <= SCALING_BOUNDS[1])
-    return Scalings(*np.clip(asked, *SCALING_BOUNDS), clamped)
+                    if not bounds[0] <= factor <= bounds[1])
+    return Scalings(*np.clip(asked, *bounds), clamped)
 
 
-def convergence(unloaded, klotz_unloaded, end_diastolic, measured, scalings):
+def convergence(unloaded, klotz_unloaded, end_diastolic, measured, scalings,
+                volume_tolerance=VOLUME_TOLERANCE, stagnation_tolerance=STAGNATION_TOLERANCE):
     """Where the outer loop stands, from the simulated unloaded and end-diastolic volumes against the
     Klotz unloaded volume and the measured volume, all in ml, and the scalings the fit just asked for.
 
@@ -362,9 +368,10 @@ def convergence(unloaded, klotz_unloaded, end_diastolic, measured, scalings):
     inner loop rather than a criterion the fit can influence: it carries whatever bias the inner loop
     leaves, so holding the fit to it would report a well-fitted material as unconverged. Stagnation is
     reported separately from convergence, so a run that stopped moving is not mistaken for one that
-    met its target. Both volume residuals are in ml and are held against one tolerance, a fraction of
-    the measured end-diastolic volume, which is the one length scale of the problem that does not move
-    between iterations.
+    met its target. Both volume residuals are in ml and are held against one tolerance,
+    `volume_tolerance` times the measured end-diastolic volume, which is the one length scale of the
+    problem that does not move between iterations. The loop has stagnated once no scaling moves by
+    more than `stagnation_tolerance`.
 
     Stagnation is the fixed point of the update rule: both scalings at 1, the simulated relation
     having the Klotz shape. The exponential model has no size of its own, but a shape and the one
@@ -375,8 +382,8 @@ def convergence(unloaded, klotz_unloaded, end_diastolic, measured, scalings):
     explained = unloaded * (end_diastolic - measured) / end_diastolic
     stagnation = max(abs(scalings.stiffness - 1.0), abs(scalings.exponent - 1.0))
     return Convergence(unloaded_residual, abs(end_diastolic - measured), explained, stagnation,
-                       converged=unloaded_residual <= VOLUME_TOLERANCE * measured,
-                       stagnated=stagnation <= STAGNATION_TOLERANCE)
+                       converged=unloaded_residual <= volume_tolerance * measured,
+                       stagnated=stagnation <= stagnation_tolerance)
 
 
 # What one outer iteration leaves in its own directory. Every run is given a directory of its own, so
@@ -594,9 +601,26 @@ def parse_arguments(argv=None):
     parser.add_argument("--exponents", nargs="+",
                         help="The names of the law's exponent parameters, for a law the table does "
                              "not list.")
+    parser.add_argument("--volume-tolerance", type=float, default=VOLUME_TOLERANCE,
+                        help="The unloaded-volume residual the loop converges at, as a fraction of "
+                             "the measured volume (default: %(default)s).")
+    parser.add_argument("--stagnation-tolerance", type=float, default=STAGNATION_TOLERANCE,
+                        help="The largest parameter move, as a fraction, at which the loop has "
+                             "stagnated (default: %(default)s).")
+    parser.add_argument("--scaling-bounds", type=float, nargs=2, default=SCALING_BOUNDS,
+                        metavar=("LOWER", "UPPER"),
+                        help="The interval both scalings of one iteration are clamped to "
+                             "(default: %(default)s).")
     arguments = parser.parse_args(argv)
+    arguments.scaling_bounds = tuple(arguments.scaling_bounds)
     if arguments.iterations < 1:
         parser.error("--iterations must run at least one iteration")
+    if arguments.volume_tolerance <= 0 or arguments.stagnation_tolerance <= 0:
+        parser.error("--volume-tolerance and --stagnation-tolerance must be positive")
+    # The fixed point of the update rule is both scalings at 1, which an interval must hold for the
+    # loop to reach it.
+    if not arguments.scaling_bounds[0] < 1 < arguments.scaling_bounds[1]:
+        parser.error("--scaling-bounds must hold 1 strictly inside")
     return arguments
 
 
@@ -620,7 +644,7 @@ def main(argv=None):
     klotz_fit = fit_exponential(*klotz, klotz_unloaded)
     print(f"{law} against Klotz from {arguments.pressure:g} mmHg in {measured:.2f} ml: "
           f"unloaded volume {klotz_unloaded:.2f} ml, "
-          f"tolerance {VOLUME_TOLERANCE * measured:.2f} ml")
+          f"tolerance {arguments.volume_tolerance * measured:.2f} ml")
 
     work = Path(arguments.work_dir).resolve()
     keys = parameter_keys(blocks, stiffness, exponents)
@@ -650,9 +674,10 @@ def main(argv=None):
             # volume that step produced, so the curve is fitted as it stands.
             simulated_fit = fit_exponential(inflation.volumes, inflation.pressures,
                                             inflation.volumes[0])
-            scalings = parameter_scalings(klotz_fit, simulated_fit)
+            scalings = parameter_scalings(klotz_fit, simulated_fit, arguments.scaling_bounds)
             state = convergence(inflation.volumes[0], klotz_unloaded, inflation.volumes[-1], measured,
-                                scalings)
+                                scalings, arguments.volume_tolerance,
+                                arguments.stagnation_tolerance)
             parameters = {key: float(get_parameter(root, key)) for key in keys}
             rows.append(iteration_row(iteration, parameters, inflation, state, scalings, walltime,
                                       corrupt))
@@ -668,18 +693,19 @@ def main(argv=None):
                   f"exponents x{scalings.exponent:.3f}, {corrupt} corrupt-element reports")
             if scalings.clamped:
                 print(f"  the {' and '.join(scalings.clamped)} scaling the fit asked for was outside "
-                      f"{SCALING_BOUNDS} and was clamped")
+                      f"{arguments.scaling_bounds} and was clamped")
             if state.converged:
                 print(f"converged: the unloaded volume is within "
-                      f"{VOLUME_TOLERANCE * measured:.2f} ml of the Klotz prediction. "
+                      f"{arguments.volume_tolerance * measured:.2f} ml of the Klotz prediction. "
                       f"The parameters are in {current}")
                 break
             if state.stagnated:
                 offset = inflation.volumes[0] - klotz_unloaded
                 print(f"stagnated: the simulated relation has the shape of the Klotz relation, no "
-                      f"parameter moving by more than {STAGNATION_TOLERANCE:g}. The unloaded volume "
-                      f"is {offset:+.2f} ml from the Klotz prediction: the end-diastolic volume, "
-                      f"{inflation.volumes[-1] - measured:+.2f} ml from the target, explains "
+                      f"parameter moving by more than {arguments.stagnation_tolerance:g}. The "
+                      f"unloaded volume is {offset:+.2f} ml from the Klotz prediction: the "
+                      f"end-diastolic volume, {inflation.volumes[-1] - measured:+.2f} ml from the "
+                      f"target, explains "
                       f"{state.explained:+.2f} ml and the fit leaves {offset - state.explained:+.2f} "
                       f"ml. The parameters are in {current}")
                 break

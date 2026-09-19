@@ -211,11 +211,12 @@ options:
 
 FitMaterialParameters.py fits the passive material parameters of a model so that its end-diastolic pressure-volume relation matches the empirical relation of Klotz et al.~\cite{Klotz-2006}, which predicts the whole end-diastolic pressure-volume relation, including the unloaded volume, from a single measured pressure-volume pair.
 Each outer iteration runs CardioMechanics with the \nameref{plugin:ReferenceRecovery} plugin from the target geometry, fits an exponential pressure-volume function to the last complete inflation and to the Klotz relation, and scales the material parameters by the ratio of the two fits.
-The stiffness parameters take one factor and the exponents another, so the anisotropy ratios of the law are preserved, and both factors are clamped to $[0.2, 5]$.
+The stiffness parameters take one factor and the exponents another, so the anisotropy ratios of the law are preserved, and both factors are clamped to $[0.2, 5]$ by default.
 Only the parameters carry forward: every iteration restarts the recovery from the target geometry.
-The loop ends when the unloaded volume differs from the Klotz prediction by less than half a percent of the measured end-diastolic volume, or when no scaling asks for a parameter change greater than a tenth of a percent, and fails - with a non-zero exit status and the path of the log - on a run that did not finish, on a recovery that did not reach the target configuration, and on the iteration cap.
+The loop ends when the unloaded volume differs from the Klotz prediction by less than half a percent of the measured end-diastolic volume, or when no scaling asks for a parameter change greater than one percent, and fails - with a non-zero exit status and the path of the log - on a run that did not finish, on a recovery that did not reach the target configuration, and on the iteration cap.
 The second ending is the fixed point of the update rule: the simulated relation has the shape of the Klotz relation.
 The exponential function measures a curve's dilation from its own unloaded volume, so a matched shape leaves the unloaded volume off by the same fraction as the end-diastolic volume; the loop exits zero and reports the unloaded-volume residual split into the part the end-diastolic overshoot accounts for and the part the fit leaves.
+Both tolerances and the clamping interval are judgements about the geometry and the data being fitted, and \verb|--volume-tolerance|, \verb|--stagnation-tolerance| and \verb|--scaling-bounds| set them.
 
 The material law is read from the settings file, and the parameters of \verb|Usyk|, \verb|Guccione| and \verb|Holzapfel| that carry the stiffness level and the exponents are known by name; \verb|--stiffness| and \verb|--exponents| cover a law that is not in that table.
 The bulk modulus is a numerical incompressibility penalty rather than a property of the tissue and is never scaled.
@@ -230,6 +231,9 @@ usage: FitMaterialParameters [-h] --pressure PRESSURE [--volume VOLUME]
                              [--binary BINARY]
                              [--stiffness STIFFNESS [STIFFNESS ...]]
                              [--exponents EXPONENTS [EXPONENTS ...]]
+                             [--volume-tolerance VOLUME_TOLERANCE]
+                             [--stagnation-tolerance STAGNATION_TOLERANCE]
+                             [--scaling-bounds LOWER UPPER]
                              settings
 
 positional arguments:
@@ -256,6 +260,15 @@ options:
   --exponents EXPONENTS [EXPONENTS ...]
                         The names of the law's exponent parameters, for a law
                         the table does not list.
+  --volume-tolerance VOLUME_TOLERANCE
+                        The unloaded-volume residual the loop converges at, as
+                        a fraction of the measured volume (default: 0.005).
+  --stagnation-tolerance STAGNATION_TOLERANCE
+                        The largest parameter move, as a fraction, at which
+                        the loop has stagnated (default: 0.01).
+  --scaling-bounds LOWER UPPER
+                        The interval both scalings of one iteration are
+                        clamped to (default: (0.2, 5.0)).
 \end{lstlisting}
 
 

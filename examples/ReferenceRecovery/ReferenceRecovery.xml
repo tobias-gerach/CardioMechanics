@@ -96,8 +96,11 @@
         <CycleMax>5</CycleMax>
         <Augmentation>true</Augmentation>
         <DisplacementFactor>1</DisplacementFactor>
-        <!-- Infinity norm of the nodal residual, in metres. -->
-        <Tolerance>1e-4</Tolerance>
+        <!-- Infinity norm of the nodal residual, in metres. Set for the material fit's loop, whose
+             volume tolerance is 0.6 ml: 3e-4 m ends the recovery up to two cycles earlier than
+             1e-4 m at an unloaded volume 0.08 ml away. It is also the accuracy of the recovered node
+             file, 0.3 mm on a ventricle 91 mm long. -->
+        <Tolerance>3e-4</Tolerance>
         <InflationDuration>0.1</InflationDuration>
     </ReferenceRecovery>
 </Plugins>
