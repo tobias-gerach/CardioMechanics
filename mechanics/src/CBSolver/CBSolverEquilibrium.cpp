@@ -219,11 +219,9 @@ void CBSolverEquilibrium::InitVectors() {
     DCPetsc::CreateVector(Base::adapter_->GetNumberOfLocalDofs(), PETSC_DETERMINE, &residuum_);
     VecDuplicate(residuum_, &displacement_);
     VecDuplicate(residuum_, &initialGuess_);
-    VecDuplicate(Base::nodes_, &tmpVector_);
     VecZeroEntries(residuum_);
     VecZeroEntries(displacement_);
     VecZeroEntries(initialGuess_);
-    VecZeroEntries(tmpVector_);
     Base::InitPressureVectors();
 }
 
@@ -235,8 +233,13 @@ CBSolverEquilibrium::~CBSolverEquilibrium() {
     VecDestroy(&residuum_);
     VecDestroy(&displacement_);
     VecDestroy(&initialGuess_);
-    VecDestroy(&tmpVector_);
     SNESDestroy(&snes_);
+}
+
+void CBSolverEquilibrium::ResetStepHistory() {
+    Base::ResetStepHistory();
+    VecZeroEntries(displacement_);
+    VecZeroEntries(initialGuess_);
 }
 
 void CBSolverEquilibrium::UpdateInitialGuess(TFloat time) {
@@ -314,6 +317,13 @@ CBStatus CBSolverEquilibrium::SolverStep(PetscScalar time, bool forceJacobianAnd
         return CBStatus::FAILED;
     }
     
+    // Apply displacements to global nodes vector, and pressures to the pressure field
+    SaveStepStart();
+    AddBlock(Base::nodes_, displacement_, Base::adapter_->GetDisplacementDofs());
+    AddBlock(pressures_, displacement_, Base::adapter_->GetPressureDofs());
+    UpdateGhostNodesAndLinkToAdapter();
+    LinkPressures(pressures_);
+    
     // ---------------- Give the plugins the chance to analyse the results and to share their honest opinions --------------
     
     bool evaluate = false;
@@ -322,23 +332,9 @@ CBStatus CBSolverEquilibrium::SolverStep(PetscScalar time, bool forceJacobianAnd
         if (p->WantsToAnalyzeResults())
             evaluate = true;
     
-    if (evaluate) {
-        Vec localDisplacedNodesSeq = 0;
-        VecCopy(Base::nodes_, tmpVector_);
-        AddBlock(tmpVector_, displacement_, Base::adapter_->GetDisplacementDofs());
-        
-        if (DCCtrl::IsParallel()) {
-            VecGhostUpdateBegin(tmpVector_, INSERT_VALUES, SCATTER_FORWARD);
-            VecGhostUpdateEnd(tmpVector_, INSERT_VALUES, SCATTER_FORWARD);
-            VecGhostGetLocalForm(tmpVector_, &localDisplacedNodesSeq);
-            Base::adapter_->LinkNodes(localDisplacedNodesSeq);
-        } else {
-            Base::adapter_->LinkNodes(tmpVector_);
-        }
-        
+    if (evaluate)
         for (auto &p : plugins_)
             p->AnalyzeResults();
-    }
     
     // --------------------------------------------------
     
@@ -360,16 +356,10 @@ CBStatus CBSolverEquilibrium::SolverStep(PetscScalar time, bool forceJacobianAnd
     switch (pluginsFeedback) {
         case CBStatus::FAILED:
         case CBStatus::REPEAT:
-            LinkPressures(pressures_);
+            RestoreStepStart();
             return pluginsFeedback;
             
         default:
-            
-            // Apply displacements to global nodes vector, and pressures to the pressure field
-            AddBlock(Base::nodes_, displacement_, Base::adapter_->GetDisplacementDofs());
-            AddBlock(pressures_, displacement_, Base::adapter_->GetPressureDofs());
-            LinkPressures(pressures_);
-            
             return CBStatus::SUCCESS;
     }
 } // CBSolverEquilibrium::SolverStep

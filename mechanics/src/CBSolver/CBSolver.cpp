@@ -270,6 +270,9 @@ void CBSolver::Init(ParameterMap *parameters, CBModel *model) {
     DCCtrl::print <<
     "\xd\t\tInitializing: Vectors ...                                                                                           ";
     InitVectors();
+    VecDuplicate(nodes_, &stepStartNodes_);
+    if (pressures_)
+        VecDuplicate(pressures_, &stepStartPressures_);
     DCCtrl::print <<
     "\xd\t\tInitializing: Matrices ...                                                                                          ";// ( Hint: if this takes too long preallocate more memory for the matrices [solver.nonZeros] ...";
     InitMatrices();
@@ -483,6 +486,28 @@ void CBSolver::InitNodalForcesJacobian() {
     formulation_->CalcNodalForcesJacobian();
     
     isInitNodalForcesJacobianDone_ = true;
+}
+
+void CBSolver::ResetStepHistory() {
+    if (!pressures_)
+        return;
+    VecZeroEntries(pressures_);
+    LinkPressures(pressures_);
+}
+
+void CBSolver::SaveStepStart() {
+    VecCopy(nodes_, stepStartNodes_);
+    if (pressures_)
+        VecCopy(pressures_, stepStartPressures_);
+}
+
+void CBSolver::RestoreStepStart() {
+    VecCopy(stepStartNodes_, nodes_);
+    UpdateGhostNodesAndLinkToAdapter();
+    if (!pressures_)
+        return;
+    VecCopy(stepStartPressures_, pressures_);
+    LinkPressures(pressures_);
 }
 
 void CBSolver::UpdateGhostNodesAndLinkToAdapter() {
@@ -1282,6 +1307,8 @@ CBSolver::~CBSolver() {
     VecDestroy(&pressures_);
     VecDestroy(&trialPressures_);
     VecDestroy(&pressureResiduals_);
+    VecDestroy(&stepStartNodes_);
+    VecDestroy(&stepStartPressures_);
     if (formulation_ != 0)
         delete formulation_;
     if (activeStressData_ != 0)

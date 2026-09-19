@@ -53,6 +53,8 @@ CBSolverGeneralizedAlpha::~CBSolverGeneralizedAlpha() {
     VecDestroy(&initialGuess_);
     VecDestroy(&velocity_);
     VecDestroy(&acceleration_);
+    VecDestroy(&stepStartVelocity_);
+    VecDestroy(&stepStartAcceleration_);
     VecDestroy(&tmpVector_);
     MatDestroy(&massMatrix_);
     MatDestroy(&dampingMatrix_);
@@ -73,6 +75,8 @@ void CBSolverGeneralizedAlpha::InitVectors() {
     VecDuplicate(Base::nodes_, &tmpVelocity_);
     VecDuplicate(Base::nodes_, &velocity_);
     VecDuplicate(Base::nodes_, &acceleration_);
+    VecDuplicate(Base::nodes_, &stepStartVelocity_);
+    VecDuplicate(Base::nodes_, &stepStartAcceleration_);
     VecDuplicate(Base::nodes_, &tmpVector_);
     VecZeroEntries(residuum_);
     VecZeroEntries(unknowns_);
@@ -821,6 +825,25 @@ CBStatus CBSolverGeneralizedAlpha::SolverStep(PetscScalar time, bool forceJacobi
         updateJacobian_ = true;
     }
     
+    // Corrector phase:
+    // Newton iterations (SNES) have calculated: displacement = d_n+1
+    SaveStepStart();
+    auto timestep = timing_.GetTimeStep();
+    
+    // acceleration_ = a_n+1 = (d_n+1 - d~_n+1) / (dt^2*beta)
+    VecAXPBYPCZ(acceleration_, 1.0 / (beta_*timestep*timestep), -1.0 / (beta_*timestep*timestep), 0, displacement_,
+                tmpDisplacement_);
+    
+    // velocity_     = v_n+1 = v~_n+1 + dt * gamma * a_n+1
+    VecCopy(tmpVelocity_, velocity_);
+    VecAXPY(velocity_, gamma_ * timestep, acceleration_);
+    
+    // Apply pressures to the pressure field, and displacements to global nodes vector
+    AddBlock(Base::pressures_, unknowns_, Base::adapter_->GetPressureDofs());
+    LinkPressures(Base::pressures_);
+    VecAXPY(Base::nodes_, 1, displacement_);
+    UpdateGhostNodesAndLinkToAdapter();
+    
     // ---------------- Give the plugins the chance to analyse the results and to share their honest opinions
     // --------------
     
@@ -830,26 +853,9 @@ CBStatus CBSolverGeneralizedAlpha::SolverStep(PetscScalar time, bool forceJacobi
         if (p->WantsToAnalyzeResults())
             evaluate = true;
     
-    if (evaluate) {
-        Vec localDisplacedNodesSeq = 0;
-        VecCopy(Base::nodes_, tmpVector_);
-        VecAXPY(tmpVector_, 1, displacement_);
-        
-        if (DCCtrl::IsParallel()) {
-            VecGhostUpdateBegin(tmpVector_, INSERT_VALUES, SCATTER_FORWARD);
-            VecGhostUpdateEnd(tmpVector_, INSERT_VALUES, SCATTER_FORWARD);
-            VecGhostGetLocalForm(tmpVector_, &localDisplacedNodesSeq);
-            Base::adapter_->LinkNodes(localDisplacedNodesSeq);
-        } else {
-            Base::adapter_->LinkNodes(tmpVector_);
-        }
-        
-        // the plugins analyse the end of the step, the pressure field included
-        LinkTrialPressures(unknowns_);
-        
+    if (evaluate)
         for (auto &p : plugins_)
             p->AnalyzeResults();
-    }
     
     // --------------------------------------------------
     
@@ -871,22 +877,10 @@ CBStatus CBSolverGeneralizedAlpha::SolverStep(PetscScalar time, bool forceJacobi
     switch (pluginsFeedback) {
         case CBStatus::FAILED:
         case CBStatus::REPEAT:
-            LinkPressures(Base::pressures_);
+            RestoreStepStart();
             return pluginsFeedback;
             
         default:
-            
-            // Corrector phase:
-            // Newton iterations (SNES) have calculated: displacement = d_n+1
-            auto timestep = timing_.GetTimeStep();
-            
-            // acceleration_ = a_n+1 = (d_n+1 - d~_n+1) / (dt^2*beta)
-            VecAXPBYPCZ(acceleration_, 1.0 / (beta_*timestep*timestep), -1.0 / (beta_*timestep*timestep), 0, displacement_,
-                        tmpDisplacement_);
-            
-            // velocity_     = v_n+1 = v~_n+1 + dt * gamma * a_n+1
-            VecCopy(tmpVelocity_, velocity_);
-            VecAXPY(velocity_, gamma_ * timestep, acceleration_);
             
             // Calculate kinetic energy and energy dissipated by damping
             Vec k;
@@ -908,18 +902,27 @@ CBStatus CBSolverGeneralizedAlpha::SolverStep(PetscScalar time, bool forceJacobi
                 VecAXPY(absDisplacement_, 1.0, displacement_);
             }
             
-            // Apply pressures to the pressure field, and displacements to global nodes vector
-            AddBlock(Base::pressures_, unknowns_, Base::adapter_->GetPressureDofs());
-            LinkPressures(Base::pressures_);
-            
-            if (evaluate)
-                VecCopy(tmpVector_, Base::nodes_);
-            else
-                VecAXPY(Base::nodes_, 1, displacement_);
-            
             return CBStatus::SUCCESS;
     }  // switch
 }  // CBSolverGeneralizedAlpha::SolverStep
+
+void CBSolverGeneralizedAlpha::ResetStepHistory() {
+    Base::ResetStepHistory();
+    SetZeroVelocityAndAcceleration();
+    updateJacobian_ = true;
+}
+
+void CBSolverGeneralizedAlpha::SaveStepStart() {
+    Base::SaveStepStart();
+    VecCopy(velocity_, stepStartVelocity_);
+    VecCopy(acceleration_, stepStartAcceleration_);
+}
+
+void CBSolverGeneralizedAlpha::RestoreStepStart() {
+    Base::RestoreStepStart();
+    VecCopy(stepStartVelocity_, velocity_);
+    VecCopy(stepStartAcceleration_, acceleration_);
+}
 
 void CBSolverGeneralizedAlpha::SetZeroVelocityAndAcceleration() {
     VecSet(acceleration_, 0.0);
