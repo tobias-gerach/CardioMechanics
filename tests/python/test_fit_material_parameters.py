@@ -11,6 +11,7 @@ published anchors and against curves generated from known parameters, and the re
 plugin writes are built by hand rather than run.
 """
 import csv
+import io
 
 import numpy as np
 import pytest
@@ -608,17 +609,51 @@ def test_a_row_records_the_parameters_that_produced_its_own_numbers(settings_fil
     scalings = fmp.Scalings(stiffness=2.0, exponent=5.0, clamped=("exponent",))
     state = fmp.convergence(60.0, 55.0, 100.0, 100.0, scalings)
     parameters = {key: float(fmp.get_parameter(root, key)) for key in keys}
-    row = fmp.iteration_row(2, parameters, inflation, state, scalings, walltime=123.0)
+    row = fmp.iteration_row(2, parameters, inflation, state, scalings, walltime=123.0, corrupt=7)
 
     fmp.write_iterations(tmp_path / "iterations.csv", [row])
     with open(tmp_path / "iterations.csv", newline="") as handle:
         written, = csv.DictReader(handle)
     assert written["iteration"] == "2" and written["cycles"] == "3"
+    assert written["corrupt_reports"] == "7"
     assert float(written["unloaded_ml"]) == 60.0 and float(written["end_diastolic_ml"]) == 100.0
     assert float(written["unloaded_residual_ml"]) == 5.0
     assert float(written["walltime_s"]) == 123.0 and written["next_clamped"] == "exponent"
     # The parameters of the run that produced the row, not the ones its scalings ask for next.
     assert float(written["Materials.Mat_30.Usyk.a"]) == 88.0
+
+
+# What a run prints: the lines below are the solver's own, as its runtime estimator and a solid element
+# write them.
+PROGRESS = "1.42857% done !! Estimated time to run: 0:09:28. Estimated remaining time: 0:09:20      \n"
+CORRUPT = "SolidT10: Element with index 5117 is corrupt.\n"
+SOLVER = ["Loading mesh ...\n", "\n", "Newton iteration 1: |R| = 3.2e-04\n"]
+
+
+def follow(lines):
+    record, shown = io.StringIO(), []
+    corrupt = fmp.follow_output(lines, record, shown.append)
+    return record.getvalue(), shown, corrupt
+
+
+def test_every_line_the_solver_prints_is_recorded():
+    lines = SOLVER + [PROGRESS, CORRUPT]
+    assert follow(lines)[0] == "".join(lines)
+
+
+def test_the_progress_line_is_shown_and_nothing_else_is():
+    _, shown, _ = follow(SOLVER + [PROGRESS, CORRUPT, PROGRESS.replace("1.42857", "72.8571")])
+    assert shown == ["1% done, 0:09:20 remaining", "73% done, 0:09:20 remaining"]
+
+
+def test_the_corrupt_element_reports_of_every_rank_are_counted():
+    reports = [CORRUPT, CORRUPT.replace("5117", "12"), CORRUPT.replace("SolidT10", "SolidT4")]
+    assert follow(SOLVER[:1] + reports + SOLVER[1:] + [PROGRESS])[2] == 3
+
+
+def test_a_run_that_prints_neither_counts_zero_and_shows_nothing():
+    _, shown, corrupt = follow(SOLVER)
+    assert shown == [] and corrupt == 0
 
 
 def test_the_recovered_configuration_is_the_last_increment(tmp_path):
