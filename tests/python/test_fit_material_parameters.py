@@ -390,13 +390,14 @@ def test_the_unloaded_volume_residual_binds():
     assert (state.unloaded, state.end_diastolic) == pytest.approx((OUTSIDE_ML, 0.0))
 
 
-def test_the_end_diastolic_volume_residual_binds():
-    """Near-tautological, since the recovery drives the loaded configuration onto the target; it
-    binds only when the inner loop did not get there, which is what it is reported for."""
+def test_the_end_diastolic_volume_residual_is_reported_and_does_not_bind():
+    """Near-tautological, since the recovery drives the loaded configuration onto the target, and it
+    carries whatever bias the inner loop leaves. It is a sanity check on that loop, which the fit
+    cannot influence, so a fit that met its target is not reported as unconverged because of it."""
     state = fmp.convergence(unloaded=V0_KLOTZ, klotz_unloaded=V0_KLOTZ,
                             end_diastolic=V_MEASURED - OUTSIDE_ML, measured=V_MEASURED,
                             scalings=MOVING)
-    assert not state.converged and not state.stagnated
+    assert state.converged and not state.stagnated
     assert (state.unloaded, state.end_diastolic) == pytest.approx((0.0, OUTSIDE_ML))
 
 
@@ -508,3 +509,78 @@ def test_the_curve_of_a_second_cavity_is_selected_by_its_surface_index():
 def test_a_record_of_no_finished_cycle_raises():
     with pytest.raises(AssertionError):
         fmp.last_inflation(*plugin_records(cycles=0, trailing=4))
+
+
+# The outer loop: what it decides between two runs. The runs themselves, and the loop that strings
+# them together, are not tested here - one costs minutes of solver time and the whole loop close to
+# an hour, and its outcome may legitimately be stagnation. The example is that demonstration.
+
+
+def test_a_run_writes_its_output_under_its_own_directory(settings_file, tmp_path):
+    root = fmp.read_settings(settings_file)
+    fmp.retarget_outputs(root, tmp_path / "iteration_01")
+
+    assert fmp.get_parameter(root, "General.LogFile") == str(tmp_path / "iteration_01" / fmp.LOG_NAME)
+    assert fmp.get_parameter(root, "Plugins.ReferenceRecovery.ExportDir") == \
+        str(tmp_path / "iteration_01" / fmp.RECOVERY_DIR)
+    # The inputs are left as they stand: the run is given the settings file's own directory to work
+    # in, so a relative mesh name resolves the way it does for a hand-started run.
+    assert fmp.get_parameter(root, "Mesh.Tetgen.Nodes") == "./tetgen/ellipsoid.node"
+    # A file that asks for no exported time series is not given one.
+    assert fmp.get_parameter(root, "Export.Prefix", None) is None
+
+
+def test_the_export_name_survives_a_second_retargeting(tmp_path):
+    """Every iteration retargets the same document, so the name the user chose for the exported time
+    series must not be consumed by the directory the previous iteration ran in."""
+    path = tmp_path / "exporting.xml"
+    path.write_text(SETTINGS + "<Export><Prefix>./Results/Ellipsoid</Prefix></Export>\n")
+    root = fmp.read_settings(path)
+
+    fmp.retarget_outputs(root, tmp_path / "iteration_01")
+    fmp.retarget_outputs(root, tmp_path / "iteration_02")
+    assert fmp.get_parameter(root, "Export.Prefix") == \
+        str(tmp_path / "iteration_02" / fmp.EXPORT_DIR / "Ellipsoid")
+
+
+def test_the_retargeted_settings_file_is_a_settings_file_again(settings_file, tmp_path):
+    out = tmp_path / "written.xml"
+    fmp.write_settings(fmp.retarget_outputs(fmp.read_settings(settings_file), tmp_path), out)
+    assert fmp.get_parameter(fmp.read_settings(out), "Materials.Mat_30.Usyk.a") == "88.0"
+
+
+def test_every_stiffness_and_exponent_is_scaled_and_nothing_else(settings_file):
+    root = fmp.read_settings(settings_file)
+    law, blocks = fmp.material_law(root)
+    stiffness, exponents = fmp.law_parameters(law)
+    updated = fmp.scaled_parameters(root, blocks, stiffness, exponents,
+                                    fmp.Scalings(stiffness=2.0, exponent=0.5, clamped=()))
+
+    assert updated["Materials.Mat_30.Usyk.a"] == pytest.approx(176.0)
+    assert updated["Materials.Mat_30.Usyk.bff"] == pytest.approx(2.5)
+    assert updated["Materials.Mat_30.Usyk.bfs"] == pytest.approx(6.0)
+    # The bulk modulus is a numerical penalty rather than a property of the tissue.
+    assert "Materials.Mat_30.Usyk.k" not in updated
+
+
+def test_the_pressure_is_taken_in_mmhg_and_the_cavity_surface_is_nameable():
+    arguments = fmp.parse_arguments(["recovery.xml", "--pressure", "8", "--surface", "3"])
+    assert (arguments.pressure, arguments.surface) == (8.0, 3)
+    # Left to the mesh the settings file names and to the law it declares.
+    assert arguments.volume is None and arguments.stiffness is None and arguments.exponents is None
+
+
+def test_the_parameter_names_of_an_unlisted_law_can_be_named_on_the_command_line():
+    arguments = fmp.parse_arguments(["recovery.xml", "--pressure", "8",
+                                     "--stiffness", "mu", "--exponents", "b1", "b2"])
+    assert fmp.law_parameters("NeoHooke", arguments.stiffness, arguments.exponents) == \
+        (("mu",), ("b1", "b2"))
+
+
+def test_a_recovery_that_did_not_reach_the_target_is_not_fitted():
+    """The plugin writes its unloaded node file when it stops on its cycle cap just as it does when it
+    converges, so the residual it ended at is what says whether the curve ends at the target."""
+    ended_at = lambda residual: fmp.Inflation(volumes=[], pressures=[], residual_norm=residual,
+                                              cycles=5)
+    assert fmp.reached_target(ended_at(9e-5), 1e-4)
+    assert not fmp.reached_target(ended_at(1.2e-3), 1e-4)

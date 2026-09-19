@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 """Fit the passive material parameters of a CardioMechanics model to an end-diastolic
 pressure-volume relation.
 
@@ -21,9 +23,19 @@ person who wrote it.
 
 Parameters are addressed by the dotted key the solver itself uses, for instance
 `Materials.Mat_30.Usyk.a`.
+
+Run as a script, the module is the outer loop those functions serve: each iteration runs
+CardioMechanics with the `ReferenceRecovery` plugin from the target geometry, fits the exponential
+model to the pressure-volume curve of the last inflation and to the Klotz relation, and scales the
+material parameters by the ratio of the two fits. Only the parameters carry forward. The loop ends on
+convergence or on parameter stagnation, and fails - with a non-zero exit status and the path of the
+log - on a run that did not finish, on a recovery that did not reach the target configuration, and on
+the iteration cap.
 """
 
+import argparse
 import re
+import subprocess
 import xml.etree.ElementTree as ET
 from collections import namedtuple
 from pathlib import Path
@@ -97,6 +109,17 @@ def set_parameter(root, key, value):
     element = _find(root, key)
     if element is None:
         raise KeyError(f"the settings file carries no {key}")
+    element.text = str(value)
+
+
+def set_output(root, key, value):
+    """Point the output `key` at `value`, creating the elements the file does not carry. An output
+    name is the tool's to set, unlike a material parameter: the run belongs to the tool, and a name
+    the file leaves to the solver's default would drop that run's output wherever it was started."""
+    element = root
+    for tag in key.split("."):
+        child = element.find(tag)
+        element = ET.SubElement(element, tag) if child is None else child
     element.text = str(value)
 
 
@@ -235,7 +258,7 @@ KLOTZ_P30 = 30.0
 # move in one outer iteration is extrapolating far outside the pressure range it saw, and a forward
 # solve with such parameters diverges rather than informing the next iteration.
 SCALING_BOUNDS = (0.2, 5.0)
-# Convergence of the outer loop: both volume residuals are held against the same half a percent of
+# Convergence of the outer loop: both volume residuals are reported against the same half a percent of
 # the measured end-diastolic volume, and the loop has stagnated once no scaling asks for a move of
 # more than a tenth of a percent.
 VOLUME_TOLERANCE = 0.005
@@ -325,16 +348,198 @@ def convergence(unloaded, klotz_unloaded, end_diastolic, measured, scalings):
     """Where the outer loop stands, from the simulated unloaded and end-diastolic volumes against the
     Klotz unloaded volume and the measured volume, all in ml, and the scalings the fit just asked for.
 
-    The unloaded-volume residual is what the fit is driving down. The end-diastolic-volume residual
-    is near-tautological - the recovery drives the loaded configuration onto the target to within the
-    plugin's own tolerance - and is reported as a sanity check on the inner loop rather than as a
-    criterion the fit can influence. Stagnation is reported separately from convergence, so a run
-    that stopped moving is not mistaken for one that met its target. Both volume residuals are in ml
-    and are held against one tolerance, a fraction of the measured end-diastolic volume, which is the
-    one length scale of the problem that does not move between iterations."""
-    tolerance = VOLUME_TOLERANCE * measured
-    residuals = (abs(unloaded - klotz_unloaded), abs(end_diastolic - measured))
+    The unloaded-volume residual is what the fit is driving down, and it alone decides convergence.
+    The end-diastolic-volume residual is near-tautological - the recovery drives the loaded
+    configuration onto the target to within the plugin's own tolerance - and is a sanity check on the
+    inner loop rather than a criterion the fit can influence: it carries whatever bias the inner loop
+    leaves, so holding the fit to it would report a well-fitted material as unconverged. Stagnation is
+    reported separately from convergence, so a run that stopped moving is not mistaken for one that
+    met its target. Both volume residuals are in ml and are held against one tolerance, a fraction of
+    the measured end-diastolic volume, which is the one length scale of the problem that does not move
+    between iterations."""
+    unloaded_residual = abs(unloaded - klotz_unloaded)
     stagnation = max(abs(scalings.stiffness - 1.0), abs(scalings.exponent - 1.0))
-    return Convergence(*residuals, stagnation,
-                       converged=all(residual <= tolerance for residual in residuals),
+    return Convergence(unloaded_residual, abs(end_diastolic - measured), stagnation,
+                       converged=unloaded_residual <= VOLUME_TOLERANCE * measured,
                        stagnated=stagnation <= STAGNATION_TOLERANCE)
+
+
+# What one outer iteration leaves in its own directory. Every run is given a directory of its own, so
+# the records read back after a run are unambiguously that run's, and nothing a long loop produces
+# lands in the tree the settings file was read from.
+LOG_NAME = "CardioMechanics.log"
+RECOVERY_DIR = "ReferenceRecovery"
+EXPORT_DIR = "Export"
+# Enough digits that a scaling of the size the loop applies is visible in the written settings file,
+# few enough that the file stays readable after a dozen iterations.
+PARAMETER_FORMAT = ".6g"
+
+
+def retarget_outputs(root, directory):
+    """`root` with its outputs retargeted at `directory`: the log, the records the recovery plugin
+    writes and, if the file asks for one, the exported time series.
+
+    The inputs the file names are left as they stand, and the run is given the settings file's own
+    directory to work in, so that a relative mesh name resolves the way it does for a hand-started run
+    and the tool needs no list of which settings keys name a file.
+
+    The log and the plugin's export directory are set whether or not the file carries them: the loop
+    names that log when a run fails and reads the pressure-volume record out of that directory. A
+    prefix for the exported time series is only moved, never created, so that the tool does not turn
+    on an export the user's file left off. Only the basename of that prefix is kept, so retargeting a
+    document a second time does not stack one iteration's directory on the next."""
+    directory = Path(directory)
+    set_output(root, "General.LogFile", directory / LOG_NAME)
+    set_output(root, "Plugins.ReferenceRecovery.ExportDir", directory / RECOVERY_DIR)
+    prefix = Path(get_parameter(root, "Export.Prefix", "").strip()).name
+    if prefix:
+        set_parameter(root, "Export.Prefix", directory / EXPORT_DIR / prefix)
+    return root
+
+
+def scaled_parameters(root, blocks, stiffness, exponents, scalings):
+    """The material parameters of every block of `blocks` after one scaling step, as their keys and
+    their new values. The stiffness parameters named in `stiffness` take the stiffness scaling and the
+    exponents named in `exponents` the exponent scaling; every other parameter of the law, the bulk
+    modulus among them, is left alone."""
+    return {f"{block}.{name}": float(get_parameter(root, f"{block}.{name}")) * factor
+            for block in blocks
+            for names, factor in ((stiffness, scalings.stiffness), (exponents, scalings.exponent))
+            for name in names}
+
+
+def reached_target(inflation, tolerance):
+    """Whether the recovery arrived at the target configuration, from the inflation it ended on and
+    the plugin's own tolerance in metres. The plugin writes its unloaded node file when it stops on
+    its cycle cap just as it does when it converges, so the existence of that file says nothing; the
+    residual the tolerance is on is what says it."""
+    return inflation.residual_norm <= tolerance
+
+
+def run_cardiomechanics(binary, settings, directory, ranks, log):
+    """Run `binary` on the settings file `settings` from the working directory `directory`, on
+    `ranks` ranks. Raises SystemExit naming `log` when the run fails, so that a diverged forward solve
+    is debugged from its own log rather than read as a fit. The run's output is left on the terminal:
+    an iteration takes minutes, and the user is watching it."""
+    command = (["mpirun", "-np", str(ranks)] if ranks > 1 else []) + \
+        [str(binary), "-settings", str(settings)]
+    code = subprocess.run(command, cwd=str(directory)).returncode
+    if code:
+        raise SystemExit(f"CardioMechanics exited {code}; its log is {log}")
+
+
+def parse_arguments(argv=None):
+    parser = argparse.ArgumentParser(
+        prog="FitMaterialParameters",
+        description="Fit the passive material parameters of a CardioMechanics model so that its "
+                    "end-diastolic pressure-volume relation matches the empirical Klotz relation "
+                    "predicted from one measured pressure-volume pair. Each outer iteration runs "
+                    "CardioMechanics with the ReferenceRecovery plugin from the target geometry; "
+                    "only the material parameters carry forward.")
+    parser.add_argument("settings", help="The CardioMechanics settings file to fit. It is never "
+                                         "written: each run gets its own copy, carrying that "
+                                         "iteration's parameters, under the work directory.")
+    parser.add_argument("--pressure", type=float, required=True,
+                        help="The measured end-diastolic pressure in mmHg, as a clinical source "
+                             "reports it.")
+    parser.add_argument("--volume", type=float,
+                        help="The measured end-diastolic volume in ml. Defaults to the cavity volume "
+                             "of the mesh the settings file names.")
+    parser.add_argument("--surface", type=int, default=1,
+                        help="The surface index of the cavity (default: %(default)s).")
+    parser.add_argument("--iterations", type=int, default=10,
+                        help="The most outer iterations to run (default: %(default)s).")
+    parser.add_argument("--ranks", type=int, default=1,
+                        help="MPI ranks per run (default: %(default)s).")
+    parser.add_argument("--work-dir", default="FitMaterialParameters",
+                        help="Where every run's settings file, log and output go "
+                             "(default: %(default)s).")
+    parser.add_argument("--binary", default="CardioMechanics",
+                        help="The CardioMechanics binary (default: %(default)s).")
+    parser.add_argument("--stiffness", nargs="+",
+                        help="The names of the law's stiffness parameters, for a law the table does "
+                             "not list.")
+    parser.add_argument("--exponents", nargs="+",
+                        help="The names of the law's exponent parameters, for a law the table does "
+                             "not list.")
+    arguments = parser.parse_args(argv)
+    if arguments.iterations < 1:
+        parser.error("--iterations must run at least one iteration")
+    return arguments
+
+
+def main(argv=None):
+    """Run the outer loop. Ends quietly on convergence or on parameter stagnation, and raises
+    SystemExit on a failed run, on a recovery that did not reach the target configuration, and on the
+    iteration cap: each of those leaves parameters that were not fitted to what was asked for."""
+    arguments = parse_arguments(argv)
+    settings = Path(arguments.settings).resolve()
+    root = read_settings(settings)
+    law, blocks = material_law(root)
+    stiffness, exponents = law_parameters(law, arguments.stiffness, arguments.exponents)
+    nodes, surfaces, unit = mesh_files(root, settings)
+    measured = arguments.volume
+    if measured is None:
+        measured = cavity_volume(nodes, surfaces, arguments.surface, unit)
+    tolerance = float(get_parameter(root, "Plugins.ReferenceRecovery.Tolerance", 1e-3))
+
+    klotz_unloaded = klotz_volumes(arguments.pressure, measured)[0]
+    klotz_fit = fit_exponential(*klotz_curve(arguments.pressure, measured), klotz_unloaded)
+    print(f"{law} against Klotz from {arguments.pressure:g} mmHg in {measured:.2f} ml: "
+          f"unloaded volume {klotz_unloaded:.2f} ml, "
+          f"tolerance {VOLUME_TOLERANCE * measured:.2f} ml")
+
+    work = Path(arguments.work_dir).resolve()
+    for iteration in range(1, arguments.iterations + 1):
+        directory = work / f"iteration_{iteration:02d}"
+        (directory / EXPORT_DIR).mkdir(parents=True, exist_ok=True)
+        current = directory / settings.name
+        write_settings(retarget_outputs(root, directory), current)
+        run_cardiomechanics(arguments.binary, current, settings.parent, arguments.ranks,
+                            directory / LOG_NAME)
+
+        records = directory / RECOVERY_DIR
+        inflation = last_inflation((records / "PressureVolumeInfo.dat").read_text(),
+                                   (records / "CycleInfo.dat").read_text(), arguments.surface)
+        if not reached_target(inflation, tolerance):
+            raise SystemExit(
+                f"iteration {iteration}: the recovery stopped after {inflation.cycles} cycles at a "
+                f"residual of {inflation.residual_norm:.3e} m, above the plugin's tolerance of "
+                f"{tolerance:.3e} m. Its pressure-volume curve does not end at the target geometry "
+                f"and nothing is fitted to it; see {directory / LOG_NAME}")
+
+        # A row of the pressure-volume record pairs the pressure a step was solved at with the volume
+        # that step produced, so the curve is fitted as it stands. What the last row does carry is the
+        # inner loop's own bias: the recovery drives its residual onto the configuration one step
+        # behind, so the end-diastolic volume overshoots the target by about one step of the ramp.
+        # That is the bias the end-diastolic residual reports and the fit cannot influence.
+        simulated_fit = fit_exponential(inflation.volumes, inflation.pressures, inflation.volumes[0])
+        scalings = parameter_scalings(klotz_fit, simulated_fit)
+        state = convergence(inflation.volumes[0], klotz_unloaded, inflation.volumes[-1], measured,
+                            scalings)
+        print(f"iteration {iteration}: {inflation.cycles} cycles at a residual of "
+              f"{inflation.residual_norm:.3e} m, unloaded {inflation.volumes[0]:.2f} ml "
+              f"(residual {state.unloaded:.2f} ml), end-diastolic {inflation.volumes[-1]:.2f} ml "
+              f"(residual {state.end_diastolic:.2f} ml), stiffness x{scalings.stiffness:.3f}, "
+              f"exponents x{scalings.exponent:.3f}")
+        if scalings.clamped:
+            print(f"  the {' and '.join(scalings.clamped)} scaling the fit asked for was outside "
+                  f"{SCALING_BOUNDS} and was clamped")
+        if state.converged:
+            print(f"converged: the unloaded volume is within {VOLUME_TOLERANCE * measured:.2f} ml of "
+                  f"the Klotz prediction. The parameters are in {current}")
+            return
+        if state.stagnated:
+            print(f"stagnated: no parameter moved by more than {STAGNATION_TOLERANCE:g}, with the "
+                  f"unloaded volume still {state.unloaded:.2f} ml from the Klotz prediction. "
+                  f"The parameters are in {current}")
+            return
+        for key, value in scaled_parameters(root, blocks, stiffness, exponents, scalings).items():
+            set_parameter(root, key, format(value, PARAMETER_FORMAT))
+
+    raise SystemExit(f"the loop reached its cap of {arguments.iterations} outer iterations without "
+                     f"converging; the parameters of the last one are in {current}")
+
+
+if __name__ == "__main__":
+    main()
