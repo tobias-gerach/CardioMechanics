@@ -36,6 +36,8 @@ protected:
     void InitMatrices();
     void InitPETScSolver();
     void UpdateInitialGuess(TFloat time);
+    /// Also drops the last increment, which the next step would otherwise start from.
+    void ResetStepHistory() override;
     CBStatus SolverStep(PetscScalar time, bool forceJacobianAndDampingRecalculation = false);
     
     using CBSolver::CalcNodalForces;
@@ -52,7 +54,6 @@ protected:
     Vec  residuum_ = nullptr;
     Vec  displacement_ = nullptr;
     Vec  initialGuess_ = nullptr;
-    Vec  tmpVector_ = nullptr;
     
     // time tracking variables, for initial guess computation
     TFloat timeLast_;

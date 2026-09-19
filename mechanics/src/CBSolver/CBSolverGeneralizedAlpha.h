@@ -53,6 +53,11 @@ public:
     
 protected:
     CBStatus SolverStep(PetscScalar time, bool forceJacobianAndDampingRecalculation = false) override;
+    /// Also drops the velocity and acceleration the next predictor starts from, and the Jacobian of the
+    /// previous configuration.
+    void ResetStepHistory() override;
+    void SaveStepStart() override;
+    void RestoreStepStart() override;
     CBStatus CalcNodalForcesJacobian(Vec unknowns, Mat jacobian) override;
     CBStatus CalcDampingMatrix();
     
@@ -62,6 +67,8 @@ protected:
     Vec         unknowns_ = nullptr;
     Vec         velocity_ = nullptr;
     Vec         acceleration_ = nullptr;
+    Vec         stepStartVelocity_ = nullptr;  // see SaveStepStart
+    Vec         stepStartAcceleration_ = nullptr;
     Vec         displacement_ = nullptr;
     Vec         absDisplacement_ = nullptr;
     Vec         residuum_ = nullptr;

@@ -366,7 +366,6 @@ void CBReferenceRecovery::ApplyBackwardDisplacement() {
         S_.unloadedVolumes_.at(s) = cavities_.at(s)->CalcVolume();
     
     adapter_->GetSolver()->RelaxElementsAndBases();
-    adapter_->GetSolver()->SetZeroVelocityAndAcceleration();
 } // CBReferenceRecovery::ApplyBackwardDisplacement
 
 void CBReferenceRecovery::ExportPressureVolumeInfo(TFloat time) {

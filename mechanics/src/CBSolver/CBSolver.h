@@ -88,9 +88,12 @@ public:
     
     TInt GetNumberOfSolidElements() {return solidElements_.size(); }
     
-    void GetNodeCoordinates(Vec &nodes) {VecDuplicate(nodes_, &nodes); VecCopy(nodes_, nodes); }
+    /// Copies the node coordinates into nodes, which the caller creates with the layout of the solver's nodes.
+    void GetNodeCoordinates(Vec nodes) {VecCopy(nodes_, nodes); }
     
-    void SetNodeCoordinates(Vec &nodes) {VecCopy(nodes,  nodes_); UpdateGhostNodesAndLinkToAdapter(); }
+    /// Replaces the configuration. The steps that led to the previous one say nothing about the next step
+    /// from this one, so the solver forgets them.
+    void SetNodeCoordinates(Vec &nodes) {VecCopy(nodes,  nodes_); ResetStepHistory(); UpdateGhostNodesAndLinkToAdapter(); }
     
     void SetRefNodeCoordinates(Vec &nodes) {VecCopy(nodes, refNodes_); UpdateGhostNodesAndLinkToAdapter(); }
     
@@ -179,6 +182,14 @@ protected:
     virtual void InitLoadedState();
     void         UpdateGhostNodesAndLinkToAdapter();
     void         CreateNodesJacobianAndLinkToAdapter();
+    /// Forgets what the solver carries from one step into the next: the pressure field and whatever a
+    /// solver derives the next step's initial guess from.
+    virtual void ResetStepHistory();
+    /// A step is committed before the plugins analyse it, so that they read the configuration it reached
+    /// in the solver's vectors as in the elements, and a configuration a plugin sets stays set. These keep
+    /// the state the step started from and return to it when a plugin rejects the step.
+    virtual void SaveStepStart();
+    virtual void RestoreStepStart();
     /// AIJ matrix with numLocalRows rows and columns on this rank, preallocated for the estimated
     /// number of nonzero columns nnz of each local row. The estimates count a column once for every
     /// element sharing it, so on small meshes or small ranks they can exceed the columns a row has,
@@ -329,6 +340,8 @@ protected:
     Vec pressures_           = 0; // converged pressure field, the counterpart of nodes_
     Vec trialPressures_      = 0;
     Vec pressureResiduals_   = 0;
+    Vec stepStartNodes_      = 0; // see SaveStepStart
+    Vec stepStartPressures_  = 0;
     
     PetscInt activeStressLowerIndex_                               = 0;
     PetscInt activeStressUpperIndex_                               = 0;
