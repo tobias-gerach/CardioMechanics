@@ -25,10 +25,11 @@ def node(p):
     return 1 + i + SHAPE[0] * (j + SHAPE[1] * k)
 
 
-def write_mesh(tetgen_dir, scale=(1, 1, 1), linear=False):
+def write_mesh(tetgen_dir, scale=(1, 1, 1), linear=False, quadratic_end=False):
     """Write the cantilever as tetgen .node/.ele/.sur files, T10 elements with T6 top faces, or T4
-    elements with T3 top faces if linear, and T3 end faces, with the block stretched by scale along
-    each axis. Nodes are numbered in the order of node(), which they match on the T10 mesh."""
+    elements with T3 top faces if linear, and T3 end faces, T6 if quadratic_end, with the block
+    stretched by scale along each axis. Nodes are numbered in the order of node(), which they match
+    on the T10 mesh."""
     def mid(a, b):
         return tuple((x + y) // 2 for x, y in zip(a, b))
 
@@ -59,10 +60,12 @@ def write_mesh(tetgen_dir, scale=(1, 1, 1), linear=False):
     for ci, cj in itertools.product(range(CELLS[0]), range(CELLS[1])):
         add_square(lambda dx, dy: (2 * (ci + dx), 2 * (cj + dy), top), SURFACE, quadratic=not linear)
     # Nodes are numbered with z slowest, so the free end spans every rank's node block, whereas
-    # the bottom face would lie on the first rank alone. It is linear because the Robin boundary
-    # elements are three-node triangles.
+    # the bottom face would lie on the first rank alone. It is linear unless asked otherwise, since
+    # the Robin boundary elements are three-node triangles and the loader has to refine six-node
+    # faces into four of them.
     for cj, ck in itertools.product(range(CELLS[1]), range(CELLS[2])):
-        add_square(lambda dy, dz: (end, 2 * (cj + dy), 2 * (ck + dz)), END_SURFACE, quadratic=False)
+        add_square(lambda dy, dz: (end, 2 * (cj + dy), 2 * (ck + dz)), END_SURFACE,
+                   quadratic=quadratic_end and not linear)
 
     # A point in no element would be a node without stiffness.
     points = sorted({p for e in elements for p in e}, key=node)
