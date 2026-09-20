@@ -1,0 +1,216 @@
+<settings>Three heart beats of the reference recovery ellipsoid from its recovered unloaded state</settings>
+
+<General>
+    <LogFile>./Results/EllipsoidHeartCycle.log</LogFile>
+</General>
+
+<Mesh>
+    <Type>T10P1</Type>
+    <Format>Tetgen</Format>
+    <!-- LoadUnloadedState reads its two node files row by row into the solver's node order, so
+         that order has to be the file's. The reference recovery example is set the same way, which
+         is what makes its recovered unloaded state readable here. -->
+    <Sorting>None</Sorting>
+
+    <Tetgen>
+        <Unit>1e-3</Unit>
+        <!-- generate.py writes the node file with its boundary condition column zeroed and the
+             surface file with the Robin traction scaling as a third attribute. The elements and the
+             fibre bases are read from the reference recovery example unchanged. -->
+        <Nodes>./tetgen/ellipsoid.node</Nodes>
+        <Elements>../ReferenceRecovery/tetgen/ellipsoid.ele</Elements>
+        <Surfaces>./tetgen/ellipsoid.sur</Surfaces>
+        <Bases>../ReferenceRecovery/tetgen/ellipsoid.bases</Bases>
+        <DetermineNeighbors>false</DetermineNeighbors>
+        <EnforceOrthonormalBases>true</EnforceOrthonormalBases>
+    </Tetgen>
+
+    <!-- One activation time per solid element, in the order of the element file. -->
+    <LAT>
+        <FilePath>./tetgen/ellipsoid.lat</FilePath>
+    </LAT>
+
+    <Surfaces>
+        <!-- The mesh writes its surfaces as the three-node triangles the quadratic faces refine
+             into, so a face loads all six of its nodes and the lid closing the endocardium can be a
+             fan over that surface's boundary, adding no node the wall does not already hold.
+
+             Endocardium and the lid, both surface index 1, which is what cavity membership goes by.
+             No CAVITY declaration is needed: the plugin selects cavity elements by element type and
+             a three-node surface already is one. -->
+        <Surface_1><Type>T3</Type></Surface_1>
+        <!-- Epicardium, the pericardial Robin boundary. -->
+        <Surface_2><Type>CONTACT_ROBIN</Type></Surface_2>
+        <!-- Base, held by the vectorial Robin boundary that replaces its Dirichlet condition. -->
+        <Surface_3><Type>CONTACT_ROBIN</Type></Surface_3>
+    </Surfaces>
+</Mesh>
+
+<Materials>
+    <Mat_30>
+        <Type>Usyk</Type>
+        <Density>1082</Density>
+        <!-- The parameters the level 0 material fit of the reference recovery example converged to,
+             so the passive response is the one the unloaded state was recovered with. -->
+        <Usyk>
+            <a>155.931</a>
+            <bff>17.0536</bff>
+            <bss>12.7902</bss>
+            <bnn>6.39511</bnn>
+            <bfs>25.5805</bfs>
+            <bfn>6.39511</bfn>
+            <bns>6.39511</bns>
+            <k>1e7</k>
+        </Usyk>
+
+        <!-- The TanH model returns its tension in kPa and refuses any TensionMax but 1000, which is
+             the kPa to Pa conversion. -->
+        <TensionMax>1000</TensionMax>
+        <TensionModel>TanH</TensionModel>
+        <TanH>
+            <!-- 80 bpm. Each element contracts once per cycle, starting at its activation time. -->
+            <cycleLength>0.75</cycleLength>
+            <!-- Along the fibre only. -->
+            <kff>1</kff>
+            <kss>0</kss>
+            <knn>0</knn>
+            <ksn>0</ksn>
+            <!-- The one parameter tuned for the ejection fraction target; everything else is the
+                 model's default. -->
+            <PeakTension>120</PeakTension>
+        </TanH>
+    </Mat_30>
+</Materials>
+
+<Export>
+    <Format>VTK</Format>
+    <Prefix>./Results/EllipsoidHeartCycle</Prefix>
+    <TimeStep>0.01</TimeStep>
+    <Options>
+        <!-- The activation sequence, written once at the start time. -->
+        <LocalActivationTime>true</LocalActivationTime>
+    </Options>
+</Export>
+
+<Solver>
+    <NonZeros>2000</NonZeros>
+    <DomainDecomposition>false</DomainDecomposition>
+    <Precision>1e-8</Precision>
+
+    <!-- Generalized-alpha at a spectral radius of 0.5 damps the high-frequency modes of the
+         discretization without the physical damping Rayleigh would add. No Rayleigh damping, so
+         that any damping added later is a visible change. -->
+    <Type>GeneralizedAlpha</Type>
+    <GeneralizedAlpha>
+        <RhoInf>0.5</RhoInf>
+    </GeneralizedAlpha>
+
+    <Formulation>TotalLagrangian</Formulation>
+
+    <StartTime>0</StartTime>
+    <!-- Three beats, long enough for the circulation to reach a near periodic state. -->
+    <StopTime>2.25</StopTime>
+    <TimeStep>1e-3</TimeStep>
+
+    <Plugins>
+        <LoadUnloadedState>true</LoadUnloadedState>
+        <Circulation>true</Circulation>
+        <RobinBoundary>true</RobinBoundary>
+        <RobinBoundaryGeneral>true</RobinBoundaryGeneral>
+    </Plugins>
+</Solver>
+
+<Plugins>
+    <!-- The end-diastolic mesh carries the stress that balances 8 mmHg rather than being treated as
+         stress free: the plugin relaxes the elements onto the recovered unloaded configuration and
+         inflates them back onto the mesh. Both files are read with a hard-coded unit of 1e-3, which
+         is the mesh's millimetres. -->
+    <LoadUnloadedState>
+        <unloadedNodes>../ReferenceRecovery/FitMaterialParameters/UnloadedState.node</unloadedNodes>
+        <inflatedNodes>../ReferenceRecovery/tetgen/ellipsoid.node</inflatedNodes>
+    </LoadUnloadedState>
+
+    <Circulation>
+        <Tolerance>1e-7</Tolerance>
+        <MaxIterations>250</MaxIterations>
+        <Perturbation>false</Perturbation>
+        <SecantIterations>0</SecantIterations>
+        <IterationsFile>./Results/CirculationIterations.dat</IterationsFile>
+
+        <!-- The ventricle starts at the end-diastolic state LoadUnloadedState sets, so there is
+             nothing to preload. -->
+        <PreloadingTime1>0.0</PreloadingTime1>
+        <PreloadingTime2>0.0</PreloadingTime2>
+
+        <PressureUnit>mmHg</PressureUnit>
+        <VolumeUnit>ml</VolumeUnit>
+
+        <!-- The lid's material index. It closes the cavity so that the volume is well defined and
+             must not carry the pressure load. -->
+        <IgnoredSurfaceIndices>4</IgnoredSurfaceIndices>
+
+        <Circs>
+            <Circ_1>
+                <Active>true</Active>
+                <Type>CircOneVentricle</Type>
+                <ExportFile>./Results/Circulation.dat</ExportFile>
+                <MaxIntegrationTimeStep>1e-4</MaxIntegrationTimeStep>
+
+                <!-- The systemic parameters of the JPhys example. -->
+                <CircParameters>
+                    <ArtValveResist>   0.006</ArtValveResist>
+                    <ArtResist>        0.05 </ArtResist>
+                    <ArtCompli>        2.5  </ArtCompli>
+                    <ArtVolumeUnstr> 800.0  </ArtVolumeUnstr>
+                    <PerResist>        0.60 </PerResist>
+                    <VenResist>        0.03 </VenResist>
+                    <VenCompli>      100.0  </VenCompli>
+                    <VenVolumeUnstr>2850.0  </VenVolumeUnstr>
+                </CircParameters>
+
+                <InitialConditions>
+                    <!-- The cavity volume generate.py prints, 120.87 ml, plus 1000 ml of arterial
+                         and 3650 ml of venous volume. The arterial compliance puts 1000 ml at
+                         80 mmHg and the venous one puts 3650 ml at the 8 mmHg the unloaded state
+                         was recovered at, so no flow jumps at the first step. -->
+                    <TotalVolume>4770.87</TotalVolume>
+                    <ArtVolume>1000.0</ArtVolume>
+                    <VentrPressure>8.0</VentrPressure>
+                </InitialConditions>
+
+                <Cavities>
+                    <VentrSurface>1</VentrSurface>
+                    <VentrPreloading>0.0</VentrPreloading>
+                </Cavities>
+            </Circ_1>
+        </Circs>
+    </Circulation>
+
+    <!-- The pericardium on the epicardium: a spring and dashpot in the normal direction only, so
+         that it resists motion across the surface and lets the epicardium slide. Its strength is
+         scaled per face by the surface file's third attribute, full at the apex and zero at the
+         base. Both Robin plugins export under the same field names and would overwrite each other,
+         so only this one exports.
+
+         The reference normal of this surface points out of the myocardium. The spring is even in
+         it - it projects the displacement onto the normal and acts along the normal - so the flag
+         below does not change the force, only the sign of the exported ContactDistance, which it
+         makes positive where the epicardium moves outward. -->
+    <RobinBoundary>
+        <SurfaceIndex>2</SurfaceIndex>
+        <Alpha>1e8</Alpha>
+        <Beta>5e3</Beta>
+        <FlipSurfaceNormals>true</FlipSurfaceNormals>
+        <Export>true</Export>
+    </RobinBoundary>
+
+    <!-- The base, held in all three directions instead of clamped, so that it can move with the
+         ventricle while its rigid-body motion is resisted. The lid is left free: it only closes the
+         cavity volume. -->
+    <RobinBoundaryGeneral>
+        <SurfaceIndex>3</SurfaceIndex>
+        <Alpha>1e5</Alpha>
+        <Beta>5e3</Beta>
+        <Export>false</Export>
+    </RobinBoundaryGeneral>
+</Plugins>
