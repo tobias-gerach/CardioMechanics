@@ -505,33 +505,29 @@ void CBModelLoaderTetgen::LoadSurfaces(std::string surfacesFilename, std::vector
                     element->SetParameters(parameters_);
                     newElements.push_back(element);
                 } else if ((element->GetNumberOfNodesIndices() == 3) && (nodesPerSurfaceElement == 6)) {
-                    for (int t = 0; t < 4; t++) {
-                        int triangleNodes[3];
-                        if (t == 0) {
-                            triangleNodes[0] = 0;
-                            triangleNodes[1] = 3;
-                            triangleNodes[2] = 5;
-                        } else if (t == 1) {
-                            triangleNodes[0] = 3;
-                            triangleNodes[1] = 1;
-                            triangleNodes[2] = 4;
-                        } else if (t == 2) {
-                            triangleNodes[0] = 3;
-                            triangleNodes[1] = 4;
-                            triangleNodes[2] = 5;
-                        } else if (t == 3) {
-                            triangleNodes[0] = 5;
-                            triangleNodes[1] = 4;
-                            triangleNodes[2] = 2;
-                        }
-                        
+                    /// The four triangles a six-node face refines into, in its node order: the three
+                    /// corner triangles and the middle one, each with the orientation of the face.
+                    static const int subTriangles[4][3] = {{0, 3, 5}, {3, 1, 4}, {3, 4, 5}, {5, 4, 2}};
+                    
+                    /// Only the node count of the declared type was needed to get here.
+                    delete element;
+                    
+                    for (auto &triangleNodes : subTriangles) {
+                        /// Each triangle is an element of its own. One element stored four times
+                        /// carries the nodes of the last alone, leaving three quarters of the face
+                        /// unloaded and its stored indices out of step with the container.
+                        element = Base::model_->GetElementFactory()->New(surfaceType);
+                        auto surface = dynamic_cast<CBElementSurface *>(element);
                         element->SetIndex(newElements.size());
-                        element->SetMaterialIndex(attributes.at(0));
-                        dynamic_cast<CBElementSurface *>(element)->SetSurfaceIndex(attributes.at(1));
-                        dynamic_cast<CBElementSurface *>(element)->SetSurfaceElementIndex(currentSurfaceElement);
-                        element->SetNodeIndex(0, nodesIndexes.at(triangleNodes[0]) - 1);
-                        element->SetNodeIndex(1, nodesIndexes.at(triangleNodes[1]) - 1);
-                        element->SetNodeIndex(2, nodesIndexes.at(triangleNodes[2]) - 1);
+                        element->SetMaterialIndex(static_cast<TInt>(attributes.at(0)));
+                        surface->SetSurfaceIndex(static_cast<TInt>(attributes.at(1)));
+                        surface->SetSurfaceElementIndex(currentSurfaceElement);
+                        if (attr == 3) {
+                            surface->SetSurfaceTractionScaling(attributes.at(2));
+                        }
+                        for (unsigned int j = 0; j < 3; j++)
+                            element->SetNodeIndex(j, nodesIndexes.at(triangleNodes[j]) - 1);
+                        element->SetParameters(parameters_);
                         newElements.push_back(element);
                     }
                 } else {
