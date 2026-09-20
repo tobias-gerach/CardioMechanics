@@ -7,7 +7,10 @@
 <Mesh>
     <Type>T10P1</Type>
     <Format>Tetgen</Format>
-    <Sorting>PCA</Sorting>
+    <!-- The recovery writes its node files row by row in the solver's own node order, and nothing
+         maps that order back to the file's. Sorting them would leave the deliverable in an order no
+         consumer of it can reconstruct, so the two orders are kept the same. -->
+    <Sorting>None</Sorting>
 
     <Tetgen>
         <Unit>1e-3</Unit>
@@ -15,22 +18,26 @@
         <Elements>./tetgen/ellipsoid.ele</Elements>
         <Surfaces>./tetgen/ellipsoid.sur</Surfaces>
         <Bases>./tetgen/ellipsoid.bases</Bases>
-        <DetermineNeighbors>true</DetermineNeighbors>
+        <DetermineNeighbors>false</DetermineNeighbors>
         <EnforceOrthonormalBases>true</EnforceOrthonormalBases>
     </Tetgen>
 
     <Surfaces>
-        <!-- Endocardium and the lid that closes it. Both carry surface index 1, which is what
-             cavity membership goes by, and are told apart by their material index. Declaring them
-             CAVITY would force 3-node faces on this quadratic mesh, which put the load of a
-             uniformly loaded face on the mid-edge nodes rather than the vertices; the plugin needs
-             no such declaration, since it selects cavity elements by element type and a 6-node
-             surface already is one. -->
-        <Surface_1><Type>T6</Type></Surface_1>
+        <!-- The mesh writes its surfaces as the three-node triangles the quadratic faces refine
+             into, so a face still loads all six of its nodes. It has to: the lid closing the
+             endocardium is a fan over that surface's own boundary, which adds no node of its own,
+             and a meshed disc would add nodes that lie in no tetrahedron and carry neither
+             stiffness nor mass.
+
+             Endocardium and the lid that closes it. Both carry surface index 1, which is what
+             cavity membership goes by, and are told apart by their material index. No CAVITY
+             declaration is needed, since the plugin selects cavity elements by element type and a
+             three-node surface already is one. -->
+        <Surface_1><Type>T3</Type></Surface_1>
         <!-- Epicardium -->
-        <Surface_2><Type>T6</Type></Surface_2>
+        <Surface_2><Type>T3</Type></Surface_2>
         <!-- Base, fixed in all directions in the node file -->
-        <Surface_3><Type>T6</Type></Surface_3>
+        <Surface_3><Type>T3</Type></Surface_3>
     </Surfaces>
 </Mesh>
 
@@ -59,7 +66,7 @@
     <Format>VTK</Format>
     <Prefix>./Results/Ellipsoid</Prefix>
     <!-- One snapshot per inflation; the deliverable is the node file, not the time series. -->
-    <TimeStep>0.1</TimeStep>
+    <TimeStep>0.01</TimeStep>
 </Export>
 
 <Solver>

@@ -57,9 +57,43 @@ def closed_surface(directory, stem, surface):
     return abs(volume(np.ones(3)) - volume(np.zeros(3))) <= 1e-10
 
 
-def write_tetgen(directory, stem, surfaces, fixations, inward=()):
+# The four triangles a six-node face refines into, in its node order, as
+# CBModelLoaderTetgen::LoadSurfaces writes them: the three corner triangles and the middle one.
+SUB_TRIANGLES = ((0, 3, 5), (3, 1, 4), (3, 4, 5), (5, 4, 2))
+
+
+def _fan(faces, group, surface, material):
+    """Three-node triangles closing the open boundary of the faces of `group`, as a fan from one of
+    its boundary nodes, tagged with `material` and `surface`.
+
+    A boundary edge is one that a single face carries. Taking each in the direction opposite to the
+    face that carries it orients the fan consistently with that surface, so the two together bound a
+    volume. The fan adds no node: every triangle is spanned by nodes already on the boundary, which
+    is what keeps them attached to the elements behind that surface. A node of its own would sit in
+    no tetrahedron, and so carry neither stiffness nor mass.
+    """
+    edges = set()
+    for f, g, _ in faces:
+        if g == group:
+            for edge in ((int(f[0]), int(f[1])), (int(f[1]), int(f[2])), (int(f[2]), int(f[0]))):
+                if edge[::-1] in edges:
+                    edges.remove(edge[::-1])
+                else:
+                    edges.add(edge)
+    boundary = sorted(edges)
+    assert boundary, f"surface group {group} has no open boundary to close"
+    apex = boundary[0][0]
+    return [(np.array([apex, v, u]), material, surface) for u, v in boundary if apex not in (u, v)]
+
+
+def write_tetgen(directory, stem, surfaces, fixations, inward=(), refine=False, close=None):
     """Write the tetrahedra of the current gmsh model, first- or second-order, as tetgen stem.node,
     stem.ele and stem.sur into directory.
+
+    With refine, each six-node face is written as the four three-node triangles it refines into,
+    which load the same six nodes. close maps a material index to the surface group it closes with a
+    fan of three-node triangles, which needs refine on a second-order mesh: the fan spans boundary
+    nodes alone, and only a refined surface has every node of its boundary on that boundary.
 
     Each element carries the tag of its 3D physical group as material. surfaces maps a 2D physical
     group to the surface index its triangles carry, or is an iterable of groups, which gives each
@@ -89,7 +123,7 @@ def write_tetgen(directory, stem, surfaces, fixations, inward=()):
     elements, materials = np.vstack(elements), np.concatenate(materials)
 
     # Nodes numbered from 1 in tag order. A node of a written surface is kept even when no element
-    # holds it, as on a cavity lid; a node in neither carries no stiffness and is dropped.
+    # holds it; a node in neither carries no stiffness and is dropped.
     surface_nodes = [gmsh.model.mesh.getNodesForPhysicalGroup(2, group)[0] for group in surfaces]
     used = np.unique(np.concatenate([elements.ravel().astype(int)] + [n.astype(int) for n in surface_nodes]))
     index = np.zeros(used.max() + 1, dtype=int)
@@ -120,6 +154,12 @@ def write_tetgen(directory, stem, surfaces, fixations, inward=()):
                     if (np.cross(b - a, c - a) @ (d - a) > 0) != (group in inward):
                         f = f[reversed_face]
                 faces.append((f, group, surface))
+    if refine:
+        assert len(reversed_face) == 6, "there is nothing to refine on a first-order mesh"
+        faces = [(f[list(triangle)], group, surface)
+                 for f, group, surface in faces for triangle in SUB_TRIANGLES]
+    for material, group in (close or {}).items():
+        faces += _fan(faces, group, surfaces[group], material)
 
     with open(directory / f"{stem}.node", "w") as out:
         out.write(f"{len(used)} 3 1 0\n")
@@ -130,7 +170,7 @@ def write_tetgen(directory, stem, surfaces, fixations, inward=()):
         for n, (e, m) in enumerate(zip(index[elements], materials), 1):
             out.write(f"{n} {' '.join(map(str, e))} {m}\n")
     with open(directory / f"{stem}.sur", "w") as out:
-        out.write(f"{len(faces)} {len(reversed_face)} 2\n")
+        out.write(f"{len(faces)} {3 if refine else len(reversed_face)} 2\n")
         for n, (f, group, surface) in enumerate(faces, 1):
             out.write(f"{n} {' '.join(map(str, index[f]))} {group} {surface}\n")
 
