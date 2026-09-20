@@ -63,6 +63,8 @@ examples/benchmark2015/Problem3/
 examples/inverseEllipsoid/Results/
 examples/ReferenceRecovery/tetgen/
 examples/ReferenceRecovery/Results/
+examples/EllipsoidHeartCycle/tetgen/
+examples/EllipsoidHeartCycle/Results/
 
 # the default work directory of tools/python/FitMaterialParameters.py, wherever it is run from
 FitMaterialParameters/
