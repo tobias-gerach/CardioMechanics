@@ -5,7 +5,7 @@ Run from tests/ as `python -m helpers.ellipsoid DIRECTORY --level K` to write on
 """
 import numpy as np
 
-from helpers.gmsh_tetgen import LAYOUTS, TRIANGLE3, closed_surface, write_tetgen
+from helpers.gmsh_tetgen import LAYOUTS, closed_surface, write_tetgen
 
 MATERIAL = 30                              # physical tag of the volume
 ENDO, EPI, BASE = 1, 2, 3                  # physical tags of the surfaces, as in examples/benchmark2015
@@ -69,13 +69,18 @@ def write_ellipsoid(directory, level, order=2, curved=True, lid=False, scale=1.0
     domain of the T4 mesh of the same level: comparing element types on the two then measures the
     discretization alone, not the geometry.
 
-    With lid=True the base opening of the endocardium is closed by a plane surface on its base curve
-    loop, so the enclosed volume of the endocardium is a true cavity volume instead of a number that
-    depends on where the origin sits. Its faces carry surface index ENDO, since cavity membership is
-    by surface index, and material index LID, the handle a cavity plugin's IgnoredSurfaceIndices uses
-    to keep them out of the pressure load. Its interior nodes lie in no tetrahedron and are fixed in
-    all directions: the solver adds a diagonal 1.0 on every constrained component onto the Jacobian
-    independently of the element assembly, so such a node gets an identity row instead of an empty one.
+    With lid=True the base opening of the endocardium is closed by a fan of three-node triangles over
+    that opening, so the enclosed volume of the endocardium is a true cavity volume instead of a
+    number that depends on where the origin sits. Its faces carry surface index ENDO, since cavity
+    membership is by surface index, and material index LID, the handle a cavity plugin's
+    IgnoredSurfaceIndices uses to keep them out of the pressure load.
+
+    The fan adds no node, which is why it is a fan rather than a meshed disc: a node of the lid alone
+    lies in no tetrahedron and so has neither stiffness nor mass, and a model that leaves it free
+    finds an empty row in its tangent and fails to factor it. A meshed disc is usable only where
+    every node of the lid is fixed, which a moving base rules out. Spanning the opening from its own
+    boundary needs every node of that boundary to lie on it, so a lidded second-order mesh writes all
+    of its surfaces as the three-node triangles the quadratic faces refine into.
 
     The endocardium and the lid then point out of the cavity rather than out of the wall, so the
     cavity encloses a positive volume, as every other cavity mesh of the repository does. The sign of
@@ -107,16 +112,6 @@ def write_ellipsoid(directory, level, order=2, curved=True, lid=False, scale=1.0
                 surfaces[BASE].append(tag)
             else:
                 surfaces[ENDO if gmsh.model.getBoundingBox(2, tag)[2] > -18.5 else EPI].append(tag)
-        if lid:
-            # Building the lid on the curves the endocardium and the base already share makes the
-            # closure conforming: gmsh meshes a curve once, whatever surfaces bound it.
-            def curves(group):
-                return {abs(tag) for _, tag in gmsh.model.getBoundary([(2, t) for t in surfaces[group]],
-                                                                     combined=False, oriented=False)}
-            loop = sorted(curves(ENDO) & curves(BASE))
-            assert loop, "the endocardium and the base share no curve to close the cavity on"
-            surfaces[LID] = [occ.addPlaneSurface([occ.addCurveLoop(loop)])]
-            occ.synchronize()
         for group, tags in surfaces.items():
             gmsh.model.addPhysicalGroup(2, tags, group)
 
@@ -129,13 +124,6 @@ def write_ellipsoid(directory, level, order=2, curved=True, lid=False, scale=1.0
             gmsh.option.setNumber(option, 0)
         gmsh.model.mesh.generate(3)
         gmsh.model.mesh.optimize("Netgen")
-        if lid:
-            # The cavity surface points out of the cavity, so that it encloses a positive volume. The
-            # cavity lies below the base, so the lid closes it consistently only if it points upwards.
-            face = gmsh.model.mesh.getElementsByType(TRIANGLE3, surfaces[LID][0])[1][:3]
-            a, b, c = (np.array(gmsh.model.mesh.getNode(node)[0]) for node in face)
-            if np.cross(b - a, c - a)[2] < 0:
-                gmsh.model.mesh.reverse([(2, surfaces[LID][0])])
         if order == 2:
             gmsh.option.setNumber("Mesh.SecondOrderLinear", 0 if curved else 1)
             gmsh.model.mesh.setOrder(2)
@@ -158,9 +146,14 @@ def write_ellipsoid(directory, level, order=2, curved=True, lid=False, scale=1.0
         if scale != 1.0:
             gmsh.model.mesh.affineTransform([scale, 0, 0, 0, 0, scale, 0, 0, 0, 0, scale, 0])
 
-        surface_indices = {group: ENDO if group == LID else group for group in surfaces}
-        write_tetgen(directory, "ellipsoid", surface_indices, {BASE: 7, LID: 7} if lid else {BASE: 7},
-                     inward={ENDO} if lid else ())
+        # A lidded mesh writes its surfaces as three-node triangles, refined so that their nodes are
+        # those of the quadratic faces, because the lid is a fan over the endocardium's open
+        # boundary and only a refined boundary carries every node of it. The fan spans nodes the
+        # wall already holds, where a meshed disc would add nodes in no tetrahedron: nothing would
+        # carry them, and a solver that leaves them free finds empty rows in its tangent.
+        write_tetgen(directory, "ellipsoid", {group: group for group in surfaces}, {BASE: 7},
+                     inward={ENDO} if lid else (), refine=(lid and order == 2),
+                     close={LID: ENDO} if lid else None)
         if lid:
             assert closed_surface(directory, "ellipsoid", ENDO), "the lid does not close the cavity"
 
