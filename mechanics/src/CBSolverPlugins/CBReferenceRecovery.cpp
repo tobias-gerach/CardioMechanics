@@ -446,14 +446,18 @@ void CBReferenceRecovery::ExportCoordsAsNodeFile(Vec coords, bool isFinalCycle) 
             throw std::runtime_error("CBReferenceRecovery::ExportCoordsAsNodeFile: Couldn't create " + nodeFilename + ".");
         
         nodeFile_ << numNodes << " 3 1 0" << std::endl;
-        
-        for (PetscInt i = 0; i < numNodes; i++) {
+
+        // Rows are written in the original (unsorted) mesh node order, not the solver's internal one, so the
+        // file is the same regardless of Mesh.Sorting and LoadNodes can map it back with GetForwardMapping.
+        CBModel *model = adapter_->GetSolver()->GetModel();
+        for (PetscInt o = 0; o < numNodes; o++) {
+            TInt i = model->GetForwardMapping(o);
             TFloat x = 1e3*values[3*i];
             TFloat y = 1e3*values[3*i+1];
             TFloat z = 1e3*values[3*i+2];
             TInt   b = bc[3*i] + (bc[3*i+1] << 1) + (bc[3*i+2] << 2); // 001 (1): x fixed; 010 (2): y fixed; 100 (4): z fixed;
                                                                       // 111 (7): x,y,z fixed
-            nodeFile_ << i+1 << " " << x << " " << y << " " << z << " " << b << std::endl;
+            nodeFile_ << o+1 << " " << x << " " << y << " " << z << " " << b << std::endl;
         }
         
         delete[] bc;

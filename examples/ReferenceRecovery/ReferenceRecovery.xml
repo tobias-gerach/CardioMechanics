@@ -7,9 +7,6 @@
 <Mesh>
     <Type>T10P1</Type>
     <Format>Tetgen</Format>
-    <!-- The recovery writes its node files row by row in the solver's own node order, and nothing
-         maps that order back to the file's. Sorting them would leave the deliverable in an order no
-         consumer of it can reconstruct, so the two orders are kept the same. -->
     <Sorting>None</Sorting>
 
     <Tetgen>

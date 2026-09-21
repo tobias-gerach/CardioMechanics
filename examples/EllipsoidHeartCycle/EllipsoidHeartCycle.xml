@@ -7,9 +7,6 @@
 <Mesh>
     <Type>T10P1</Type>
     <Format>Tetgen</Format>
-    <!-- LoadUnloadedState reads its two node files row by row into the solver's node order, so
-         that order has to be the file's. The reference recovery example is set the same way, which
-         is what makes its recovered unloaded state readable here. -->
     <Sorting>None</Sorting>
 
     <Tetgen>

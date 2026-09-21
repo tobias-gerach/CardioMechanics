@@ -155,6 +155,9 @@ void CBLoadUnloadedState::LoadNodes(std::string filename) {
         if (dim != 3)
             throw std::runtime_error("CBLoadUnloadedState::LoadNodes: Only for 3D model !");
         
+        // Rows are in the original (unsorted) mesh node order (see CBReferenceRecovery::ExportCoordsAsNodeFile),
+        // so they are mapped to this run's internal node order rather than read into it directly.
+        CBModel *model = adapter_->GetSolver()->GetModel();
         std::string currentNodeAsString;
         TFloat x, y, z;
         int i = 0;
@@ -186,9 +189,10 @@ void CBLoadUnloadedState::LoadNodes(std::string filename) {
                                              "! Did you check if all lines have a sufficient number of coordinates?");
                 }
                 
-                VecSetValue(coordsSeq_, 3*i,   1e-3*x, INSERT_VALUES);
-                VecSetValue(coordsSeq_, 3*i+1, 1e-3*y, INSERT_VALUES);
-                VecSetValue(coordsSeq_, 3*i+2, 1e-3*z, INSERT_VALUES);
+                TInt internalIndex = model->GetForwardMapping(i);
+                VecSetValue(coordsSeq_, 3*internalIndex,   1e-3*x, INSERT_VALUES);
+                VecSetValue(coordsSeq_, 3*internalIndex+1, 1e-3*y, INSERT_VALUES);
+                VecSetValue(coordsSeq_, 3*internalIndex+2, 1e-3*z, INSERT_VALUES);
                 
                 i++;
             }
