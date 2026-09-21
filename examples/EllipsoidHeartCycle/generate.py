@@ -65,12 +65,10 @@ def source_files():
 def check_node_order(mesh_nodes, unloaded, coordinates):
     """The recovered unloaded state has to be in the node order of the mesh file.
 
-    LoadUnloadedState reads both of its node files row by row into the solver's node order, and the
-    recovery wrote its file in the solver's node order of its own run. The two agree only if both
-    runs leave the mesh unsorted, and nothing in either file records which order it is in, so a
-    sorted one would silently pair coordinates with the wrong nodes. The recovered state is the
-    mesh deflated, so row by row it is a fraction of the ventricle away; a permuted one is the
-    ventricle's own size away.
+    The recovery writes its node file in the mesh's own node order regardless of Mesh.Sorting, so
+    row by row it should sit close to the mesh: the recovered state is the mesh deflated, a fraction
+    of the ventricle away. A permuted file, from an out-of-date fit or a solver defect, would instead
+    pair coordinates with the wrong nodes and land a fraction of the ventricle's own size away.
     """
     recovered = np.loadtxt(unloaded, skiprows=1, usecols=(1, 2, 3))
     assert len(recovered) == len(coordinates), \
@@ -80,7 +78,7 @@ def check_node_order(mesh_nodes, unloaded, coordinates):
     assert moved < 0.5 * extent, (
         f"{unloaded.name} is {moved:.1f} mm from the mesh at its furthest node, over half the"
         f" ventricle's {extent:.1f} mm extent: the two are in different node orders."
-        " Set <Sorting>None</Sorting> in the reference recovery example and run its fit again.")
+        " Re-run the reference recovery example's material fit.")
 
 
 def read_table(path):
