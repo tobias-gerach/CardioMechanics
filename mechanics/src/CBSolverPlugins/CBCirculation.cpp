@@ -429,14 +429,18 @@ void CBCirculation::Apply(PetscScalar time) {
             lastPreloadingStep1_ = false;
         }
         
+        // Both preloading times at zero means no preloading is configured, not a
+        // zero-length preloading phase, so the phase-1/phase-2 branches below must
+        // not fire and leave the initial cavity pressure of the final branch applied.
+        bool noPreloading = (preloadingTime1_ == 0.0) && (preloadingTime2_ == 0.0);
         if (time < preloadingTime1_) {
             estPressure_ = -time/preloadingTime1_ * preloadingPressure1_;
             str1_ << "Preloading Phase 1";
-        } else if (std::abs(time-preloadingTime1_) < 0.5*dt_) {
+        } else if (!noPreloading && (std::abs(time-preloadingTime1_) < 0.5*dt_)) {
             estPressure_ = -1.0 * preloadingPressure1_;
             lastPreloadingStep1_ = true;
             str1_ << "Preloading Phase 1: Last step";
-        } else if (time <= preloadingTime1_+preloadingTime2_) {
+        } else if (!noPreloading && (time <= preloadingTime1_+preloadingTime2_)) {
             estPressure_ = (time-preloadingTime1_)/preloadingTime2_ * preloadingPressure2_;
             str1_ << "Preloading Phase 2";
         } else {
