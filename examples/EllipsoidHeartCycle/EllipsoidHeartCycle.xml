@@ -151,9 +151,13 @@
         <PressureUnit>mmHg</PressureUnit>
         <VolumeUnit>ml</VolumeUnit>
 
-        <!-- The lid's material index. It closes the cavity so that the volume is well defined and
-             must not carry the pressure load. -->
-        <IgnoredSurfaceIndices>4</IgnoredSurfaceIndices>
+        <!-- The lid closes the cavity so that the volume is well defined, and carries the
+             pressure load along with the endocardium. Pressure on the endocardium alone acts on an
+             open surface and leaves a net axial force of about 2 N at end-diastolic pressure. A
+             clamped base takes that up; a base held by springs that start unloaded does not, so the
+             end-diastolic geometry would not be an equilibrium. Loading the lid closes the surface
+             and the net force vanishes. -->
+        <!-- <IgnoredSurfaceIndices>4</IgnoredSurfaceIndices> -->
 
         <Circs>
             <Circ_1>

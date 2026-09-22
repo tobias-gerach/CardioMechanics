@@ -93,8 +93,11 @@
         <!-- 8 mmHg. A positive entry inflates: the faces of a lidded endocardium point out of the
              cavity, so that it encloses a positive volume, and the load follows their normals. -->
         <Pressures>1066.58</Pressures>
-        <!-- The lid's material index. It closes the cavity so that the volume is well defined and
-             must not carry the pressure load. -->
+        <!-- The lid closes the cavity so that the volume is well defined, and carries the
+             pressure load along with the endocardium. Pressure on the endocardium alone acts on an
+             open surface and leaves a net axial force that the clamped base takes up here. The
+             recovered state is consumed by a model whose base is free, where nothing would balance
+             it, so the load must already be the closed one when the state is recovered. -->
         <!-- <IgnoredSurfaceIndices>4</IgnoredSurfaceIndices> -->
         <NumberOfIncrements>1</NumberOfIncrements>
         <CycleMax>5</CycleMax>
