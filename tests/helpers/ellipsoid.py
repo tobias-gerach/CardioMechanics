@@ -27,8 +27,10 @@ def fibre_frames(X):
     This is the fibre field of problem 3, as in xyz_to_fiber.m of the benchmark repository: the
     transmural coordinate t, 0 on the endocardium and 1 on the epicardium, fixes the ellipsoidal
     surface through the point, r_s = 7 + 3t and r_l = 17 + 3t, and the fibre angle alpha = 90 - 180t
-    from the circumferential direction dX/dv towards the meridian dX/du. The problem's Guccione law is
-    transversely isotropic, so the sheet only completes the frame; it lies in that surface.
+    from the circumferential direction dX/dv towards the meridian dX/du. The sheet is the outward
+    normal of that surface, the transmural direction from endocardium to epicardium along which the
+    laminar sheets stack; the sheet-normal completes the frame and lies in the surface. The problem's
+    Guccione law is transversely isotropic, so only the fibre direction enters it.
     """
     x, y, z = X.T
 
@@ -52,8 +54,11 @@ def fibre_frames(X):
     dv /= np.linalg.norm(dv, axis=1, keepdims=True)
     alpha = np.radians(90 - 180 * t)[:, None]
     fibre = du * np.sin(alpha) + dv * np.cos(alpha)
-    sheet = du * np.cos(alpha) - dv * np.sin(alpha)
-    return np.stack([fibre, np.cross(fibre, sheet), sheet], axis=1)
+    # Perpendicular to the fibre within the ellipsoidal surface, which makes it the sheet-normal:
+    # the sheet is the transmural direction, perpendicular to both.
+    sheet_normal = du * np.cos(alpha) - dv * np.sin(alpha)
+    sheet = np.cross(fibre, sheet_normal)
+    return np.stack([fibre, sheet, sheet_normal], axis=1)
 
 
 def write_ellipsoid(directory, level, order=2, curved=True, lid=False, scale=1.0):
