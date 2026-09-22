@@ -7,7 +7,7 @@
 <Mesh>
     <Type>T10P1</Type>
     <Format>Tetgen</Format>
-    <Sorting>None</Sorting>
+    <Sorting>PCA</Sorting>
 
     <Tetgen>
         <Unit>1e-3</Unit>
@@ -95,7 +95,7 @@
         <Pressures>1066.58</Pressures>
         <!-- The lid's material index. It closes the cavity so that the volume is well defined and
              must not carry the pressure load. -->
-        <IgnoredSurfaceIndices>4</IgnoredSurfaceIndices>
+        <!-- <IgnoredSurfaceIndices>4</IgnoredSurfaceIndices> -->
         <NumberOfIncrements>1</NumberOfIncrements>
         <CycleMax>5</CycleMax>
         <Augmentation>true</Augmentation>
