@@ -53,7 +53,7 @@ def fibre_frames(X):
     alpha = np.radians(90 - 180 * t)[:, None]
     fibre = du * np.sin(alpha) + dv * np.cos(alpha)
     sheet = du * np.cos(alpha) - dv * np.sin(alpha)
-    return np.stack([fibre, sheet, np.cross(fibre, sheet)], axis=1)
+    return np.stack([fibre, np.cross(fibre, sheet), sheet], axis=1)
 
 
 def write_ellipsoid(directory, level, order=2, curved=True, lid=False, scale=1.0):
