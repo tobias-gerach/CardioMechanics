@@ -7,7 +7,7 @@
 <Mesh>
     <Type>T10P1</Type>
     <Format>Tetgen</Format>
-    <Sorting>None</Sorting>
+    <Sorting>PCA</Sorting>
 
     <Tetgen>
         <Unit>1e-3</Unit>
@@ -23,9 +23,9 @@
     </Tetgen>
 
     <!-- One activation time per solid element, in the order of the element file. -->
-    <LAT>
+    <!-- <LAT>
         <FilePath>./tetgen/ellipsoid.lat</FilePath>
-    </LAT>
+    </LAT> -->
 
     <Surfaces>
         <!-- The mesh writes its surfaces as the three-node triangles the quadratic faces refine
@@ -44,19 +44,28 @@
 </Mesh>
 
 <Materials>
+    <Global>
+        <Damping>
+            <Rayleigh>
+                <Alpha>500</Alpha>
+                <Beta>0.005</Beta>
+            </Rayleigh>
+        </Damping>
+    </Global>
+
     <Mat_30>
         <Type>Usyk</Type>
         <Density>1082</Density>
         <!-- The parameters the level 0 material fit of the reference recovery example converged to,
              so the passive response is the one the unloaded state was recovered with. -->
         <Usyk>
-            <a>155.931</a>
-            <bff>17.0536</bff>
-            <bss>12.7902</bss>
-            <bnn>6.39511</bnn>
-            <bfs>25.5805</bfs>
-            <bfn>6.39511</bfn>
-            <bns>6.39511</bns>
+            <a>115.716</a>
+            <bff>19.4812</bff>
+            <bss>14.6109</bss>
+            <bnn>7.30545</bnn>
+            <bfs>29.2218</bfs>
+            <bfn>7.30545</bfn>
+            <bns>7.30545</bns>
             <k>1e7</k>
         </Usyk>
 
@@ -74,7 +83,7 @@
             <ksn>0</ksn>
             <!-- The one parameter tuned for the ejection fraction target; everything else is the
                  model's default. -->
-            <PeakTension>120</PeakTension>
+            <PeakTension>50</PeakTension>
         </TanH>
     </Mat_30>
 </Materials>
@@ -106,7 +115,7 @@
 
     <StartTime>0</StartTime>
     <!-- Three beats, long enough for the circulation to reach a near periodic state. -->
-    <StopTime>2.25</StopTime>
+    <StopTime>0.75</StopTime>
     <TimeStep>1e-3</TimeStep>
 
     <Plugins>
@@ -123,8 +132,8 @@
          inflates them back onto the mesh. Both files are read with a hard-coded unit of 1e-3, which
          is the mesh's millimetres. -->
     <LoadUnloadedState>
-        <unloadedNodes>../ReferenceRecovery/FitMaterialParameters/UnloadedState.node</unloadedNodes>
-        <inflatedNodes>../ReferenceRecovery/tetgen/ellipsoid.node</inflatedNodes>
+        <unloadedNodes>../ReferenceRecovery/FitMaterialParameters/iteration_05/ReferenceRecovery/UnloadedState_Incr1.node</unloadedNodes>
+        <inflatedNodes>../ReferenceRecovery/FitMaterialParameters/iteration_05/ReferenceRecovery/InflatedState_Incr1.node</inflatedNodes>
     </LoadUnloadedState>
 
     <Circulation>
@@ -195,8 +204,8 @@
          makes positive where the epicardium moves outward. -->
     <RobinBoundary>
         <SurfaceIndex>2</SurfaceIndex>
-        <Alpha>1e8</Alpha>
-        <Beta>5e3</Beta>
+        <Alpha>1e7</Alpha>
+        <Beta>0</Beta>
         <FlipSurfaceNormals>true</FlipSurfaceNormals>
         <Export>true</Export>
     </RobinBoundary>
@@ -206,8 +215,8 @@
          cavity volume. -->
     <RobinBoundaryGeneral>
         <SurfaceIndex>3</SurfaceIndex>
-        <Alpha>1e5</Alpha>
-        <Beta>5e3</Beta>
+        <Alpha>1e6</Alpha>
+        <Beta>0</Beta>
         <Export>false</Export>
     </RobinBoundaryGeneral>
 </Plugins>
