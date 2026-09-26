@@ -23,12 +23,15 @@
 
 using namespace math_pack;
 
+/// A spring and dashpot on the centroid of each surface triangle. RobinBoundary lets them act along
+/// the reference normal only, RobinBoundaryGeneral on the full displacement and velocity; the two
+/// keep their own XML keys and default stiffness so that existing input files load unchanged.
 class CBRobinBoundary : public CBSolverPlugin {
 public:
-    CBRobinBoundary();
+    explicit CBRobinBoundary(bool projectOnNormal);
     ~CBRobinBoundary() {}
     
-    std::string GetName() override { return "RobinBoundary"; }
+    std::string GetName() override { return key_; }
     
     /// fundamental CBSolverPlugin functions
     void Init() override;
@@ -44,6 +47,8 @@ public:
     
 protected:
 private:
+    const bool projectOnNormal_;
+    const std::string key_;
     TFloat dt_, prevDt_;
     typedef CBSolverPlugin Base;
     static constexpr int numNodes = CBElementSurfaceT3::numNodes;
@@ -62,6 +67,7 @@ private:
     
     /// functions
     void InitContactSurfaces();
+    Vector3<TFloat> Project(const Vector3<TFloat> &x, const Vector3<TFloat> &N) const;
     void CalcForceContributionOfElement(Vector3<TFloat> u, Vector3<TFloat> v, CBElementSurfaceT3 *triangle,
                                         const Vector3<TFloat> &refNormalVector,
                                         TFloat *nodalForces);

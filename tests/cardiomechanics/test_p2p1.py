@@ -393,10 +393,10 @@ def _jacobian_entries(view_file, matrix):
 # projects onto the reference normal and gives it a dashpot, so between them the two Robin cases
 # cover both plugins and the dashpot. Beta / TimeStep outweighs Alpha, so a wrong dashpot term
 # cannot hide below the threshold.
-ROBIN_NORMAL_WITH_DASHPOT = (("<RobinBoundaryGeneral>true</RobinBoundaryGeneral>", "<RobinBoundary>true</RobinBoundary>"),
-                             ("<RobinBoundaryGeneral>\n", "<RobinBoundary>\n"),
-                             ("</RobinBoundaryGeneral>\n", "</RobinBoundary>\n"),
-                             ("<Beta>0</Beta>", "<Beta>0.5</Beta>"))
+ROBIN_NORMAL = (("<RobinBoundaryGeneral>true</RobinBoundaryGeneral>", "<RobinBoundary>true</RobinBoundary>"),
+                ("<RobinBoundaryGeneral>\n", "<RobinBoundary>\n"),
+                ("</RobinBoundaryGeneral>\n", "</RobinBoundary>\n"))
+ROBIN_NORMAL_WITH_DASHPOT = ROBIN_NORMAL + (("<Beta>0</Beta>", "<Beta>0.5</Beta>"),)
 
 
 # A cavity declared CAVITY on six-node faces keeps them whole, as the T6 declaration does, rather
@@ -441,6 +441,37 @@ def test_p2p1_jacobian_matches_finite_differences(binary, cm_env, tmp_path, fixt
         row, col, value = max(wrong, key=lambda e: abs(e[2]))
         raise AssertionError(f"{len(wrong)} Jacobian entries differ beyond {JACOBIAN_THRESHOLD}, "
                              f"worst at row {row} column {col}: {value:.3e}")
+
+
+ROBIN_ALPHA = 0.002     # the Alpha of the Robin fixture
+ROBIN_SURFACE = 131     # and its SurfaceIndex
+# The VTU stores single precision, so a displacement taken from its O(1) coordinates is good to
+# about 1e-6 however small it is.
+VTU_RTOL, VTU_ATOL = 1e-4, 1e-6
+
+
+@pytest.mark.parametrize("replace, projected", [((), False), (ROBIN_NORMAL, True)],
+                         ids=["general", "normal"])
+def test_robin_boundary_exports_its_traction(binary, cm_env, tmp_path, replace, projected):
+    """ContactPressure is the magnitude of the spring traction alpha * u on each Robin triangle,
+    u its centroid displacement, projected onto the reference normal N by RobinBoundary: the
+    element's total force over its area. ContactDistance is
+    u . N in both, up to the sign of u. Without a dashpot a static step has no velocity term."""
+    meshio = pytest.importorskip("meshio")
+    replace += (("<Beta>0</Beta>", "<Beta>0</Beta><Export>true</Export>"),)
+    _, vtu_dir = _run(binary, cm_env, tmp_path, fixture=ROBIN_FIXTURE, replace=replace)
+    ref, cur = meshio.read(str(vtu_dir / "cantilever.0.vtu")), meshio.read(str(_last_vtu(vtu_dir)))
+    block = next(i for i, m in enumerate(cur.cell_data["Material"]) if (m == ROBIN_SURFACE).all())
+    corners = ref.points[cur.cells[block].data]
+    normals = np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0])
+    normals /= np.linalg.norm(normals, axis=1)[:, None]
+    u = (cur.points - ref.points)[cur.cells[block].data].mean(axis=1)
+    distance = np.einsum("ij,ij->i", u, normals)
+    traction = ROBIN_ALPHA * (np.abs(distance) if projected else np.linalg.norm(u, axis=1))
+    assert np.allclose(np.abs(cur.cell_data["ContactDistance"][block]), np.abs(distance),
+                       rtol=VTU_RTOL, atol=VTU_ATOL)
+    assert np.allclose(cur.cell_data["ContactPressure"][block], traction,
+                       rtol=VTU_RTOL, atol=ROBIN_ALPHA * VTU_ATOL)
 
 
 def test_cavity_on_six_node_faces_is_loaded_whole(binary, cm_env, tmp_path):

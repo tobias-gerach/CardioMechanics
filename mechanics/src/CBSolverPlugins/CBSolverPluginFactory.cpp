@@ -23,7 +23,6 @@
 #include "CBReferenceRecovery.h"
 #include "CBLoadUnloadedState.h"
 #include "CBRobinBoundary.h"
-#include "CBRobinBoundaryGeneral.h"
 #include "CBacCELLerate.h"
 #include "CBPointsCtrl.h"
 
@@ -34,8 +33,8 @@ CBSolverPluginFactory::CBSolverPluginFactory() : producers_{
     {"ReferenceRecovery",                   []() { return new CBReferenceRecovery(); }},
     {"Circulation",                         []() { return new CBCirculation(); }},
     {"ContactHandling",                     []() { return new CBContactHandling(); }},
-    {"RobinBoundary",                       []() { return new CBRobinBoundary(); }},
-    {"RobinBoundaryGeneral",                []() { return new CBRobinBoundaryGeneral(); }},
+    {"RobinBoundary",                       []() { return new CBRobinBoundary(/*projectOnNormal=*/true); }},
+    {"RobinBoundaryGeneral",                []() { return new CBRobinBoundary(/*projectOnNormal=*/false); }},
     {"ApplyPressureFromFunction",           []() { return new CBApplyPressureFromFunction(); }},
     {"ApplyPressureFromFunctionNodeExport", []() { return new CBApplyPressureFromFunctionNodeExport(); }},
     {"ApplyPressure",                       []() { return new CBApplyPressure(); }},
