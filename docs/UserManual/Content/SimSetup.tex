@@ -1667,9 +1667,10 @@ It applies a pressure as a Neumann boundary condition of the form
 to a surface $\Gamma$.
 The pressure is calculated with
 \begin{equation}
-    p(t) = p_\mathrm{max} \frac{t}{t_\mathrm{stop} - t_\mathrm{start}} \qif t < t_\mathrm{stop} \,.
+    p(t) = p_\mathrm{max} \frac{t - t_\mathrm{start}}{t_\mathrm{stop} - t_\mathrm{start}} \qif t_\mathrm{start} \leq t < t_\mathrm{stop} \,,
 \end{equation}
-If \verb|KeepMaxPressure| is set to true, $p(t) = p_\mathrm{max} \, \forall \, t$.
+and $p(t) = 0$ before $t_\mathrm{start}$.
+After $t_\mathrm{stop}$, $p(t) = p_\mathrm{max}$ if \verb|KeepMaxPressure| is set to true, and $p(t) = 0$ otherwise.
 Pressure and volume data is exported to a file called \verb|ApplyPressure.dat| or \verb|Filename|.
 
 \begin{lstlisting}[language=XML,caption=.xml settings for the ApplyPressure plugin]

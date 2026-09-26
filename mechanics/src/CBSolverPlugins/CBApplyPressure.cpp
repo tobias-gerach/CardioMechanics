@@ -55,16 +55,21 @@ void CBApplyPressure::Apply(TFloat time)
     TFloat lastVolume = currentVolume_;
     currentVolume_ = CalcVolume();
     
-    currentPressure_ = 0;
-    if(keepMaxPressure_)
-        currentPressure_ = maxPressure_;
-    if(time < stopTime_)
-        currentPressure_ = maxPressure_  *  time / ( stopTime_ - startTime_ );
+    currentPressure_ = PressureAt(time, startTime_, stopTime_, maxPressure_, keepMaxPressure_);
     
     lastVolumeWork_ = volumeWork_;
     volumeWork_ += (currentVolume_ - lastVolume)*(currentPressure_ );
     
     DCPetsc::debug << "ApplyPressure(p/V/W): " << currentPressure_ << " " << currentVolume_ << " " << volumeWork_ << "\n";
+}
+
+TFloat CBApplyPressure::PressureAt(TFloat time, TFloat startTime, TFloat stopTime, TFloat maxPressure, bool keepMaxPressure)
+{
+    if (time < startTime)
+        return 0;
+    if (time < stopTime)
+        return maxPressure * (time - startTime) / (stopTime - startTime);
+    return keepMaxPressure ? maxPressure : 0;
 }
 
 void CBApplyPressure::ApplyToNodalForces()
