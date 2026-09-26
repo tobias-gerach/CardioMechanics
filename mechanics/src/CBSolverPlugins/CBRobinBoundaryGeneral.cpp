@@ -146,70 +146,44 @@ void CBRobinBoundaryGeneral::ApplyToNodalForces() {
 }  // CBRobinBoundaryGeneral::ApplyToNodalForces
 
 void CBRobinBoundaryGeneral::ApplyToNodalForcesJacobian() {
-    //  if (!IsActive() || !hasStarted_) {
-    //    return;
-    //  }
-    //
-    //  for (int i = 0; i < contactSurfaceElements_.size(); i++) {
-    //    auto element = contactSurfaceElements_.at(i);
-    //    TInt nodesCoordsIndices[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
-    //    TFloat nodalForces[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
-    //    bool   bc[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
-    //    TFloat u[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
-    //    TFloat v[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
-    //
-    //    ContactForces_.at(i) = Vector3<TFloat>(0, 0, 0);
-    //    ContactDistances_.at(i) = Vector3<TFloat>(0, 0, 0);
-    //
-    //    /// add nodal forces to global vector
-    //    for (int k = 0; k < 3; k++) {
-    //      nodesCoordsIndices[3*k]   = 3.0 * element->GetNodeIndex(k);
-    //      nodesCoordsIndices[3*k+1] = 3.0 * element->GetNodeIndex(k)+1;
-    //      nodesCoordsIndices[3*k+2] = 3.0 * element->GetNodeIndex(k)+2;
-    //    }
-    //    adapter_->ApplyLocalToGlobalMapping(nodesCoordsIndices, 9);
-    //
-    //    VecDuplicate(GetSolver()->GetAbsDisplacementVector(), &displacement);
-    //    VecCopy(GetSolver()->GetAbsDisplacementVector(), displacement);
-    //    VecDuplicate(GetSolver()->GetVelocityVector(), &velocity);
-    //    VecCopy(GetSolver()->GetVelocityVector(), velocity);
-    //
-    //    VecAssemblyBegin(displacement);
-    //    VecAssemblyEnd(displacement);
-    //    VecAssemblyBegin(velocity);
-    //    VecAssemblyEnd(velocity);
-    //
-    //    VecGetValues(displacement, 9, nodesCoordsIndices, u);
-    //    VecGetValues(velocity, 9, nodesCoordsIndices, v);
-    //
-    //    CalcForceContributionOfElement(u, v, element, nodalForces);
-    //
-    //    Base::GetAdapter()->GetNodesComponentsBoundaryConditionsGlobal(9, nodesCoordsIndices, bc);
-    //
-    //    TFloat epsilon = Base::GetAdapter()->GetFiniteDifferencesEpsilon();
-    //    TFloat nodalForcesJacobian[9*9];
-    //    TFloat nodalForces2[9];
-    //    TFloat u2[9] = {0,0,0,0,0,0,0,0,0};
-    //
-    //    for (int j = 0; j < 9; j++) {
-    //      for (int h = 0; h < 9; h++) {
-    //        u2[h] = u[h];
-    //      }
-    //      u2[j] += epsilon;
-    //
-    //      CalcForceContributionOfElement(u2, v, element, nodalForces2);
-    //
-    //      for (int k = 0; k < 9; k++) {
-    //        if ( (bc[k] == 0) && (bc[j] == 0) ) {
-    //          nodalForcesJacobian[9*k+j] = (nodalForces2[k] - nodalForces[j]) / epsilon;
-    //        } else {
-    //          nodalForcesJacobian[9*k+j] = 0;
-    //        }
-    //      }
-    //    }
-    //
-    //    Base::GetAdapter()->AddNodalForcesJacobianEntriesGlobal(9, nodesCoordsIndices, 9, nodesCoordsIndices, nodalForcesJacobian);
-    //  }
+    if (!IsActive() || !hasStarted_) {
+        return;
+    }
+    
+    for (int i = 0; i < contactSurfaceElements_.size(); i++) {
+        auto element = contactSurfaceElements_.at(i);
+        TInt nodes[3];
+        TInt dofs[9];
+        bool bc[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
+        for (int k = 0; k < 3; k++)
+            nodes[k] = adapter_->GlobalNodeIndex(element->GetNodeIndex(k));
+        adapter_->GetGlobalDofIndices(3, nodes, dofs);
+        Base::GetAdapter()->GetNodesComponentsBoundaryConditionsForGlobalNodes(3, nodes, bc);
+        
+        /// every node I carries f_I = -A/3 * w with the traction w of CalcForceContributionOfElement.
+        /// u and v depend on the nodes through the centroid, which moves by 1/3 of any node, so
+        /// dw/dx_J = -stiffness * P with P = I. The current area A depends on the nodes as well.
+        Triangle<TFloat> triangle = element->GetTriangle();
+        TFloat area = triangle.GetArea();
+        TFloat scaling = element->GetSurfaceTractionScaling();
+        Vector3<TFloat> u = initialPos_.at(i) - triangle.GetCentroid();
+        Vector3<TFloat> v = (u - prevDisplacement_.at(i)) / dt_;
+        Vector3<TFloat> w = (u * alpha_ + v * beta_) * scaling;
+        TFloat stiffness = scaling * (alpha_ + beta_ / dt_) / 3;
+        
+        TFloat nodalForcesJacobian[9*9];
+        for (int J = 0; J < 3; J++) {
+            Vector3<TFloat> areaGradient =
+                CrossProduct(triangle.GetNode((J+1)%3) - triangle.GetNode((J+2)%3), triangle.GetNormalVector()) * 0.5;
+            for (int a = 0; a < 3; a++)
+                for (int b = 0; b < 3; b++) {
+                    TFloat dfdx = -(w(a) * areaGradient(b) - area * stiffness * (a == b)) / 3;
+                    for (int I = 0; I < 3; I++)
+                        nodalForcesJacobian[9*(3*I+a) + 3*J+b] = (bc[3*I+a] || bc[3*J+b]) ? 0 : dfdx;
+                }
+        }
+        Base::GetAdapter()->AddNodalForcesJacobianEntriesGlobal(9, dofs, 9, dofs, nodalForcesJacobian);
+    }
 } // CBRobinBoundaryGeneral::ApplyToNodalForcesJacobian
 
 void CBRobinBoundaryGeneral::Export(TFloat time) {
