@@ -320,11 +320,13 @@ void CBCirculation::ApplyToNodalForces() {
 }
 
 void CBCirculation::ApplyToNodalForcesJacobian() {
-    //    for(TInt i = 0; i < nC_; i++)
-    //    {
-    //        TInt cavInd = cavitySurfaceIndices_[i];
-    //        cavities_[cavInd]->ApplyPressureToJacobian(uP_ * estPressure_(i));
-    //    }
+    if (!hasStarted_)
+        return;
+    
+    for (TInt i = 0; i < nC_; i++) {
+        TInt cavInd = cavitySurfaceIndices_[i];
+        cavities_[cavInd]->ApplyPressureToJacobian(uP_ * estPressure_(i));
+    }
 }
 
 void CBCirculation::Apply(PetscScalar time) {

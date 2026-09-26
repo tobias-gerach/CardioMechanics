@@ -20,6 +20,7 @@ from helpers.run import assert_no_petsc_error, assert_refused, run_binary
 FIXTURE = Path(__file__).parent / "fixtures" / "p2p1_cantilever.xml"
 ROBIN_FIXTURE = Path(__file__).parent / "fixtures" / "p2p1_cantilever_robin.xml"
 DYNAMIC_FIXTURE = Path(__file__).parent / "fixtures" / "p2p1_cantilever_dynamic.xml"
+CIRCULATION_FIXTURE = Path(__file__).parent / "fixtures" / "p2p1_cantilever_circulation.xml"
 
 # T10 local nodes 5-10 sit on the edges (1,2), (2,3), (1,3), (1,4), (2,4), (3,4).
 T10_EDGES = ((0, 1), (1, 2), (0, 2), (0, 3), (1, 3), (2, 3))
@@ -46,13 +47,14 @@ MATERIALS = {
 
 
 def _run(binary, cm_env, wd, element_type="T10P1", kappa=100, material="NeoHooke", solver=None,
-         env=None, check=True, ranks=None, fixture=FIXTURE, replace=()):
+         env=None, check=True, ranks=None, fixture=FIXTURE, replace=(), closed=False):
     """Stage mesh and settings into wd, run on ranks MPI ranks (serially if None), return (process, vtu directory).
     solver replaces the Static solver of the fixture; None keeps the fixture's own. replace holds further
-    (old, new) substitutions of the settings text. The linear element types get the linear mesh."""
+    (old, new) substitutions of the settings text. The linear element types get the linear mesh. closed
+    makes surface 130 the whole boundary."""
     linear = element_type in ("T4", "T4MINI")
     (wd / "tetgen").mkdir()
-    write_mesh(wd / "tetgen", linear=linear)
+    write_mesh(wd / "tetgen", linear=linear, closed=closed)
     (wd / "Results").mkdir()
     text, n = re.subn(r"<NeoHooke>.*?</NeoHooke>", MATERIALS[material].format(kappa=kappa),
                       fixture.read_text(), flags=re.DOTALL)
@@ -391,14 +393,17 @@ ROBIN_NORMAL_WITH_DASHPOT = (("<RobinBoundaryGeneral>true</RobinBoundaryGeneral>
                              ("<Beta>0</Beta>", "<Beta>0.5</Beta>"))
 
 
-@pytest.mark.parametrize("fixture, replace", [(FIXTURE, ()), (DYNAMIC_FIXTURE, ()), (ROBIN_FIXTURE, ()),
-                                              (ROBIN_FIXTURE, ROBIN_NORMAL_WITH_DASHPOT)],
-                         ids=["static", "generalized_alpha", "robin", "robin_normal_dashpot"])
-def test_p2p1_jacobian_matches_finite_differences(binary, cm_env, tmp_path, fixture, replace):
+@pytest.mark.parametrize("fixture, replace, closed", [(FIXTURE, (), False), (DYNAMIC_FIXTURE, (), False),
+                                                      (ROBIN_FIXTURE, (), False),
+                                                      (ROBIN_FIXTURE, ROBIN_NORMAL_WITH_DASHPOT, False),
+                                                      (CIRCULATION_FIXTURE, (), True)],
+                         ids=["static", "generalized_alpha", "robin", "robin_normal_dashpot", "circulation"])
+def test_p2p1_jacobian_matches_finite_differences(binary, cm_env, tmp_path, fixture, replace, closed):
     """Every Jacobian block, coupling and constraint included, against PETSc's finite differences.
     Under generalized-alpha that includes the mass and damping terms and the (1 - alphaF) factor
     of both fields at the intermediate configuration. The Robin cases add the tangents of both
-    Robin boundary plugins.
+    Robin boundary plugins, the circulation case the cavity pressure tangent of the Circulation
+    plugin, which refuses a cavity that is not closed.
 
     kappa = 1 keeps the -1/kappa constraint block well above the threshold. Entries in clamped
     rows and columns are excluded: the hand-coded Jacobian replaces those rows by the identity and
@@ -408,7 +413,7 @@ def test_p2p1_jacobian_matches_finite_differences(binary, cm_env, tmp_path, fixt
     view = tmp_path / "jacobian.txt"
     env = dict(cm_env, PETSC_OPTIONS=f"-mech_snes_test_jacobian {JACOBIAN_THRESHOLD} "
                                      f"-mech_snes_test_jacobian_view ascii:{view}")
-    _run(binary, cm_env, tmp_path, kappa=1, env=env, fixture=fixture, replace=replace)
+    _run(binary, cm_env, tmp_path, kappa=1, env=env, fixture=fixture, replace=replace, closed=closed)
     clamped = _clamped_dofs()
     wrong = [e for e in _jacobian_differences(view) if e[0] not in clamped and e[1] not in clamped]
     if wrong:

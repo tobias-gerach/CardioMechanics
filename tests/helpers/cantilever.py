@@ -25,11 +25,12 @@ def node(p):
     return 1 + i + SHAPE[0] * (j + SHAPE[1] * k)
 
 
-def write_mesh(tetgen_dir, scale=(1, 1, 1), linear=False, quadratic_end=False):
+def write_mesh(tetgen_dir, scale=(1, 1, 1), linear=False, quadratic_end=False, closed=False):
     """Write the cantilever as tetgen .node/.ele/.sur files, T10 elements with T6 top faces, or T4
     elements with T3 top faces if linear, and T3 end faces, T6 if quadratic_end, with the block
-    stretched by scale along each axis. Nodes are numbered in the order of node(), which they match
-    on the T10 mesh."""
+    stretched by scale along each axis. If closed, the loaded surface is the whole boundary instead and
+    there is no end surface, for plugins that refuse a cavity that does not enclose a volume. Nodes
+    are numbered in the order of node(), which they match on the T10 mesh."""
     def mid(a, b):
         return tuple((x + y) // 2 for x, y in zip(a, b))
 
@@ -56,16 +57,30 @@ def write_mesh(tetgen_dir, scale=(1, 1, 1), linear=False, quadratic_end=False):
             mids = [mid(tri[a], tri[b]) for a, b in ((0, 1), (1, 2), (2, 0))] if quadratic else []
             surfaces.append((index, list(tri) + mids))
 
-    top, end = 2 * CELLS[2], 2 * CELLS[0]
-    for ci, cj in itertools.product(range(CELLS[0]), range(CELLS[1])):
-        add_square(lambda dx, dy: (2 * (ci + dx), 2 * (cj + dy), top), SURFACE, quadratic=not linear)
-    # Nodes are numbered with z slowest, so the free end spans every rank's node block, whereas
-    # the bottom face would lie on the first rank alone. It is linear unless asked otherwise, since
-    # the Robin boundary elements are three-node triangles and the loader has to refine six-node
-    # faces into four of them.
-    for cj, ck in itertools.product(range(CELLS[1]), range(CELLS[2])):
-        add_square(lambda dy, dz: (end, 2 * (cj + dy), 2 * (ck + dz)), END_SURFACE,
-                   quadratic=quadratic_end and not linear)
+    def add_face(axis, at, index, quadratic):
+        """The squares of the block face normal to axis at half-grid coordinate at, facing outward."""
+        # Cyclic in-plane axes make u x v point along +axis, so the face at the lower end swaps them.
+        u, v = (axis + 1) % 3, (axis + 2) % 3
+        if at == 0:
+            u, v = v, u
+        for cu, cv in itertools.product(range(CELLS[u]), range(CELLS[v])):
+            def corner(du, dv):
+                p = [at] * 3
+                p[u], p[v] = 2 * (cu + du), 2 * (cv + dv)
+                return tuple(p)
+            add_square(corner, index, quadratic)
+
+    if closed:
+        for axis in range(3):
+            for at in (0, 2 * CELLS[axis]):
+                add_face(axis, at, SURFACE, quadratic=not linear)
+    else:
+        add_face(2, 2 * CELLS[2], SURFACE, quadratic=not linear)
+        # Nodes are numbered with z slowest, so the free end spans every rank's node block, whereas
+        # the bottom face would lie on the first rank alone. It is linear unless asked otherwise, since
+        # the Robin boundary elements are three-node triangles and the loader has to refine six-node
+        # faces into four of them.
+        add_face(0, 2 * CELLS[0], END_SURFACE, quadratic=quadratic_end and not linear)
 
     # A point in no element would be a node without stiffness.
     points = sorted({p for e in elements for p in e}, key=node)
