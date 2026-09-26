@@ -381,11 +381,13 @@ def _jacobian_differences(view_file):
     return entries
 
 
-@pytest.mark.parametrize("fixture", [FIXTURE, DYNAMIC_FIXTURE], ids=["static", "generalized_alpha"])
+@pytest.mark.parametrize("fixture", [FIXTURE, DYNAMIC_FIXTURE, ROBIN_FIXTURE],
+                         ids=["static", "generalized_alpha", "robin"])
 def test_p2p1_jacobian_matches_finite_differences(binary, cm_env, tmp_path, fixture):
     """Every Jacobian block, coupling and constraint included, against PETSc's finite differences.
     Under generalized-alpha that includes the mass and damping terms and the (1 - alphaF) factor
-    of both fields at the intermediate configuration.
+    of both fields at the intermediate configuration. The Robin case adds the tangent of the
+    Robin boundary plugin.
 
     kappa = 1 keeps the -1/kappa constraint block well above the threshold. Entries in clamped
     rows and columns are excluded: the hand-coded Jacobian replaces those rows by the identity and
