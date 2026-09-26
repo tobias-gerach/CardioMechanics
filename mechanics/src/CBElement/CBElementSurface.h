@@ -19,6 +19,16 @@
 
 using namespace math_pack;
 
+/// What the settings declare a surface for. It is independent of the element's shape, whose node
+/// count comes from the mesh, so the model and the plugins select their surfaces by role.
+enum class SurfaceRole {
+    None,
+    Cavity,
+    Robin,
+    ContactMaster,
+    ContactSlave
+};
+
 class CBElementSurface : public CBElement {
 public:
     CBElementSurface() {
@@ -30,7 +40,12 @@ public:
         surfaceElementIndex_ = other.surfaceElementIndex_;
         initialArea_ = other.initialArea_;
         surfaceTractionScaling_ = other.surfaceTractionScaling_;
+        role_ = other.role_;
     }
+    
+    SurfaceRole GetRole() const {return role_;}
+    
+    void SetRole(SurfaceRole role) {role_ = role;}
     
     TFloat GetSurfaceTractionScaling() {return surfaceTractionScaling_;}
     
@@ -61,6 +76,7 @@ protected:
     TInt surfaceElementIndex_; // Index of the element in the surface file -> not the element index !!!!
     TInt initialArea_;
     TFloat surfaceTractionScaling_ = 1.0; // individual scaling for boundary conditions
+    SurfaceRole role_ = SurfaceRole::None;
     
 private:
     CBElementSurface(const CBElementSurface &);

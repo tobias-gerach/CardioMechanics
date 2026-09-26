@@ -134,19 +134,19 @@ void CBContactHandling::Init() {
     
     // Create vector for nodes coordinates of the slave elements, these are needed on all processes -> VecScatter ...
     if (DCCtrl::IsParallel()) {
-        VecCreateMPI(DCPetsc::Comm(), 9 * slaveElements_.size(), PETSC_DETERMINE, &slaveElementsNodes_);
+        VecCreateMPI(DCPetsc::Comm(), 3*numNodes * slaveElements_.size(), PETSC_DETERMINE, &slaveElementsNodes_);
         VecAssemblyBegin(slaveElementsNodes_);
         VecAssemblyEnd(slaveElementsNodes_);
         
         VecGetSize(slaveElementsNodes_, &numGlobalSlaveElements_);
-        numGlobalSlaveElements_ /= 9;
+        numGlobalSlaveElements_ /= 3*numNodes;
         VecGetOwnershipRange(slaveElementsNodes_, &from, PETSC_NULLPTR);
-        from /= 9;
+        from /= 3*numNodes;
         
-        VecCreateSeq(PETSC_COMM_SELF, 9 * numGlobalSlaveElements_, &slaveElementsNodesSeq_);
+        VecCreateSeq(PETSC_COMM_SELF, 3*numNodes * numGlobalSlaveElements_, &slaveElementsNodesSeq_);
         VecScatterCreateToAll(slaveElementsNodes_, &scatter_, PETSC_NULLPTR);
     } else {
-        VecCreateSeq(PETSC_COMM_SELF, 9 * slaveElements_.size(), &slaveElementsNodesSeq_);
+        VecCreateSeq(PETSC_COMM_SELF, 3*numNodes * slaveElements_.size(), &slaveElementsNodesSeq_);
         numGlobalSlaveElements_ = slaveElements_.size();
         from                    = 0;
     }
@@ -158,18 +158,18 @@ void CBContactHandling::Init() {
     }
     
     if (DCCtrl::IsParallel()) {
-        TInt *indices = new TInt[3*slaveElements_.size()];
+        TInt *indices = new TInt[numNodes*slaveElements_.size()];
         
         int s = 0;
         
         for (auto it : slaveElements_) {
-            for (int i = 0; i < 3; i++)
-                indices[3*s+i] = it->GetNodeIndex(i);
+            for (int i = 0; i < numNodes; i++)
+                indices[numNodes*s+i] = it->GetNodeIndex(i);
             s++;
             slaveElementsSurfaceIndices_.push_back(it->GetSurfaceIndex());
         }
         
-        for (int i = 0; i < 3*slaveElements_.size(); i++)
+        for (int i = 0; i < numNodes*slaveElements_.size(); i++)
             slaveElementsNodesIndicesGlobal_.push_back(adapter_->GlobalNodeIndex(indices[i]));
         
         
@@ -188,7 +188,7 @@ void CBContactHandling::Init() {
         delete[] indices;
     } else {
         for (auto e : slaveElements_) {
-            for (int i = 0; i < 3; i++)
+            for (int i = 0; i < numNodes; i++)
                 slaveElementsNodesIndicesGlobal_.push_back(e->GetNodeIndex(i));
             slaveElementsSurfaceIndices_.push_back(e->GetSurfaceIndex());
         }
@@ -203,15 +203,7 @@ void CBContactHandling::Init() {
     
     for (int j = 0; j < numGlobalSlaveElements_; j++) {
         // DCCtrl::print << "Neighbors for " << j << ":\t";
-        TFloat i10 = slaveNodes[9*j];
-        TFloat i11 = slaveNodes[9*j+1];
-        TFloat i12 = slaveNodes[9*j+2];
-        TFloat i13 = slaveNodes[9*j+3];
-        TFloat i14 = slaveNodes[9*j+4];
-        TFloat i15 = slaveNodes[9*j+5];
-        TFloat i16 = slaveNodes[9*j+6];
-        TFloat i17 = slaveNodes[9*j+7];
-        TFloat i18 = slaveNodes[9*j+8];
+        const TFloat *nodes1 = &slaveNodes[3*numNodes*j];
         
         std::vector<int> *neighbors = new std::vector<int>();
         
@@ -219,26 +211,16 @@ void CBContactHandling::Init() {
             if (j == k)
                 continue;
             
-            TFloat i20 = slaveNodes[9*k];
-            TFloat i21 = slaveNodes[9*k+1];
-            TFloat i22 = slaveNodes[9*k+2];
-            TFloat i23 = slaveNodes[9*k+3];
-            TFloat i24 = slaveNodes[9*k+4];
-            TFloat i25 = slaveNodes[9*k+5];
-            TFloat i26 = slaveNodes[9*k+6];
-            TFloat i27 = slaveNodes[9*k+7];
-            TFloat i28 = slaveNodes[9*k+8];
-            
+            /// Two slave elements are neighbors if they share a node.
+            const TFloat *nodes2 = &slaveNodes[3*numNodes*k];
             TFloat a = 1e-12;
-            if (((std::abs(i10-i20) < a) && (std::abs(i11-i21) < a) && (std::abs(i12-i22) < a)) ||
-                ((std::abs(i10-i23) < a) && (std::abs(i11-i24) < a) && (std::abs(i12-i25) < a)) ||
-                ((std::abs(i10-i26) < a) && (std::abs(i11-i27) < a) && (std::abs(i12-i28) < a)) ||
-                ((std::abs(i13-i20) < a) && (std::abs(i14-i21) < a) && (std::abs(i15-i22) < a)) ||
-                ((std::abs(i13-i23) < a) && (std::abs(i14-i24) < a) && (std::abs(i15-i25) < a)) ||
-                ((std::abs(i13-i26) < a) && (std::abs(i14-i27) < a) && (std::abs(i15-i28) < a)) ||
-                ((std::abs(i16-i20) < a) && (std::abs(i17-i21) < a) && (std::abs(i18-i22) < a)) ||
-                ((std::abs(i16-i23) < a) && (std::abs(i17-i24) < a) && (std::abs(i18-i25) < a)) ||
-                ((std::abs(i16-i26) < a) && (std::abs(i17-i27) < a) && (std::abs(i18-i28) < a))) {
+            bool isNeighbor = false;
+            for (int n1 = 0; n1 < numNodes && !isNeighbor; n1++)
+                for (int n2 = 0; n2 < numNodes && !isNeighbor; n2++)
+                    isNeighbor |= (std::abs(nodes1[3*n1]-nodes2[3*n2]) < a) &&
+                                  (std::abs(nodes1[3*n1+1]-nodes2[3*n2+1]) < a) &&
+                                  (std::abs(nodes1[3*n1+2]-nodes2[3*n2+2]) < a);
+            if (isNeighbor) {
                 neighbors->push_back(k);
                 
                 // DCCtrl::print << k << ", ";
@@ -296,10 +278,10 @@ std::set<TInt> CBContactHandling::GetMasterNodesLocalIndices() {
 std::set<TInt> CBContactHandling::GetMasterWithSlaveNodesLocalIndices() {
     DetermineSlaveElementsAtVertices();
     std::set<TInt> masterNodesWithSlaveNodesLocalIndices;
-    for (auto e : masterElements_)
-        for (int i = 0; i < e->GetNumberOfNodesIndices(); i++)
-            if (e->GetSlaveAtVertex(i) != -1)
-                masterNodesWithSlaveNodesLocalIndices.insert(e->GetNodeIndex(i));
+    for (auto &m : masterElements_)
+        for (int i = 0; i < numNodes; i++)
+            if (m.slaveAtVertex[i] != -1)
+                masterNodesWithSlaveNodesLocalIndices.insert(m.element->GetNodeIndex(i));
     
     return masterNodesWithSlaveNodesLocalIndices;
 }
@@ -375,12 +357,13 @@ void CBContactHandling::ApplyToNodalForces() {
     
     
     for (int i = 0; i < masterElements_.size(); i++) {
-        auto e = masterElements_.at(i);
+        auto &m = masterElements_.at(i);
+        auto e = m.element;
         
-        bool bc[18]            = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-        TFloat nodalForces[18] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-        TFloat distances[3]    = {0, 0, 0};
-        TFloat nodesCoords[9];
+        bool bc[6*numNodes]            = {};
+        TFloat nodalForces[6*numNodes] = {};
+        TFloat distances[numNodes]     = {};
+        TFloat nodesCoords[3*numNodes];
         e->GetNodesCoords(nodesCoords);
         TFloat scaling = e->GetSurfaceTractionScaling();
         
@@ -391,29 +374,29 @@ void CBContactHandling::ApplyToNodalForces() {
         
         masterContactDistances_.at(i) = Vector3<TFloat>(0, 0, 0);
         
-        for (int j = 0; j < 3; j++) {
-            TInt slave = e->GetSlaveAtGaussPoint(j);
+        for (int j = 0; j < numGaussPoints; j++) {
+            TInt slave = m.slaveAtGaussPoint[j];
             if (slave == -1)
                 continue;
             else
                 masterCorrespondingSlaveFound_.at(i) = 1;
             
-            Triangle<TFloat> slaveTriangle(&slaveNodes[9*slave]);
+            Triangle<TFloat> slaveTriangle(&slaveNodes[3*numNodes*slave]);
             slaveNormal += slaveTriangle.GetNormalVector();
             
             CalcContributionToContactForceAtGaussPoint(masterTriangle, slaveTriangle, j, nodalForces, distances, scaling);
             masterContactForces_.at(i)    += Vector3<TFloat>(nodalForces[3*j], nodalForces[3*j+1], nodalForces[3*j+2]);
             masterContactDistances_.at(i) += Vector3<TFloat>(distances[0], distances[1], distances[2]);
             
-            TInt nodes[6];
-            for (int k = 0; k < 3; k++)
+            TInt nodes[2*numNodes];
+            for (int k = 0; k < numNodes; k++)
                 nodes[k] = adapter_->GlobalNodeIndex(e->GetNodeIndex(k));
-            for (int k = 3; k < 6; k++)
-                nodes[k] = slaveElementsNodesIndicesGlobal_.at(3*slave+(k-3));
+            for (int k = numNodes; k < 2*numNodes; k++)
+                nodes[k] = slaveElementsNodesIndicesGlobal_.at(numNodes*slave+(k-numNodes));
             
-            GetAdapter()->GetNodesComponentsBoundaryConditionsForGlobalNodes(6, nodes, bc);
+            GetAdapter()->GetNodesComponentsBoundaryConditionsForGlobalNodes(2*numNodes, nodes, bc);
             
-            for (int k = 0; k < 6; k++) {
+            for (int k = 0; k < 2*numNodes; k++) {
                 if (bc[3*k] != 0)
                     nodalForces[3*k] = 0;
                 if (bc[3*k+1] != 0)
@@ -422,7 +405,7 @@ void CBContactHandling::ApplyToNodalForces() {
                     nodalForces[3*k+2] = 0;
             }
             
-            Base::GetAdapter()->AddNodalForcesComponentsGlobal(6, nodes, nodalForces);
+            Base::GetAdapter()->AddNodalForcesComponentsGlobal(2*numNodes, nodes, nodalForces);
         }
         
         if (slaveNormal.Norm() != 0)
@@ -447,13 +430,14 @@ void CBContactHandling::GetMasterNodesDistancesToSlaveElements(Vec *distances) {
     VecZeroEntries(cnt);
     VecZeroEntries(*distances);
     
-    for (auto e : masterElements_) {
-        for (int i = 0; i < 3; i++) {
-            if (e->GetSlaveAtGaussPoint(i) == -1)
+    for (auto &m : masterElements_) {
+        auto e = m.element;
+        for (int i = 0; i < numGaussPoints; i++) {
+            if (m.slaveAtGaussPoint[i] == -1)
                 continue;
             PetscInt nodesIndices[3] = {3*e->GetNodeIndex(i), 3*e->GetNodeIndex(i) + 1, 3*e->GetNodeIndex(i) + 2};
             PetscScalar d[3]         =
-            {e->GetDistanceVectorToSlave(i)(0), e->GetDistanceVectorToSlave(i)(1), e->GetDistanceVectorToSlave(i)(2)};
+            {m.distanceVectorToSlave[i](0), m.distanceVectorToSlave[i](1), m.distanceVectorToSlave[i](2)};
             VecSetValues(*distances, 3, nodesIndices, d, ADD_VALUES);
             PetscScalar c[3] = {1, 1, 1};
             VecSetValues(cnt, 3, nodesIndices, c, ADD_VALUES);
@@ -491,64 +475,65 @@ void CBContactHandling::ApplyToNodalForcesJacobian() {
     DetermineSlaveNodes();
     TFloat *slaveNodes;
     VecGetArray(slaveElementsNodesSeq_, &slaveNodes);
-    for (auto e : masterElements_) {
-        TInt pos[18];
-        bool bc[18] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-        TFloat nodalForces[18];
-        TFloat nodesCoords[9];
-        TFloat distances[3] = {0, 0, 0};
+    for (auto &m : masterElements_) {
+        auto e = m.element;
+        TInt pos[6*numNodes];
+        bool bc[6*numNodes] = {};
+        TFloat nodalForces[6*numNodes];
+        TFloat nodesCoords[3*numNodes];
+        TFloat distances[numNodes] = {};
         e->GetNodesCoords(nodesCoords);
         Triangle<TFloat> masterTriangle(nodesCoords);
         TFloat scaling = e->GetSurfaceTractionScaling();
         
-        for (int i = 0; i < 3; i++) {
-            TInt slave = e->GetSlaveAtGaussPoint(i);
+        for (int i = 0; i < numGaussPoints; i++) {
+            TInt slave = m.slaveAtGaussPoint[i];
             
             if (slave == -1)
                 continue;
             
-            Triangle<TFloat> slaveTriangle(&slaveNodes[9*slave]);
+            Triangle<TFloat> slaveTriangle(&slaveNodes[3*numNodes*slave]);
             
             CalcContributionToContactForceAtGaussPoint(masterTriangle, slaveTriangle, i, nodalForces, distances, scaling);
             
-            TInt nodes[6];
-            for (int j = 0; j < 3; j++)
+            TInt nodes[2*numNodes];
+            for (int j = 0; j < numNodes; j++)
                 nodes[j] = adapter_->GlobalNodeIndex(e->GetNodeIndex(j));
-            for (int j = 3; j < 6; j++)
-                nodes[j] = slaveElementsNodesIndicesGlobal_[3*slave+(j-3)];
+            for (int j = numNodes; j < 2*numNodes; j++)
+                nodes[j] = slaveElementsNodesIndicesGlobal_[numNodes*slave+(j-numNodes)];
             
-            adapter_->GetGlobalDofIndices(6, nodes, pos);
-            GetAdapter()->GetNodesComponentsBoundaryConditionsForGlobalNodes(6, nodes, bc);
+            adapter_->GetGlobalDofIndices(2*numNodes, nodes, pos);
+            GetAdapter()->GetNodesComponentsBoundaryConditionsForGlobalNodes(2*numNodes, nodes, bc);
             
             
             TFloat epsilon = Base::GetAdapter()->GetFiniteDifferencesEpsilon();
-            TFloat nodalForcesJacobian[18*18];
-            TFloat nodalForces2[18];
-            TFloat slaveNodesTmp[9];
+            TFloat nodalForcesJacobian[6*numNodes*6*numNodes];
+            TFloat nodalForces2[6*numNodes];
+            TFloat slaveNodesTmp[3*numNodes];
             
             
-            for (int j = 0; j < 18; j++) {
+            for (int j = 0; j < 6*numNodes; j++) {
                 e->GetNodesCoords(nodesCoords);
-                memcpy(slaveNodesTmp, &slaveNodes[9*slave], 9*sizeof(TFloat));
+                memcpy(slaveNodesTmp, &slaveNodes[3*numNodes*slave], 3*numNodes*sizeof(TFloat));
                 
-                if (j < 9)
+                if (j < 3*numNodes)
                     nodesCoords[j] += epsilon;
                 else
-                    slaveNodesTmp[j-9] += epsilon;
+                    slaveNodesTmp[j-3*numNodes] += epsilon;
                 
                 masterTriangle.SetNodes(nodesCoords);
                 slaveTriangle.SetNodes(slaveNodesTmp);
                 
                 CalcContributionToContactForceAtGaussPoint(masterTriangle, slaveTriangle, i, nodalForces2, distances, scaling);
                 
-                for (int k = 0; k < 18; k++) {
+                for (int k = 0; k < 6*numNodes; k++) {
                     if ((bc[k] == 0) && (bc[j] == 0))
-                        nodalForcesJacobian[18*k + j] = (nodalForces2[k] - nodalForces[k]) / epsilon;
+                        nodalForcesJacobian[6*numNodes*k + j] = (nodalForces2[k] - nodalForces[k]) / epsilon;
                     else
-                        nodalForcesJacobian[18*k + j] = 0;
+                        nodalForcesJacobian[6*numNodes*k + j] = 0;
                 }
             }
-            Base::GetAdapter()->AddNodalForcesJacobianEntriesGlobal(18, pos, 18, pos, nodalForcesJacobian);
+            Base::GetAdapter()->AddNodalForcesJacobianEntriesGlobal(6*numNodes, pos, 6*numNodes, pos, nodalForcesJacobian);
         }
     }
     VecRestoreArray(slaveElementsNodesSeq_, &slaveNodes);
@@ -591,7 +576,7 @@ void CBContactHandling::Export(TFloat time) {
         averageContactPressure_ = 0;
         
         for (int i = 0; i < masterElements_.size(); i++) {
-            auto e = masterElements_.at(i);
+            auto e = masterElements_.at(i).element;
             Vector3<TFloat> sn = masterCorrespondingSlaveNormal_.at(i);
             Vector3<TFloat> cf = masterContactForces_.at(i);
             
@@ -720,18 +705,18 @@ void CBContactHandling::WriteToFile(TFloat time) {
 
 void CBContactHandling::DetermineSlaveNodes() {
     for (auto e : slaveElements_) {
-        TInt pos[9];
-        TFloat nodesCoords[9];
+        TInt pos[3*numNodes];
+        TFloat nodesCoords[3*numNodes];
         
-        for (int i = 0; i < 9; i++)
-            pos[i] = 9* e->GetLocalIndex()+i;
+        for (int i = 0; i < 3*numNodes; i++)
+            pos[i] = 3*numNodes* e->GetLocalIndex()+i;
         
         e->GetNodesCoords(nodesCoords);
         
         if (DCCtrl::IsParallel())
-            VecSetValues(slaveElementsNodes_, 9, pos, nodesCoords, INSERT_VALUES);
+            VecSetValues(slaveElementsNodes_, 3*numNodes, pos, nodesCoords, INSERT_VALUES);
         else
-            VecSetValues(slaveElementsNodesSeq_, 9, pos, nodesCoords, INSERT_VALUES);
+            VecSetValues(slaveElementsNodesSeq_, 3*numNodes, pos, nodesCoords, INSERT_VALUES);
     }
     if (DCCtrl::IsParallel()) {
         VecAssemblyBegin(slaveElementsNodes_);
@@ -743,7 +728,7 @@ void CBContactHandling::DetermineSlaveNodes() {
 
 bool CBContactHandling::CheckIfSlave(TFloat *slaveNodes, int slaveInd, Vector3<TFloat> *p, Vector3<TFloat> *nv,
                                      TFloat &dist) {
-    Triangle<TFloat> slaveTriangle(&slaveNodes[9*slaveInd]);
+    Triangle<TFloat> slaveTriangle(&slaveNodes[3*numNodes*slaveInd]);
     Vector3<TFloat>  ip = slaveTriangle.CalcIntersectionPoint(*p, *nv);
     
     if (slaveTriangle.IsPointWithinTriangle(ip)) {
@@ -833,30 +818,30 @@ void CBContactHandling::DetermineSlaveElementsAtGaussPoints() {
     averageDist_ = 0;
     TInt numContacts = 0;
     
-    for (auto e : masterElements_) {
-        TFloat nodesCoords[9];
+    for (auto &m : masterElements_) {
+        TFloat nodesCoords[3*numNodes];
         
-        e->GetNodesCoords(nodesCoords);
+        m.element->GetNodesCoords(nodesCoords);
         
         Triangle<TFloat> masterTriangle(nodesCoords);
         Vector3<TFloat>  nv =  masterTriangle.GetNormalVector();
         nv.Normalize();
         
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < numGaussPoints; i++) {
             Vector3<TFloat> gp = masterTriangle.GetGaussPoint3(i);
-            int oldSlave       = e->GetSlaveAtGaussPoint(i);
+            int oldSlave       = m.slaveAtGaussPoint[i];
             TFloat dist;
             int slave = SearchForSlave(slaveNodes, oldSlave, &gp, &nv, dist);
             
             if (slave != -1) {
-                e->SetDistanceVectorToSlave(i, nv*dist);
+                m.distanceVectorToSlave[i] = nv*dist;
                 averageDist_ += std::abs(dist);
                 numContacts++;
             } else {
-                e->SetDistanceVectorToSlave(i, Vector3<TFloat>(0, 0, 0));
+                m.distanceVectorToSlave[i] = Vector3<TFloat>(0, 0, 0);
             }
 
-            e->SetSlaveAtGaussPoint(i, slave);
+            m.slaveAtGaussPoint[i] = slave;
         }
     }
     if (numContacts != 0)
@@ -880,30 +865,30 @@ void CBContactHandling::DetermineSlaveElementsAtVertices() {
     averageDist_ = 0;
     TInt numContacts = 0;
     
-    for (auto e : masterElements_) {
-        TFloat nodesCoords[9];
+    for (auto &m : masterElements_) {
+        TFloat nodesCoords[3*numNodes];
         
-        e->GetNodesCoords(nodesCoords);
+        m.element->GetNodesCoords(nodesCoords);
         
         Triangle<TFloat> masterTriangle(nodesCoords);
         Vector3<TFloat>  nv =  masterTriangle.GetNormalVector();
         nv.Normalize();
         
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < numNodes; i++) {
             Vector3<TFloat> vertex = masterTriangle.GetNode(i);
-            int oldSlave           = e->GetSlaveAtVertex(i);
+            int oldSlave           = m.slaveAtVertex[i];
             TFloat dist;
             int slave = SearchForSlave(slaveNodes, oldSlave, &vertex, &nv, dist);
             
             if (slave != -1) {
-                e->SetDistanceVectorToSlave(i, nv*dist);
+                m.distanceVectorToSlave[i] = nv*dist;
                 averageDist_ += std::abs(dist);
                 numContacts++;
             } else {
-                e->SetDistanceVectorToSlave(i, Vector3<TFloat>(0, 0, 0));
+                m.distanceVectorToSlave[i] = Vector3<TFloat>(0, 0, 0);
             }
 
-            e->SetSlaveAtVertex(i, slave);
+            m.slaveAtVertex[i] = slave;
         }
     }
     if (numContacts != 0)
@@ -920,50 +905,43 @@ void CBContactHandling::DetermineSlaveElementsAtVertices() {
 }  // CBContactHandling::DetermineSlaveElementsAtVertices
 
 void CBContactHandling::LoadMasterElements() {
-    for (auto &it : Base::GetAdapter()->GetElementVector()) {
-        CBElementContactMaster *element = dynamic_cast<CBElementContactMaster *>(it);
-        if (element != 0) {
-            int *indices = new int[3*element->GetNumberOfNodesIndices()];
-            bool *bc     = new bool[3*element->GetNumberOfNodesIndices()];
-            
-            for (int i = 0; i < element->GetNumberOfNodesIndices(); i++) {
-                auto index     = it->GetNodeIndex(i);
-                indices[3*i]   = 3*index;
-                indices[3*i+1] = 3*index+1;
-                indices[3*i+2] = 3*index+2;
-                masterNodesLocalIndices_.insert(it->GetNodeIndex(i));
-            }
-            
-            GetAdapter()->GetNodesComponentsBoundaryConditions(3*element->GetNumberOfNodesIndices(), indices, bc);
-            
-            bool discard = false;
-            if (!useContactHandlingToFitPeri_) {
-                for (int i = 0; i < 3*element->GetNumberOfNodesIndices(); i++) {
-                    if (bc[i] == true)
-                        discard = true;
-                }
-            }
-            
-            if (!discard) {
-                masterElements_.push_back(element);
-                masterContactForces_.push_back(Vector3<TFloat>(0, 0, 0));
-                masterCorrespondingSlaveNormal_.push_back(Vector3<TFloat>(0, 0, 0));
-                masterCorrespondingSlaveFound_.push_back(0);
-                masterContactDistances_.push_back(Vector3<TFloat>(0, 0, 0));
-            }
-            
-            delete[] indices;
-            delete[] bc;
+    for (auto *element : GetSurfaceElements(SurfaceRole::ContactMaster)) {
+        int *indices = new int[3*element->GetNumberOfNodesIndices()];
+        bool *bc     = new bool[3*element->GetNumberOfNodesIndices()];
+        
+        for (int i = 0; i < element->GetNumberOfNodesIndices(); i++) {
+            auto index     = element->GetNodeIndex(i);
+            indices[3*i]   = 3*index;
+            indices[3*i+1] = 3*index+1;
+            indices[3*i+2] = 3*index+2;
+            masterNodesLocalIndices_.insert(element->GetNodeIndex(i));
         }
+        
+        GetAdapter()->GetNodesComponentsBoundaryConditions(3*element->GetNumberOfNodesIndices(), indices, bc);
+        
+        bool discard = false;
+        if (!useContactHandlingToFitPeri_) {
+            for (int i = 0; i < 3*element->GetNumberOfNodesIndices(); i++) {
+                if (bc[i] == true)
+                    discard = true;
+            }
+        }
+        
+        if (!discard) {
+            masterElements_.emplace_back(element);
+            masterContactForces_.push_back(Vector3<TFloat>(0, 0, 0));
+            masterCorrespondingSlaveNormal_.push_back(Vector3<TFloat>(0, 0, 0));
+            masterCorrespondingSlaveFound_.push_back(0);
+            masterContactDistances_.push_back(Vector3<TFloat>(0, 0, 0));
+        }
+        
+        delete[] indices;
+        delete[] bc;
     }
 }  // CBContactHandling::LoadMasterElements
 
 void CBContactHandling::LoadSlaveElements() {
-    for (auto &it : Base::GetAdapter()->GetElementVector()) {
-        CBElementContactSlave *element = dynamic_cast<CBElementContactSlave *>(it);
-        if (element)
-            slaveElements_.push_back(element);
-    }
+    slaveElements_ = GetSurfaceElements(SurfaceRole::ContactSlave);
 }
 
 void CBContactHandling::UpdateDistancesMasterSlave() {
@@ -971,26 +949,26 @@ void CBContactHandling::UpdateDistancesMasterSlave() {
     TFloat *slaveNodes;
     VecGetArray(slaveElementsNodesSeq_, &slaveNodes);
     
-    for (auto e : masterElements_) {
-        TFloat nodesCoords[9];
+    for (auto &m : masterElements_) {
+        TFloat nodesCoords[3*numNodes];
         
-        e->GetNodesCoords(nodesCoords);
+        m.element->GetNodesCoords(nodesCoords);
         Triangle<TFloat> masterTriangle(nodesCoords);
         TFloat dist = 0;
         
-        for (int i = 0; i < 3; i++) {
-            TInt slave = e->GetSlaveAtGaussPoint(i);
+        for (int i = 0; i < numGaussPoints; i++) {
+            TInt slave = m.slaveAtGaussPoint[i];
             if (slave == -1)
                 continue;
             
-            Triangle<TFloat> slaveTriangle(&slaveNodes[9*slave]);
+            Triangle<TFloat> slaveTriangle(&slaveNodes[3*numNodes*slave]);
             
             Vector3<TFloat> gp = masterTriangle.GetGaussPoint3(i);
             dist += slaveTriangle.GetDistanceTo(gp);
         }
         
         dist /= 3.0;
-        e->SetDistanceToSlave(dist);
+        m.distanceToSlave = dist;
     }
 }  // CBContactHandling::UpdateDistancesMasterSlave
 
@@ -1054,7 +1032,7 @@ void CBContactHandling::CalcContributionToContactForceAtGaussPoint(const Triangl
     
     // This loop adds the shape functions for each QP to the nodal forces: sum[N_i] = N_1(2/3,1/6,1/6) + N_2(1/6,2/3,1/6)
     // + N_3(1/6,1/6,2/3)
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < numNodes; i++) {
         if (i == gaussPointIndex) {
             nodalForces[3*i]   = 2.0 / 3.0 * contactForce(0);
             nodalForces[3*i+1] = 2.0 / 3.0 * contactForce(1);
@@ -1069,8 +1047,8 @@ void CBContactHandling::CalcContributionToContactForceAtGaussPoint(const Triangl
     }
     
     // contact force of slave elements
-    for (int i = 3; i < 6; i++) {
-        TFloat w = slaveTriangle.GetSubArea(ip, i-3) / slaveArea;
+    for (int i = numNodes; i < 2*numNodes; i++) {
+        TFloat w = slaveTriangle.GetSubArea(ip, i-numNodes) / slaveArea;
         nodalForces[3*i]   = -w *contactForce(0);
         nodalForces[3*i+1] = -w *contactForce(1);
         nodalForces[3*i+2] = -w *contactForce(2);

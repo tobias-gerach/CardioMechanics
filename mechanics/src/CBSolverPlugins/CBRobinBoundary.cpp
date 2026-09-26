@@ -18,8 +18,6 @@
 CBRobinBoundary::CBRobinBoundary() : CBSolverPlugin() {}
 
 void CBRobinBoundary::Init() {
-#pragma message("Implementation only works for T3 surface elements at the moment")
-    
     /// read XML parameter input
     startTime_ = parameters_->Get<TFloat>("Plugins.RobinBoundary.StartTime", std::numeric_limits<double>::lowest());
     export_ = parameters_->Get<bool>("Plugins.RobinBoundary.Export", false);
@@ -51,27 +49,22 @@ void CBRobinBoundary::Init() {
 void CBRobinBoundary::InitContactSurfaces() {
     DCCtrl::print << "\t\tcreate contact surfaces..." << std::endl;
     
-    for (auto &eleIt : Base::GetAdapter()->GetElementVector()) {
-        /// iterate over all CBElement and check if they are of type CBElementContact
-        CBElementContactRobin *element = dynamic_cast<CBElementContactRobin *>(eleIt);
-        if (element != 0) {
-            /// material index
-            TInt materialIndex = element->GetSurfaceIndex();
-            if (materialIndex <= 0) {
-                throw std::runtime_error("CBRobinBoundary::InitContactSurfaces(): Surface indices must be > 0");
-            }
-            if (materialIndex == surfaceIndex_) {
-                /// set reference normal vector of surface element
-                Vector3<TFloat> N = element->GetNormalVector();
-                element->SetReferenceNormal(N*normalVectorSign_);
-                
-                contactSurfaceElements_.push_back(element);
-                ContactForces_.push_back(Vector3<TFloat>(0, 0, 0));
-                initialPos_.push_back(element->GetCentroid());
-                displacement_.push_back(Vector3<TFloat>(0, 0, 0));
-                prevDisplacement_.push_back(Vector3<TFloat>(0, 0, 0));
-                velocity_.push_back(Vector3<TFloat>(0, 0, 0));
-            }
+    for (auto *element : GetSurfaceElements(SurfaceRole::Robin)) {
+        /// material index
+        TInt materialIndex = element->GetSurfaceIndex();
+        if (materialIndex <= 0) {
+            throw std::runtime_error("CBRobinBoundary::InitContactSurfaces(): Surface indices must be > 0");
+        }
+        if (materialIndex == surfaceIndex_) {
+            /// set reference normal vector of surface element
+            Vector3<TFloat> N = element->GetNormalVector();
+            referenceNormals_.push_back(N*normalVectorSign_);
+            contactSurfaceElements_.push_back(element);
+            ContactForces_.push_back(Vector3<TFloat>(0, 0, 0));
+            initialPos_.push_back(element->GetCentroid());
+            displacement_.push_back(Vector3<TFloat>(0, 0, 0));
+            prevDisplacement_.push_back(Vector3<TFloat>(0, 0, 0));
+            velocity_.push_back(Vector3<TFloat>(0, 0, 0));
         }
     }
     DCCtrl::print << "\t\tContact surfaces initialized!" << std::endl;
@@ -113,26 +106,26 @@ void CBRobinBoundary::ApplyToNodalForces() {
     
     for (int i = 0; i < contactSurfaceElements_.size(); i++) {
         auto element = contactSurfaceElements_.at(i);
-        TFloat nodalForces[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
-        bool   bc[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
+        TFloat nodalForces[3*numNodes] = {};
+        bool   bc[3*numNodes] = {};
         
         ContactForces_.at(i) = Vector3<TFloat>(0, 0, 0);
         displacement_.at(i)  = Vector3<TFloat>(0, 0, 0);
         velocity_.at(i)      = Vector3<TFloat>(0, 0, 0);
         
         /// add nodal forces to global vector
-        TInt nodes[3];
-        for (int k = 0; k < 3; k++)
+        TInt nodes[numNodes];
+        for (int k = 0; k < numNodes; k++)
             nodes[k] = adapter_->GlobalNodeIndex(element->GetNodeIndex(k));
         
         displacement_.at(i) = initialPos_.at(i) - element->GetCentroid();
         velocity_.at(i)     = (displacement_.at(i) - prevDisplacement_.at(i)) / dt_;
         
-        CalcForceContributionOfElement(displacement_.at(i), velocity_.at(i), element, nodalForces);
+        CalcForceContributionOfElement(displacement_.at(i), velocity_.at(i), element, referenceNormals_.at(i), nodalForces);
         
         /// respect dirichlet boundary conditions
-        Base::GetAdapter()->GetNodesComponentsBoundaryConditionsForGlobalNodes(3, nodes, bc);
-        for (int k = 0; k < 3; k++) {
+        Base::GetAdapter()->GetNodesComponentsBoundaryConditionsForGlobalNodes(numNodes, nodes, bc);
+        for (int k = 0; k < numNodes; k++) {
             if (bc[3*k] != 0) {
                 nodalForces[3*k] = 0;
             }
@@ -142,9 +135,9 @@ void CBRobinBoundary::ApplyToNodalForces() {
             if (bc[3*k+2] != 0) {
                 nodalForces[3*k+2] = 0;
             }
-            ContactForces_.at(i)    += Vector3<TFloat>(nodalForces[3*k], nodalForces[3*k+1], nodalForces[3*k+2])/3;
+            ContactForces_.at(i)    += Vector3<TFloat>(nodalForces[3*k], nodalForces[3*k+1], nodalForces[3*k+2])/numNodes;
         }
-        Base::GetAdapter()->AddNodalForcesComponentsGlobal(3, nodes, nodalForces);
+        Base::GetAdapter()->AddNodalForcesComponentsGlobal(numNodes, nodes, nodalForces);
     }
 }  // CBRobinBoundary::ApplyToNodalForces
 
@@ -155,13 +148,13 @@ void CBRobinBoundary::ApplyToNodalForcesJacobian() {
     
     for (int i = 0; i < contactSurfaceElements_.size(); i++) {
         auto element = contactSurfaceElements_.at(i);
-        TInt nodes[3];
-        TInt dofs[9];
-        bool bc[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
-        for (int k = 0; k < 3; k++)
+        TInt nodes[numNodes];
+        TInt dofs[3*numNodes];
+        bool bc[3*numNodes] = {};
+        for (int k = 0; k < numNodes; k++)
             nodes[k] = adapter_->GlobalNodeIndex(element->GetNodeIndex(k));
-        adapter_->GetGlobalDofIndices(3, nodes, dofs);
-        Base::GetAdapter()->GetNodesComponentsBoundaryConditionsForGlobalNodes(3, nodes, bc);
+        adapter_->GetGlobalDofIndices(numNodes, nodes, dofs);
+        Base::GetAdapter()->GetNodesComponentsBoundaryConditionsForGlobalNodes(numNodes, nodes, bc);
         
         /// every node I carries f_I = -A/3 * w with the traction w of CalcForceContributionOfElement.
         /// u and v depend on the nodes through the centroid, which moves by 1/3 of any node, so
@@ -169,24 +162,24 @@ void CBRobinBoundary::ApplyToNodalForcesJacobian() {
         Triangle<TFloat> triangle = element->GetTriangle();
         TFloat area = triangle.GetArea();
         TFloat scaling = element->GetSurfaceTractionScaling();
-        Vector3<TFloat> N = element->GetReferenceNormal();
+        Vector3<TFloat> N = referenceNormals_.at(i);
         Vector3<TFloat> u = initialPos_.at(i) - triangle.GetCentroid();
         Vector3<TFloat> v = (u - prevDisplacement_.at(i)) / dt_;
         Vector3<TFloat> w = N * (scaling * (alpha_ * (u * N) + beta_ * (v * N)));
         TFloat stiffness = scaling * (alpha_ + beta_ / dt_) / 3;
         
-        TFloat nodalForcesJacobian[9*9];
-        for (int J = 0; J < 3; J++) {
+        TFloat nodalForcesJacobian[3*numNodes*3*numNodes];
+        for (int J = 0; J < numNodes; J++) {
             Vector3<TFloat> areaGradient =
-                CrossProduct(triangle.GetNode((J+1)%3) - triangle.GetNode((J+2)%3), triangle.GetNormalVector()) * 0.5;
+                CrossProduct(triangle.GetNode((J+1)%numNodes) - triangle.GetNode((J+2)%numNodes), triangle.GetNormalVector()) * 0.5;
             for (int a = 0; a < 3; a++)
                 for (int b = 0; b < 3; b++) {
                     TFloat dfdx = -(w(a) * areaGradient(b) - area * stiffness * N(a) * N(b)) / 3;
-                    for (int I = 0; I < 3; I++)
-                        nodalForcesJacobian[9*(3*I+a) + 3*J+b] = (bc[3*I+a] || bc[3*J+b]) ? 0 : dfdx;
+                    for (int I = 0; I < numNodes; I++)
+                        nodalForcesJacobian[3*numNodes*(3*I+a) + 3*J+b] = (bc[3*I+a] || bc[3*J+b]) ? 0 : dfdx;
                 }
         }
-        Base::GetAdapter()->AddNodalForcesJacobianEntriesGlobal(9, dofs, 9, dofs, nodalForcesJacobian);
+        Base::GetAdapter()->AddNodalForcesJacobianEntriesGlobal(3*numNodes, dofs, 3*numNodes, dofs, nodalForcesJacobian);
     }
 } // CBRobinBoundary::ApplyToNodalForcesJacobian
 
@@ -214,7 +207,7 @@ void CBRobinBoundary::Export(TFloat time) {
         for (int i = 0; i < contactSurfaceElements_.size(); i++) {
             auto e = contactSurfaceElements_.at(i);
             Vector3<TFloat> cf = ContactForces_.at(i);
-            Vector3<TFloat> refNormal = e->GetReferenceNormal();
+            Vector3<TFloat> refNormal = referenceNormals_.at(i);
             
             TFloat dist = displacement_.at(i) * refNormal;
             VecSetValue(contactDistance, from3 + e->GetLocalIndex(), dist, INSERT_VALUES);
@@ -246,7 +239,9 @@ void CBRobinBoundary::WriteToFile(TFloat time) {}
 void CBRobinBoundary::Prepare() {}
 
 void CBRobinBoundary::CalcForceContributionOfElement(Vector3<TFloat> u, Vector3<TFloat> v,
-                                                     CBElementContactRobin *triangle, TFloat *nodalForces) {
+                                                     CBElementSurfaceT3 *triangle,
+                                                     const Vector3<TFloat> &refNormalVector,
+                                                     TFloat *nodalForces) {
     /// we use a one point quadrature rule for the integration on the linear triangle element e
     /// therefore, the force f at node I is given with
     /// f_i = - A_e * sum_i^n[ W * N_i(l1, l2, l3) * p * normalVec ]
@@ -255,19 +250,18 @@ void CBRobinBoundary::CalcForceContributionOfElement(Vector3<TFloat> u, Vector3<
     /// l1 = l2 = l3 = 1/3
     /// p = alpha * u * N  + beta * v * N
     TFloat area = triangle->GetTriangle().GetArea();
-    Vector3<TFloat> refNormalVector = triangle->GetReferenceNormal();
     TFloat W    = 1;
     TFloat scaling = triangle->GetSurfaceTractionScaling();
     
     /// Shape functions T3 element
-    std::function<double(double, double, double)> Ni[3];
+    std::function<double(double, double, double)> Ni[numNodes];
     
     Ni[0] = [](double l1, double l2, double l3) {return l1; };
     Ni[1] = [](double l1, double l2, double l3) {return l2; };
     Ni[2] = [](double l1, double l2, double l3) {return l3; };
     
     /// iterate over nodes
-    for (unsigned int i = 0; i < 3; i++) {
+    for (int i = 0; i < numNodes; i++) {
         TFloat forceMagnitude = scaling * alpha_ * (u * refNormalVector) + scaling * beta_ * (v * refNormalVector);
         Vector3<TFloat> f = -area * forceMagnitude * W * refNormalVector * Ni[i](1.0/3.0, 1.0/3.0, 1.0/3.0);
         
