@@ -39,6 +39,8 @@
 - Corrected the statement in the manual that two solver classes are available, which no longer held once `ActiveStressEstimator` was added.
 - `docs/BUILD.md` and the CI PETSc image now recommend and use OpenBLAS (`--download-openblas`) instead of reference BLAS. Results are unaffected; the inverse problem is roughly 7x faster, pure mechanics roughly 2x, and EP-dominated runs largely unchanged.
 - `tools/python/VTK2tetgen.py` rewritten to be Python 3 compatible and importable: the CLI and conversion moved into `main()` under a `__main__` guard and the `vtk` import is deferred, so the geometry helpers can be imported without VTK. Mesh output is unchanged; `.bases` differs only in whitespace between the row index and the values.
+- A cavity on 6-node faces is integrated over the curved face: its enclosed volume is the volume under the isoparametric surface instead of under a fan of flat triangles through its nodes, consistent with the pressure load, and converges at fourth instead of second order. The pressure tangent is analytic instead of finite differences. Volumes and results of `T6` cavities change.
+- `CAVITY` on the 6-node faces of a quadratic mesh keeps each face a 6-node element instead of refining it into four 3-node triangles. The other surface roles still refine.
 
 ### Deleted
 - `Solver.LU`, `Solver.NewmarkBeta.Type` and `Solver.GeneralizedAlpha.Type`. They raise an error naming `Solver.LinearSolver.Preset`; `Type` `superlu` becomes the preset `direct-superlu`.

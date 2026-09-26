@@ -26,12 +26,13 @@
 
 class CBElementFactory {
 public:
-    using FactoryFunction = std::function<CBElement*()>;
+    /// Builds the element of a type from the node count of the mesh entity it is loaded onto.
+    using FactoryFunction = std::function<CBElement*(unsigned int numNodes)>;
     
     CBElementFactory();
     ~CBElementFactory() {}
     
-    CBElement* New(std::string elementType);
+    CBElement* New(std::string elementType, unsigned int numNodes);
     
 protected:
 private:

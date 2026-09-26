@@ -138,12 +138,9 @@ The loop's convergence criterion is the unloaded-volume residual alone. The end-
 near-tautological, since the recovery drives the loaded configuration onto the target, and is
 reported as a check on the inner loop.
 
-The endocardium and the lid are declared as 6-node surfaces, **not** as the `CAVITY` type. `CAVITY`
-is registered against a 3-node triangle, and forcing flat 3-node faces on a quadratic mesh would
-distribute the pressure load wrongly: the consistent nodal load of a uniformly loaded 6-node face
-sits on the mid-edge nodes, not the vertices. No type declaration is needed, because a 6-node
-surface element already derives from the cavity element and the plugin selects cavity elements by
-element type. The plugin's error message suggesting otherwise is stale.
+The endocardium and the lid are declared by their shape, not as the `CAVITY` type. No `CAVITY`
+declaration is needed, because every surface element derives from the cavity element and the plugin
+selects cavity elements by element type. The plugin's error message suggesting otherwise is stale.
 
 The benchmark ellipsoid is scaled rather than used at its original 2.5 ml because the Klotz relation
 is empirical and was established on ventricles of physiological size. Its unloaded-volume term is

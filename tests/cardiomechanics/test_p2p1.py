@@ -399,21 +399,28 @@ ROBIN_NORMAL_WITH_DASHPOT = (("<RobinBoundaryGeneral>true</RobinBoundaryGeneral>
                              ("<Beta>0</Beta>", "<Beta>0.5</Beta>"))
 
 
+# A cavity declared CAVITY on six-node faces keeps them whole, as the T6 declaration does, rather
+# than refining them into three-node triangles.
+CAVITY_DECLARED = (("<Surface_130><Type>T6</Type></Surface_130>", "<Surface_130><Type>CAVITY</Type></Surface_130>"),)
+
+
 @pytest.mark.parametrize("fixture, replace, closed, element_type",
                          [(FIXTURE, (), False, "T10P1"), (DYNAMIC_FIXTURE, (), False, "T10P1"),
                           (ROBIN_FIXTURE, (), False, "T10P1"),
                           (ROBIN_FIXTURE, ROBIN_NORMAL_WITH_DASHPOT, False, "T10P1"),
                           (CIRCULATION_FIXTURE, (), True, "T10P1"),
+                          (CIRCULATION_FIXTURE, CAVITY_DECLARED, True, "T10P1"),
                           (FIXTURE, (), False, "T4"), (CIRCULATION_FIXTURE, (), True, "T4")],
                          ids=["static", "generalized_alpha", "robin", "robin_normal_dashpot", "circulation",
-                              "static_t3", "circulation_t3"])
+                              "circulation_cavity", "static_t3", "circulation_t3"])
 def test_p2p1_jacobian_matches_finite_differences(binary, cm_env, tmp_path, fixture, replace, closed, element_type):
     """Every Jacobian block, coupling and constraint included, against PETSc's finite differences.
     Under generalized-alpha that includes the mass and damping terms and the (1 - alphaF) factor
     of both fields at the intermediate configuration. The Robin cases add the tangents of both
     Robin boundary plugins, the circulation case the cavity pressure tangent of the Circulation
-    plugin, which refuses a cavity that is not closed. The T3 cases put the same pressure loads
-    on the linear mesh, whose surface elements are T3 rather than T6.
+    plugin, which refuses a cavity that is not closed, once declared T6 and once CAVITY. The T3
+    cases put the same pressure loads on the linear mesh, whose surface elements are T3 rather
+    than T6.
 
     kappa = 1 keeps the -1/kappa constraint block well above the threshold. Clamped rows and
     columns are checked apart, because finite differences perturb clamped nodes like any other.
@@ -434,6 +441,21 @@ def test_p2p1_jacobian_matches_finite_differences(binary, cm_env, tmp_path, fixt
         row, col, value = max(wrong, key=lambda e: abs(e[2]))
         raise AssertionError(f"{len(wrong)} Jacobian entries differ beyond {JACOBIAN_THRESHOLD}, "
                              f"worst at row {row} column {col}: {value:.3e}")
+
+
+def test_cavity_on_six_node_faces_is_loaded_whole(binary, cm_env, tmp_path):
+    """The circulation cantilever with its cavity declared CAVITY, T6 and T3. CAVITY keeps the
+    six-node faces whole, so it solves the same system as T6, while T3 refines each face into four
+    three-node triangles and loads a different surface."""
+    points = {}
+    for declared in ("CAVITY", "T6", "T3"):
+        (tmp_path / declared).mkdir()
+        replace = (("<Surface_130><Type>T6</Type></Surface_130>", f"<Surface_130><Type>{declared}</Type></Surface_130>"),)
+        _, vtu_dir = _run(binary, cm_env, tmp_path / declared, fixture=CIRCULATION_FIXTURE, replace=replace, closed=True)
+        points[declared] = _final_points(vtu_dir)[1]
+    assert np.array_equal(points["CAVITY"], points["T6"]), \
+        f"CAVITY and T6 differ by up to {np.abs(points['CAVITY'] - points['T6']).max():.3e}"
+    assert not np.allclose(points["CAVITY"], points["T3"], rtol=0, atol=1e-12), "CAVITY loads the refined triangles"
 
 
 # Eliminating the pressure pointwise from the perturbed constraint gives back Neo-Hooke's

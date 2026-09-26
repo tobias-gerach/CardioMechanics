@@ -54,6 +54,7 @@ protected:
     std::array<TInt,6>   nodesIndices_;
     Matrix3<TFloat> basisAtQuadraturePoint_;
     TFloat GetArea(const TFloat* nodesCoords);
+    void GetNodesCoordsAndIndices(TInt* nodesCoordsIndices, TFloat* nodesCoords);
     void CalcForcesDueToPressure(TFloat pressure, const TInt* nodesCoordsIndices, const TFloat* nodesCoords, TFloat* forces);
 private:
     
