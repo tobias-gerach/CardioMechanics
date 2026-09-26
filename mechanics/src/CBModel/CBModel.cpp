@@ -75,10 +75,10 @@ void CBModel::CalcNonZeroes() {
             pressureColumns.at(n) += numPressureNodes;
             if (i < numPressureNodes)
                 pressureNeighborsNnz_.at(pressureIndices_.at(n)) +=3 * ele->GetNumberOfNodesIndices() + numPressureNodes - 1;
-            // Contact and Robin surfaces reserve a block over their whole surface. Cavities do not:
-            // their pressure tangent is assembled per element, which the loop above reserves.
-            if (sele && (sele->GetRole() == SurfaceRole::ContactMaster || sele->GetRole() == SurfaceRole::ContactSlave ||
-                         sele->GetRole() == SurfaceRole::Robin))
+            // Cavity and Robin tangents are per element, which the loop above reserves. Contact couples
+            // a master triangle to whichever slave triangle its search finds, which no per-element count
+            // bounds for a slave row, so contact nodes reserve their surface's node count instead.
+            if (sele && (sele->GetRole() == SurfaceRole::ContactMaster || sele->GetRole() == SurfaceRole::ContactSlave))
                 SurIndexMap[sele->GetSurfaceIndex()].insert(n);
         }
     }
