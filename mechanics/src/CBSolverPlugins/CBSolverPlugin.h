@@ -66,7 +66,8 @@ public:
     CBElementAdapter* GetAdapter(){return(adapter_); }
     CBSolver* GetSolver(){return adapter_->GetSolver();}
     
-    /// The surface elements declared with a role, which the factory makes three-node triangles.
+    /// The surface elements declared with a Robin or contact role, which the factory makes three-node
+    /// triangles.
     std::vector<CBElementSurfaceT3*> GetSurfaceElements(SurfaceRole role) {
         std::vector<CBElementSurfaceT3*> surfaces;
         for (auto *element : adapter_->GetElementVector()) {

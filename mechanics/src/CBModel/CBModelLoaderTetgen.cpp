@@ -231,7 +231,7 @@ void CBModelLoaderTetgen::LoadElements(std::string elementsFilename, std::string
             elementsFile >> currentElement;
             CBElement *element;
             
-            element = Base::model_->GetElementFactory()->New(elementType);
+            element = Base::model_->GetElementFactory()->New(elementType, nodesPerElement);
             
             if (element->GetNumberOfNodesIndices() != nodesPerElement) {
                 throw std::runtime_error(
@@ -491,7 +491,7 @@ void CBModelLoaderTetgen::LoadSurfaces(std::string surfacesFilename, std::vector
                 }
                 
                 
-                element = Base::model_->GetElementFactory()->New(surfaceType);
+                element = Base::model_->GetElementFactory()->New(surfaceType, nodesPerSurfaceElement);
                 if (element->GetNumberOfNodesIndices() == nodesPerSurfaceElement) {
                     element->SetIndex(newElements.size());
                     element->SetMaterialIndex(static_cast<TInt>(attributes.at(0)));
@@ -516,7 +516,7 @@ void CBModelLoaderTetgen::LoadSurfaces(std::string surfacesFilename, std::vector
                         /// Each triangle is an element of its own. One element stored four times
                         /// carries the nodes of the last alone, leaving three quarters of the face
                         /// unloaded and its stored indices out of step with the container.
-                        element = Base::model_->GetElementFactory()->New(surfaceType);
+                        element = Base::model_->GetElementFactory()->New(surfaceType, 3);
                         auto surface = dynamic_cast<CBElementSurface *>(element);
                         element->SetIndex(newElements.size());
                         element->SetMaterialIndex(static_cast<TInt>(attributes.at(0)));

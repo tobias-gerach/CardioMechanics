@@ -1877,7 +1877,7 @@ The second file contains a summary of the following data: Cycle, Increment, Time
 Furthermore, a \nameref{nodeFile} and a \nameref{basesFile} of the stress free reference state after each iteration of the algorithm is saved.
 
 The surfaces listed under \verb|Surfaces| bound the cavities the pressures are applied to.
-They do not have to be declared as \verb|CAVITY| in \verb|Mesh.Surfaces|, and on a quadratic mesh they must not be: \verb|CAVITY| is registered against a 3-node triangle, so the mesh loader rejects a 6-node face for it, and forcing flat 3-node faces onto a quadratic mesh distributes the pressure load wrongly, since the consistent nodal load of a uniformly loaded 6-node face sits on the mid-edge nodes rather than on the vertices.
+They do not have to be declared as \verb|CAVITY| in \verb|Mesh.Surfaces|; a \verb|CAVITY| declaration keeps a 6-node face a 6-node element, as \verb|T6| does.
 Both \verb|T3| and \verb|T6| produce an element derived from the cavity element, and the plugin collects cavity elements by their type rather than by the name they were declared under, so declaring the order of the faces is enough.
 The error message the plugin raises when it finds no cavity with a given surface index suggests otherwise and is stale.
 A surface that bounds the cavity but must not carry the load, such as a lid closing an open endocardium, is listed by its material index under \verb|IgnoredSurfaceIndices|: it still contributes to the enclosed volume, which \autoref{eq:cavityVolume} needs to be well defined, but not to the pressure load.

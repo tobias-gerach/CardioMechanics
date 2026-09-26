@@ -94,8 +94,10 @@ bool CBCirculationCavity::ClosedSurfaceCheck() {
     TFloat origin1[3] = {1., 1., 1.};
     TFloat volume0 = 1e6 * CalcVolume(origin0); // volume in ml
     TFloat volume1 = 1e6 * CalcVolume(origin1);
-    
-    if (std::abs(volume1 - volume0) > 1e-10)
+
+    // On a closed surface the two differ by round-off alone, which grows with the size of the
+    // cavity, while a hole moves the volume by its area times the distance of the origins.
+    if (std::abs(volume1 - volume0) > 1e-10 * std::abs(volume0))
         return false;
     
     return true;

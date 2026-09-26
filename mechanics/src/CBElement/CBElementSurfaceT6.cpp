@@ -14,6 +14,7 @@
 
 #include "CBElementSurfaceT6.h"
 #include "CBElementAdapter.h"
+#include "CBElementSurfaceT6Kernel.h"
 
 
 CBElementSurfaceT6::CBElementSurfaceT6(CBElementSurfaceT6& other) : CBElementCavity(other) {
@@ -92,15 +93,7 @@ TFloat CBElementSurfaceT6::GetArea()
 {
     TInt    nodesCoordsIndices[18];
     TFloat  nodesCoords[18];
-    
-    for(unsigned int i = 0; i < 6; i++)
-    {
-        nodesCoordsIndices[3 * i]     = 3 * nodesIndices_[i];
-        nodesCoordsIndices[3 * i + 1] = 3 * nodesIndices_[i] + 1;
-        nodesCoordsIndices[3 * i + 2] = 3 * nodesIndices_[i] + 2;
-    }
-    
-    Base::adapter_->GetNodesCoords(18,nodesCoordsIndices, nodesCoords);
+    GetNodesCoordsAndIndices(nodesCoordsIndices, nodesCoords);
     
     return GetArea(nodesCoords);
 }
@@ -155,132 +148,50 @@ TFloat CBElementSurfaceT6::GetArea(const TFloat* nodesCoords)
 //
 //}
 
-TFloat CBElementSurfaceT6::CalcContributionToVolume(const TFloat* referenceCoords)
+void CBElementSurfaceT6::GetNodesCoordsAndIndices(TInt* nodesCoordsIndices, TFloat* nodesCoords)
 {
-    TInt    nodesCoordsIndices[18];
     for(unsigned int i = 0; i < 6; i++)
     {
         nodesCoordsIndices[3 * i]     = 3 * nodesIndices_[i];
         nodesCoordsIndices[3 * i + 1] = 3 * nodesIndices_[i] + 1;
         nodesCoordsIndices[3 * i + 2] = 3 * nodesIndices_[i] + 2;
     }
-    
-    TFloat  nodesCoords[18];
     Base::adapter_->GetNodesCoords(18, nodesCoordsIndices, nodesCoords);
-    
-    TFloat a1[3] = {nodesCoords[ 9]-nodesCoords[0], nodesCoords[10]-nodesCoords[1], nodesCoords[11]-nodesCoords[2]};
-    TFloat a2[3] = {nodesCoords[ 3]-nodesCoords[0], nodesCoords[ 4]-nodesCoords[1], nodesCoords[ 5]-nodesCoords[2]};
-    TFloat a3[3] = {nodesCoords[12]-nodesCoords[0], nodesCoords[13]-nodesCoords[1], nodesCoords[14]-nodesCoords[2]};
-    TFloat a4[3] = {nodesCoords[ 6]-nodesCoords[0], nodesCoords[ 7]-nodesCoords[1], nodesCoords[ 8]-nodesCoords[2]};
-    TFloat a5[3] = {nodesCoords[15]-nodesCoords[0], nodesCoords[16]-nodesCoords[1], nodesCoords[17]-nodesCoords[2]};
-    
-    TFloat c1[3];
-    c1[0] = a1[1] * a2[2] - a1[2] * a2[1];
-    c1[1] = a1[2] * a2[0] - a1[0] * a2[2];
-    c1[2] = a1[0] * a2[1] - a1[1] * a2[0];
-    
-    TFloat c2[3];
-    c2[0] = a2[1] * a3[2] - a2[2] * a3[1];
-    c2[1] = a2[2] * a3[0] - a2[0] * a3[2];
-    c2[2] = a2[0] * a3[1] - a2[1] * a3[0];
-    
-    TFloat c3[3];
-    c3[0] = a3[1] * a4[2] - a3[2] * a4[1];
-    c3[1] = a3[2] * a4[0] - a3[0] * a4[2];
-    c3[2] = a3[0] * a4[1] - a3[1] * a4[0];
-    
-    TFloat c4[3];
-    c4[0] = a4[1] * a5[2] - a4[2] * a5[1];
-    c4[1] = a4[2] * a5[0] - a4[0] * a5[2];
-    c4[2] = a4[0] * a5[1] - a4[1] * a5[0];
-    
-    TFloat d[3];
-    d[0] = nodesCoords[0] - referenceCoords[0];
-    d[1] = nodesCoords[1] - referenceCoords[1];
-    d[2] = nodesCoords[2] - referenceCoords[2];
-    
-    TFloat v1 = d[0] * c1[0] + d[1] * c1[1] + d[2] * c1[2];
-    TFloat v2 = d[0] * c2[0] + d[1] * c2[1] + d[2] * c2[2];
-    TFloat v3 = d[0] * c3[0] + d[1] * c3[1] + d[2] * c3[2];
-    TFloat v4 = d[0] * c4[0] + d[1] * c4[1] + d[2] * c4[2];
-    
-    return (v1+v2+v3+v4)/6.0;
+}
+
+TFloat CBElementSurfaceT6::CalcContributionToVolume(const TFloat* referenceCoords)
+{
+    TInt    nodesCoordsIndices[18];
+    TFloat  nodesCoords[18];
+    GetNodesCoordsAndIndices(nodesCoordsIndices, nodesCoords);
+    return CBElementSurfaceT6Kernel::CalcVolume(nodesCoords, referenceCoords);
 }
 
 void CBElementSurfaceT6::CalcContributionToVolumeJacobian(TFloat* volumeJacobianEntries, TInt* volumeJacobianEntriesIndices)
 {
-    throw std::runtime_error("CBElementSurfaceT6::CalcContributionToVolumeJacobian is not implemented! Either try to implement or use T3 instead.");
+    TFloat  nodesCoords[18];
+    GetNodesCoordsAndIndices(volumeJacobianEntriesIndices, nodesCoords);
+    // The origin, as CalcContributionToVolume() and the cavities take it.
+    const TFloat origin[3] = {0, 0, 0};
+    CBElementSurfaceT6Kernel::CalcVolumeGradient(nodesCoords, origin, volumeJacobianEntries);
 }
 
 void CBElementSurfaceT6::CalcForcesDueToPressure(TFloat pressure, const TInt* nodesCoordsIndices, const TFloat* nodesCoords, TFloat* forces)
 {
-    
     bool bc[18];
     Base::adapter_->GetNodesComponentsBoundaryConditions(18, nodesCoordsIndices, bc);
     
-    // The force on node i is the integral of -p N_i n dA over the isoparametric face. With xi = l2
-    // and eta = l3, n dA = (x_,xi x x_,eta) dxi deta, which is quadratic like N_i, so the degree 4
-    // rule of Dunavant (1985) integrates it exactly, on curved faces as well as flat ones.
-    const TFloat a = 0.44594849091596489, b = 0.091576213509770743;
-    const TFloat wa = 0.22338158967801147, wb = 0.10995174365532187;
-    const TFloat points[6][3] = {{1-2*a, a, a}, {a, 1-2*a, a}, {a, a, 1-2*a},
-                                 {1-2*b, b, b}, {b, 1-2*b, b}, {b, b, 1-2*b}};
-    const TFloat weights[6] = {wa, wa, wa, wb, wb, wb};
-    
-    Vector3<TFloat> f[6];
-    for(unsigned int q = 0; q < 6; q++)
-    {
-        const TFloat* l = points[q];
-        // Local nodes 4, 5 and 6 sit on the edges (1,2), (2,3) and (3,1).
-        const TFloat N[6]      = {l[0]*(2*l[0] - 1), l[1]*(2*l[1] - 1), l[2]*(2*l[2] - 1), 4*l[0]*l[1], 4*l[1]*l[2], 4*l[2]*l[0]};
-        const TFloat dNdxi[6]  = {1 - 4*l[0], 4*l[1] - 1, 0, 4*(l[0] - l[1]), 4*l[2], -4*l[2]};
-        const TFloat dNdeta[6] = {1 - 4*l[0], 0, 4*l[2] - 1, -4*l[1], 4*l[1], 4*(l[0] - l[2])};
-        
-        Vector3<TFloat> dxdxi, dxdeta;
-        for(unsigned int i = 0; i < 6; i++)
-        {
-            const Vector3<TFloat> x(&nodesCoords[3 * i]);
-            dxdxi  += dNdxi[i]  * x;
-            dxdeta += dNdeta[i] * x;
-        }
-        // The reference triangle has area 1/2, which the weights, summing to 1, leave out.
-        const Vector3<TFloat> areaVector = 0.5 * weights[q] * CrossProduct(dxdxi, dxdeta);
-        for(unsigned int i = 0; i < 6; i++)
-            f[i] += -pressure * N[i] * areaVector;
-    }
-    
-    for(unsigned int i = 0; i < 6; i++)
-    {
-        if (bc[3*i+0] !=0)
-            forces[3 * i + 0] = 0;
-        else
-            forces[3 * i + 0] = f[i].X();
-        
-        if (bc[3*i+1] !=0)
-            forces[3 * i + 1] = 0;
-        else
-            forces[3 * i + 1] = f[i].Y();
-        
-        if (bc[3*i+2] !=0)
-            forces[3 * i + 2] = 0;
-        else
-            forces[3 * i + 2] = f[i].Z();
-    }
+    CBElementSurfaceT6Kernel::CalcPressureForces(nodesCoords, pressure, forces);
+    for(unsigned int i = 0; i < 18; i++)
+        if (bc[i])
+            forces[i] = 0;
 }
 
 void CBElementSurfaceT6::ApplyPressure(TFloat pressure)
 {
     TInt    nodesCoordsIndices[18];
     TFloat  nodesCoords[18];
-    
-    for(unsigned int i = 0; i < 6; i++)
-    {
-        nodesCoordsIndices[3 * i]     = 3 * nodesIndices_[i];
-        nodesCoordsIndices[3 * i + 1] = 3 * nodesIndices_[i] + 1;
-        nodesCoordsIndices[3 * i + 2] = 3 * nodesIndices_[i] + 2;
-    }
-    
-    Base::adapter_->GetNodesCoords(18,nodesCoordsIndices, nodesCoords);
+    GetNodesCoordsAndIndices(nodesCoordsIndices, nodesCoords);
     TFloat forces[18];
     CalcForcesDueToPressure(pressure, nodesCoordsIndices, nodesCoords, forces);
     Base::adapter_->AddNodalForcesComponents(18, nodesCoordsIndices, forces);
@@ -306,45 +217,16 @@ void CBElementSurfaceT6::CalcPressureJacobian(TFloat pressure)
 {
     TInt    nodesCoordsIndices[18];
     TFloat  nodesCoords[18];
-    
-    for(unsigned int i = 0; i < 6; i++)
-    {
-        nodesCoordsIndices[3 * i + 0] = 3 * nodesIndices_[i];
-        nodesCoordsIndices[3 * i + 1] = 3 * nodesIndices_[i] + 1;
-        nodesCoordsIndices[3 * i + 2] = 3 * nodesIndices_[i] + 2;
-    }
-    
-    Base::adapter_->GetNodesCoords(18,nodesCoordsIndices, nodesCoords);
-    
-    TFloat epsilon = Base::adapter_->GetFiniteDifferencesEpsilon();
+    GetNodesCoordsAndIndices(nodesCoordsIndices, nodesCoords);
     
     TFloat dfdx[18*18];
+    CBElementSurfaceT6Kernel::CalcPressureTangent(nodesCoords, pressure, dfdx);
     
     bool bc[18];
     Base::adapter_->GetNodesComponentsBoundaryConditions(18, nodesCoordsIndices, bc);
-    
-    for(unsigned int i = 0; i < 6; i++)
-        for(unsigned int j = 0; j < 3; j++)
-        {
-            TFloat f1[18];
-            TFloat f2[18];
-            
-            double tmp = nodesCoords[3 * i + j];
-            nodesCoords[3 * i + j] += epsilon;
-            CalcForcesDueToPressure(pressure, nodesCoordsIndices, nodesCoords, f1);
-            nodesCoords[3 * i + j] -= 2.0*epsilon;
-            CalcForcesDueToPressure(pressure, nodesCoordsIndices, nodesCoords, f2);
-            
-            for(unsigned int k = 0; k < 6; k++)
-                for(unsigned int l = 0; l < 3; l++)
-                {
-                    if(bc[3*k+l] == 0 && bc[3*i+j]==0)
-                        dfdx[18 * (3 * k + l) + (3 * i + j)] = (f1[3*k+l] - f2[3*k+l])/(2*epsilon);
-                    else
-                        dfdx[18 * (3 * k + l) + (3 * i + j)] = 0;
-                }
-            nodesCoords[3 * i + j] = tmp;
-        }
+    for(unsigned int i = 0; i < 18; i++)
+        if (bc[i])
+            nodesCoordsIndices[i] = -1; // negative indices are ignored by MatSetValues
     
     Base::adapter_->AddNodalForcesJacobianEntries(18, nodesCoordsIndices, 18, nodesCoordsIndices, dfdx);
 }
