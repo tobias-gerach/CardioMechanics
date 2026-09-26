@@ -315,8 +315,13 @@ void CBElementSurfaceT3::ApplyPressure(TFloat pressure) {
 }
 
 Triangle<TFloat> CBElementSurfaceT3::GetTriangle() {
-    TInt   nodesCoordsIndices[9];
     TFloat nodesCoords[9];
+    GetNodesCoords(nodesCoords);
+    return Triangle<TFloat>(nodesCoords);
+}
+
+void CBElementSurfaceT3::GetNodesCoords(TFloat *nodesCoords) {
+    TInt nodesCoordsIndices[9];
     
     for (unsigned int i = 0; i < 3; i++) {
         nodesCoordsIndices[3 * i]     = 3 * nodesIndices_[i];
@@ -325,7 +330,6 @@ Triangle<TFloat> CBElementSurfaceT3::GetTriangle() {
     }
     
     Base::adapter_->GetNodesCoords(9, nodesCoordsIndices, nodesCoords);
-    return Triangle<TFloat>(nodesCoords);
 }
 
 void CBElementSurfaceT3::CalcPressureJacobian(TFloat pressure) {

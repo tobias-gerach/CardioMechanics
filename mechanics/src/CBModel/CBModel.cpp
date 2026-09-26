@@ -75,20 +75,11 @@ void CBModel::CalcNonZeroes() {
             pressureColumns.at(n) += numPressureNodes;
             if (i < numPressureNodes)
                 pressureNeighborsNnz_.at(pressureIndices_.at(n)) +=3 * ele->GetNumberOfNodesIndices() + numPressureNodes - 1;
-            if (sele) {
-                if (sele->GetType() == "CAVITY") {
-                    SurIndexMap[sele->GetSurfaceIndex()].insert(n);
-                }
-                if (sele->GetType() == "CONTACT_MASTER") {
-                    SurIndexMap[sele->GetSurfaceIndex()].insert(n);
-                }
-                if (sele->GetType() == "CONTACT_SLAVE") {
-                    SurIndexMap[sele->GetSurfaceIndex()].insert(n);
-                }
-                if (sele->GetType() == "CONTACT_ROBIN") {
-                    SurIndexMap[sele->GetSurfaceIndex()].insert(n);
-                }
-            }
+            // Contact and Robin surfaces reserve a block over their whole surface. Cavities do not:
+            // their pressure tangent is assembled per element, which the loop above reserves.
+            if (sele && (sele->GetRole() == SurfaceRole::ContactMaster || sele->GetRole() == SurfaceRole::ContactSlave ||
+                         sele->GetRole() == SurfaceRole::Robin))
+                SurIndexMap[sele->GetSurfaceIndex()].insert(n);
         }
     }
     for (auto SurIndex : SurIndexMap) {

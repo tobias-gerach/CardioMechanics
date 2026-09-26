@@ -19,7 +19,7 @@
 #include <memory>
 
 #include "CBSolverPlugin.h"
-#include "CBElementContactRobin.h"
+#include "CBElementSurfaceT3.h"
 
 using namespace math_pack;
 
@@ -46,7 +46,8 @@ protected:
 private:
     TFloat dt_, prevDt_;
     typedef CBSolverPlugin Base;
-    std::vector<CBElementContactRobin *> contactSurfaceElements_;
+    static constexpr int numNodes = CBElementSurfaceT3::numNodes;
+    std::vector<CBElementSurfaceT3 *> contactSurfaceElements_;
     std::vector<Vector3<TFloat>> initialPos_;
     std::vector<Vector3<TFloat>> displacement_;
     std::vector<Vector3<TFloat>> prevDisplacement_;
@@ -60,7 +61,7 @@ private:
     
     /// functions
     void InitContactSurfaces();
-    void CalcForceContributionOfElement(Vector3<TFloat> u, Vector3<TFloat> v, CBElementContactRobin *triangle,
+    void CalcForceContributionOfElement(Vector3<TFloat> u, Vector3<TFloat> v, CBElementSurfaceT3 *triangle,
                                         TFloat *nodalForces);
     
     /// xml parameters

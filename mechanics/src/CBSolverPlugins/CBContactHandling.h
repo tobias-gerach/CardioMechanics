@@ -15,14 +15,14 @@
 #ifndef CB_CONTACT_HANDLING_H
 #define CB_CONTACT_HANDLING_H
 
+#include <array>
 #include <map>
 #include <set>
 #include "Matrix3.h"
 
 #include "CBSolverPlugin.h"
 
-#include "CBElementContactMaster.h"
-#include "CBElementContactSlave.h"
+#include "CBElementSurfaceT3.h"
 
 using namespace math_pack;
 
@@ -54,6 +54,26 @@ public:
 protected:
 private:
     friend class CBParameterEstimator;
+    
+    /// Contact is formulated on three-node triangles, with one Gauss point near each vertex.
+    static constexpr int numNodes       = CBElementSurfaceT3::numNodes;
+    static constexpr int numGaussPoints = 3;
+    
+    /// A master element with the slave element found at each of its Gauss points and vertices, -1
+    /// where there is none, and the gap vector to it.
+    struct MasterElement {
+        explicit MasterElement(CBElementSurfaceT3 *e) : element(e) {
+            slaveAtGaussPoint.fill(-1);
+            slaveAtVertex.fill(-1);
+        }
+        
+        CBElementSurfaceT3 *element;
+        std::array<TInt, numGaussPoints> slaveAtGaussPoint;
+        std::array<TInt, numNodes> slaveAtVertex;
+        std::array<Vector3<TFloat>, numGaussPoints> distanceVectorToSlave;
+        TFloat distanceToSlave = 0;
+    };
+    
     void DetermineSlaveNodes();
     void DetermineInitialSlaveElementsAtGaussPoints();
     bool CheckIfSlave(TFloat *slaveNodes, int slaveInd, Vector3<TFloat> *p, Vector3<TFloat> *nv, TFloat &dist);
@@ -70,8 +90,8 @@ private:
                                                   const Triangle<TFloat> &slaveTriangle, TInt gaussPointIndex);
     Vector3<TFloat> CalculateDistanceAtVertex(const Triangle<TFloat> &masterTriangle,
                                               const Triangle<TFloat> &slaveTriangle, TInt index);
-    std::vector<CBElementContactMaster *> masterElements_;
-    std::vector<CBElementContactSlave *>  slaveElements_;
+    std::vector<MasterElement>        masterElements_;
+    std::vector<CBElementSurfaceT3 *> slaveElements_;
     
     // -----
     std::map<int, std::vector<int> *> slaveNeighbors_;

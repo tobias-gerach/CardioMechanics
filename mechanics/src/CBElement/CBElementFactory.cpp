@@ -23,10 +23,18 @@
 #include "CBElementSurface.h"
 #include "CBElementSurfaceT3.h"
 #include "CBElementSurfaceT6.h"
-#include "CBElementCavity.h"
-#include "CBElementContactMaster.h"
-#include "CBElementContactSlave.h"
-#include "CBElementContactRobin.h"
+
+namespace {
+/// Roles are carried by three-node triangles until their plugins support six-node faces; the
+/// loader refines a six-node face declared with a role into four of them.
+CBElementFactory::FactoryFunction TriangleWithRole(SurfaceRole role) {
+    return [role] {
+        auto *surface = new CBElementSurfaceT3;
+        surface->SetRole(role);
+        return surface;
+    };
+}
+}
 
 
 CBElementFactory::CBElementFactory() {
@@ -34,12 +42,12 @@ CBElementFactory::CBElementFactory() {
     producers_["T4MINI"]  = CBElementSolidT4Mini::New;
     producers_["T10"]     = CBElementSolidT10::New;
     producers_["T10P1"]   = CBElementSolidT10P1::New;
-    producers_["CAVITY"]  = CBElementSurfaceT3::New;
     producers_["T3"]      = CBElementSurfaceT3::New;
     producers_["T6"]      = CBElementSurfaceT6::New;
-    producers_["CONTACT_ROBIN"] = CBElementContactRobin::New;
-    producers_["CONTACT_MASTER"]  = CBElementContactMaster::New;
-    producers_["CONTACT_SLAVE"]   = CBElementContactSlave::New;
+    producers_["CAVITY"]          = TriangleWithRole(SurfaceRole::Cavity);
+    producers_["CONTACT_ROBIN"]   = TriangleWithRole(SurfaceRole::Robin);
+    producers_["CONTACT_MASTER"]  = TriangleWithRole(SurfaceRole::ContactMaster);
+    producers_["CONTACT_SLAVE"]   = TriangleWithRole(SurfaceRole::ContactSlave);
 }
 
 CBElement *CBElementFactory::New(std::string elementType) {

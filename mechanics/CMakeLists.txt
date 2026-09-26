@@ -25,9 +25,6 @@ set(SRCS
     src/CBElement/CBElement.cpp
     src/CBElement/CBElementAdapter.cpp
     src/CBElement/CBElementCavity.cpp
-    src/CBElement/CBElementContactMaster.cpp
-    src/CBElement/CBElementContactSlave.cpp
-    src/CBElement/CBElementContactRobin.cpp
     src/CBElement/CBElementFactory.cpp
     src/CBElement/CBElementSolid.cpp
     src/CBElement/CBElementSolidT10.cpp

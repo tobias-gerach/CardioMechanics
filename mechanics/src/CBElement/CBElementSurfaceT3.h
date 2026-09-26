@@ -25,6 +25,8 @@ using namespace math_pack;
 
 class CBElementSurfaceT3 : public CBElementCavity {
 public:
+    static constexpr int numNodes = 3;
+    
     CBElementSurfaceT3() : CBElementCavity() {}
     
     CBElementSurfaceT3(CBElementSurfaceT3 &other);
@@ -42,9 +44,10 @@ public:
     virtual void SetWeight(unsigned int i, TFloat w) override;
     virtual TFloat GetWeight(unsigned int i) override;
     
-    unsigned int GetNumberOfNodesIndices() override {return (unsigned int)3; }
+    unsigned int GetNumberOfNodesIndices() override {return numNodes; }
     
     Triangle<TFloat> GetTriangle() override;
+    void GetNodesCoords(TFloat *nodesCoords);
     TFloat GetArea();
     Vector3<TFloat> GetCentroid();
     Vector3<TFloat> GetNormalVector();

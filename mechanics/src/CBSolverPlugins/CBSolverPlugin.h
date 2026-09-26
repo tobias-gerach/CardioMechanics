@@ -20,7 +20,10 @@
 
 #include "ParameterMap.h"
 
+#include <cassert>
+
 #include "CBElementAdapter.h"
+#include "CBElementSurfaceT3.h"
 #include "CBStatus.h"
 
 
@@ -62,6 +65,19 @@ public:
     ParameterMap* GetParameters(){return(parameters_); }
     CBElementAdapter* GetAdapter(){return(adapter_); }
     CBSolver* GetSolver(){return adapter_->GetSolver();}
+    
+    /// The surface elements declared with a role, which the factory makes three-node triangles.
+    std::vector<CBElementSurfaceT3*> GetSurfaceElements(SurfaceRole role) {
+        std::vector<CBElementSurfaceT3*> surfaces;
+        for (auto *element : adapter_->GetElementVector()) {
+            auto *surface = dynamic_cast<CBElementSurface*>(element);
+            if (surface && surface->GetRole() == role) {
+                assert(dynamic_cast<CBElementSurfaceT3*>(surface));
+                surfaces.push_back(static_cast<CBElementSurfaceT3*>(surface));
+            }
+        }
+        return surfaces;
+    }
     
     virtual void LoadState(ParameterMap* pluginParameters){}
     

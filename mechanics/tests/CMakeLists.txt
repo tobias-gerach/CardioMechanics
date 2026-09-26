@@ -4,6 +4,7 @@ include(GoogleTest)
 add_executable(MechanicsTests
     ConstitutiveModelTest.cpp
     DataFromFileTest.cpp
+    ElementFactoryTest.cpp
     ElementKernelTest.cpp
     LinearSolverOptionsTest.cpp
     TensionModelLand17Test.cpp
