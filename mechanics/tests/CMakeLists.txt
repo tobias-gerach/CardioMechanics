@@ -2,6 +2,7 @@ find_package(GTest REQUIRED)
 include(GoogleTest)
 
 add_executable(MechanicsTests
+    ApplyPressureTest.cpp
     ConstitutiveModelTest.cpp
     DataFromFileTest.cpp
     ElementFactoryTest.cpp

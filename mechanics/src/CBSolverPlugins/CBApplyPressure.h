@@ -35,6 +35,9 @@ public:
     void ApplyToNodalForces() override;
     void ApplyToNodalForcesJacobian() override;
     TFloat CalcVolume();
+    // Linear ramp from zero at startTime to maxPressure at stopTime; after stopTime the peak is
+    // held if keepMaxPressure, and released to zero otherwise.
+    static TFloat PressureAt(TFloat time, TFloat startTime, TFloat stopTime, TFloat maxPressure, bool keepMaxPressure);
     void StepBack() override;
     void WriteToFile(TFloat time) override;
     std::string GetName() override {return "Apply Pressure";}

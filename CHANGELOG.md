@@ -41,6 +41,7 @@
 - `tools/python/VTK2tetgen.py` rewritten to be Python 3 compatible and importable: the CLI and conversion moved into `main()` under a `__main__` guard and the `vtk` import is deferred, so the geometry helpers can be imported without VTK. Mesh output is unchanged; `.bases` differs only in whitespace between the row index and the values.
 - A cavity on 6-node faces is integrated over the curved face: its enclosed volume is the volume under the isoparametric surface instead of under a fan of flat triangles through its nodes, consistent with the pressure load, and converges at fourth instead of second order. The pressure tangent is analytic instead of finite differences. Volumes and results of `T6` cavities change.
 - `CAVITY` on the 6-node faces of a quadratic mesh keeps each face a 6-node element instead of refining it into four 3-node triangles. The other surface roles still refine.
+- The manual's `ApplyPressure` section states that `KeepMaxPressure` only decides whether the peak is held after `StopTime`; it never replaced the ramp.
 
 ### Deleted
 - `Solver.LU`, `Solver.NewmarkBeta.Type` and `Solver.GeneralizedAlpha.Type`. They raise an error naming `Solver.LinearSolver.Preset`; `Type` `superlu` becomes the preset `direct-superlu`.
@@ -52,6 +53,7 @@
 - Holzapfel's stress omitted the derivative of the smoothed Heaviside switch in the fibre and sheet terms, so stress and energy disagreed. Results change only for `k != 0`.
 - Corrected the sign of the master-to-target gap vector in `CBContactHandling`. The gap was taken as `(ip - p).Norm()`, which discards the sign of the signed distance along the master normal, so the vector pointed the wrong way whenever the target lay on the negative-normal side. Only the estimator consumes this vector; the forward contact force computes its own distance and is unaffected.
 - `CBDataFromFile`'s default constructor left `startTime_` and `period_` uninitialized, which produced NaN sampled values on the default-constructed path used by `CBPointsCtrl`.
+- The `ApplyPressure` ramp ran from zero at `t = 0` rather than at `StartTime`, so a non-zero `StartTime` loaded the surface before the start time and reached `MaxPressure` at `StopTime - StartTime` instead of `StopTime`. The ramp now runs from zero at `StartTime` to `MaxPressure` at `StopTime`, and the pressure is zero before `StartTime`. Results change for every run whose effective start time is non-zero: `Plugins.ApplyPressure.StartTime`, or the solver's `StartTime` where the plugin sets none.
 
 ### Known Issues
 - The active-stress estimator is serial only and aborts if launched under `mpirun`.
