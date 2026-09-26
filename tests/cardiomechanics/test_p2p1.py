@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from helpers.cantilever import SHAPE, node, write_mesh
+from helpers.cantilever import write_mesh
 from helpers.compare import read_vtu_point_field, read_vtu_points
 from helpers.run import assert_no_petsc_error, assert_refused, run_binary
 
@@ -26,10 +26,12 @@ CIRCULATION_FIXTURE = Path(__file__).parent / "fixtures" / "p2p1_cantilever_circ
 T10_EDGES = ((0, 1), (1, 2), (0, 2), (0, 3), (1, 3), (2, 3))
 
 
-def _clamped_dofs():
-    """Displacement unknowns of the clamped face x = 0; on one rank, 3 * node + component."""
-    return {3 * (node((0, j, k)) - 1) + c
-            for j in range(SHAPE[1]) for k in range(SHAPE[2]) for c in range(3)}
+def _clamped_dofs(wd):
+    """Displacement unknowns of the clamped face x = 0 of the mesh staged into wd; on one rank,
+    3 * node + component. Read from the boundary condition attribute of the nodes, since the T4
+    mesh numbers its nodes differently from helpers.cantilever.node()."""
+    lines = (wd / "tetgen" / "cantilever.node").read_text().splitlines()[1:]
+    return {3 * (int(n) - 1) + c for n, *_, bc in map(str.split, lines) if bc != "0" for c in range(3)}
 
 
 # Parameters of each law with every modulus O(1), for the reasons given above. The fixtures have
@@ -366,8 +368,12 @@ def test_p2p1_robin_boundary_parallel_matches_serial(binary, cm_env, tmp_path):
 JACOBIAN_THRESHOLD = 1e-6
 
 
-def _jacobian_differences(view_file):
-    """Non-zero (row, column, value) entries of the hand-coded minus finite-difference Jacobian.
+HAND_CODED, DIFFERENCE = 0, 2
+
+
+def _jacobian_entries(view_file, matrix):
+    """Non-zero (row, column, value) entries of the HAND_CODED Jacobian or of its DIFFERENCE from
+    finite differences.
 
     PETSc writes the hand-coded, the finite-difference and the thresholded difference matrix,
     in that order, and rewrites the file at every Jacobian evaluation, so it holds the last one.
@@ -375,7 +381,7 @@ def _jacobian_differences(view_file):
     sections = view_file.read_text().split("Mat Object:")[1:]
     assert len(sections) == 3, f"{view_file.name}: expected 3 matrices, found {len(sections)}"
     entries = []
-    for line in sections[2].splitlines():
+    for line in sections[matrix].splitlines():
         m = re.match(r"\s*row (\d+):(.*)", line)
         if m:
             entries += [(int(m.group(1)), int(c), float(v))
@@ -393,29 +399,37 @@ ROBIN_NORMAL_WITH_DASHPOT = (("<RobinBoundaryGeneral>true</RobinBoundaryGeneral>
                              ("<Beta>0</Beta>", "<Beta>0.5</Beta>"))
 
 
-@pytest.mark.parametrize("fixture, replace, closed", [(FIXTURE, (), False), (DYNAMIC_FIXTURE, (), False),
-                                                      (ROBIN_FIXTURE, (), False),
-                                                      (ROBIN_FIXTURE, ROBIN_NORMAL_WITH_DASHPOT, False),
-                                                      (CIRCULATION_FIXTURE, (), True)],
-                         ids=["static", "generalized_alpha", "robin", "robin_normal_dashpot", "circulation"])
-def test_p2p1_jacobian_matches_finite_differences(binary, cm_env, tmp_path, fixture, replace, closed):
+@pytest.mark.parametrize("fixture, replace, closed, element_type",
+                         [(FIXTURE, (), False, "T10P1"), (DYNAMIC_FIXTURE, (), False, "T10P1"),
+                          (ROBIN_FIXTURE, (), False, "T10P1"),
+                          (ROBIN_FIXTURE, ROBIN_NORMAL_WITH_DASHPOT, False, "T10P1"),
+                          (CIRCULATION_FIXTURE, (), True, "T10P1"),
+                          (FIXTURE, (), False, "T4"), (CIRCULATION_FIXTURE, (), True, "T4")],
+                         ids=["static", "generalized_alpha", "robin", "robin_normal_dashpot", "circulation",
+                              "static_t3", "circulation_t3"])
+def test_p2p1_jacobian_matches_finite_differences(binary, cm_env, tmp_path, fixture, replace, closed, element_type):
     """Every Jacobian block, coupling and constraint included, against PETSc's finite differences.
     Under generalized-alpha that includes the mass and damping terms and the (1 - alphaF) factor
     of both fields at the intermediate configuration. The Robin cases add the tangents of both
     Robin boundary plugins, the circulation case the cavity pressure tangent of the Circulation
-    plugin, which refuses a cavity that is not closed.
+    plugin, which refuses a cavity that is not closed. The T3 cases put the same pressure loads
+    on the linear mesh, whose surface elements are T3 rather than T6.
 
-    kappa = 1 keeps the -1/kappa constraint block well above the threshold. Entries in clamped
-    rows and columns are excluded: the hand-coded Jacobian replaces those rows by the identity and
-    drops those columns, because a clamped increment is zero, whereas finite differences perturb
-    clamped nodes like any other.
+    kappa = 1 keeps the -1/kappa constraint block well above the threshold. Clamped rows and
+    columns are checked apart, because finite differences perturb clamped nodes like any other.
+    The hand-coded Jacobian must replace clamped rows by the identity, so that a clamped increment
+    is zero; any other entry in such a row moves the clamp. Clamped columns then meet only zero
+    increments, so what they hold does not matter.
     """
     view = tmp_path / "jacobian.txt"
     env = dict(cm_env, PETSC_OPTIONS=f"-mech_snes_test_jacobian {JACOBIAN_THRESHOLD} "
                                      f"-mech_snes_test_jacobian_view ascii:{view}")
-    _run(binary, cm_env, tmp_path, kappa=1, env=env, fixture=fixture, replace=replace, closed=closed)
-    clamped = _clamped_dofs()
-    wrong = [e for e in _jacobian_differences(view) if e[0] not in clamped and e[1] not in clamped]
+    _run(binary, cm_env, tmp_path, element_type=element_type, kappa=1, env=env, fixture=fixture,
+         replace=replace, closed=closed)
+    clamped = _clamped_dofs(tmp_path)
+    leaking = [e for e in _jacobian_entries(view, HAND_CODED) if e[0] in clamped and e != (e[0], e[0], 1.0)]
+    assert not leaking, f"{len(leaking)} entries in clamped rows besides the unit diagonal, e.g. {leaking[:3]}"
+    wrong = [e for e in _jacobian_entries(view, DIFFERENCE) if e[0] not in clamped and e[1] not in clamped]
     if wrong:
         row, col, value = max(wrong, key=lambda e: abs(e[2]))
         raise AssertionError(f"{len(wrong)} Jacobian entries differ beyond {JACOBIAN_THRESHOLD}, "

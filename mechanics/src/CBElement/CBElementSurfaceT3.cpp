@@ -340,33 +340,26 @@ void CBElementSurfaceT3::CalcPressureJacobian(TFloat pressure) {
     
     Base::adapter_->GetNodesCoords(9, nodesCoordsIndices, nodesCoords);
     
-    TFloat epsilon = Base::adapter_->GetFiniteDifferencesEpsilon();
-    
+    // Every node carries f = -(p/6) (x2 - x1) x (x3 - x1). The cross product is bilinear in the
+    // nodes, so its derivative with respect to x_J is exactly the skew matrix of x_{J+2} - x_{J+1},
+    // indices cyclic.
     TFloat dfdx[9*9];
+    for (unsigned int j = 0; j < 3; j++) {
+        TFloat v[3];
+        for (unsigned int c = 0; c < 3; c++)
+            v[c] = -pressure / 6.0 * (nodesCoords[3 * ((j + 2) % 3) + c] - nodesCoords[3 * ((j + 1) % 3) + c]);
+        const TFloat skew[3][3] = {{0, -v[2], v[1]}, {v[2], 0, -v[0]}, {-v[1], v[0], 0}};
+        for (unsigned int i = 0; i < 3; i++)
+            for (unsigned int k = 0; k < 3; k++)
+                for (unsigned int l = 0; l < 3; l++)
+                    dfdx[9 * (3 * i + k) + (3 * j + l)] = skew[k][l];
+    }
     
     bool bc[9];
     Base::adapter_->GetNodesComponentsBoundaryConditions(9, nodesCoordsIndices, bc);
-    
-    for (unsigned int i = 0; i < 3; i++) // iter over nodes
-        for (unsigned int j = 0; j < 3; j++) { // iter over coordinates x,y,z
-            TFloat f1[9];
-            TFloat f2[9];
-            
-            double tmp = nodesCoords[3 * i + j];
-            nodesCoords[3 * i + j] += epsilon;
-            CalcForcesDueToPressure(pressure, nodesCoordsIndices, nodesCoords, f1);
-            nodesCoords[3 * i + j] -= 2.0*epsilon;
-            CalcForcesDueToPressure(pressure, nodesCoordsIndices, nodesCoords, f2);
-            
-            for (unsigned int k = 0; k < 3; k++)
-                for (unsigned int l = 0; l < 3; l++) {
-                    if ((bc[3*k+l] == 0) && (bc[3*i+j] == 0))
-                        dfdx[9 * (3 * k + l) + (3 * i + j)] = (f1[3*k+l] - f2[3*k+l])/(2*epsilon);
-                    else
-                        dfdx[9 * (3 * k + l) + (3 * i + j)] = 0;
-                }
-            nodesCoords[3 * i + j] = tmp;
-        }
+    for (unsigned int i = 0; i < 9; i++)
+        if (bc[i])
+            nodesCoordsIndices[i] = -1; // negative indices are ignored by MatSetValues
     
     Base::adapter_->AddNodalForcesJacobianEntries(9, nodesCoordsIndices, 9, nodesCoordsIndices, dfdx);
 } // CBElementSurfaceT3::CalcPressureJacobian
