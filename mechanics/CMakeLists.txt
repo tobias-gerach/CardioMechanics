@@ -61,7 +61,6 @@ set(SRCS
     src/CBSolverPlugins/CBCirculation.cpp
     src/CBSolverPlugins/CBContactHandling.cpp
     src/CBSolverPlugins/CBRobinBoundary.cpp
-    src/CBSolverPlugins/CBRobinBoundaryGeneral.cpp
     src/CBSolverPlugins/CBLoadUnloadedState.cpp
     src/CBSolverPlugins/CBPointsCtrl.cpp
     src/CBSolverPlugins/CBSolverPluginCavities.cpp

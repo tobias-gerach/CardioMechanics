@@ -15,30 +15,32 @@
 #include "CBSolver.h"
 #include "CBRobinBoundary.h"
 
-CBRobinBoundary::CBRobinBoundary() : CBSolverPlugin() {}
+CBRobinBoundary::CBRobinBoundary(bool projectOnNormal)
+    : CBSolverPlugin(), projectOnNormal_(projectOnNormal),
+      key_(projectOnNormal ? "RobinBoundary" : "RobinBoundaryGeneral") {}
 
 void CBRobinBoundary::Init() {
     /// read XML parameter input
-    startTime_ = parameters_->Get<TFloat>("Plugins.RobinBoundary.StartTime", std::numeric_limits<double>::lowest());
-    export_ = parameters_->Get<bool>("Plugins.RobinBoundary.Export", false);
+    startTime_ = parameters_->Get<TFloat>("Plugins." + key_ + ".StartTime", std::numeric_limits<double>::lowest());
+    export_ = parameters_->Get<bool>("Plugins." + key_ + ".Export", false);
     
     if (startTime_ != std::numeric_limits<double>::lowest())
         status_ = CBStatus::DACCORD;
     
     /// Depending on the mesh, we sometimes have to flip the surface normals
-    bool flipSurfaceNormals = parameters_->Get<bool>("Plugins.RobinBoundary.FlipSurfaceNormals", false);
+    bool flipSurfaceNormals = parameters_->Get<bool>("Plugins." + key_ + ".FlipSurfaceNormals", false);
     if (flipSurfaceNormals) {
         normalVectorSign_ = -1;
     }
     
     /// ID of the surface you want to use
-    surfaceIndex_ = parameters_->Get<TInt>("Plugins.RobinBoundary.SurfaceIndex");
+    surfaceIndex_ = parameters_->Get<TInt>("Plugins." + key_ + ".SurfaceIndex");
     
     /// Parameters to adjust the force magnitude
     /// alpha_ : stiffness in Pa/m
     /// beta_ : dashpot viscosity in (Pa*s) / m
-    alpha_              = parameters_->Get<TFloat>("Plugins.RobinBoundary.Alpha", 1e8);
-    beta_               = parameters_->Get<TFloat>("Plugins.RobinBoundary.Beta", 5e3);
+    alpha_              = parameters_->Get<TFloat>("Plugins." + key_ + ".Alpha", projectOnNormal_ ? 1e8 : 1e5);
+    beta_               = parameters_->Get<TFloat>("Plugins." + key_ + ".Beta", 5e3);
     
     /// solver timestep
     dt_ = Base::adapter_->GetSolver()->GetTiming().GetTimeStep();
@@ -135,7 +137,7 @@ void CBRobinBoundary::ApplyToNodalForces() {
             if (bc[3*k+2] != 0) {
                 nodalForces[3*k+2] = 0;
             }
-            ContactForces_.at(i)    += Vector3<TFloat>(nodalForces[3*k], nodalForces[3*k+1], nodalForces[3*k+2])/numNodes;
+            ContactForces_.at(i)    += Vector3<TFloat>(nodalForces[3*k], nodalForces[3*k+1], nodalForces[3*k+2]);
         }
         Base::GetAdapter()->AddNodalForcesComponentsGlobal(numNodes, nodes, nodalForces);
     }
@@ -158,14 +160,15 @@ void CBRobinBoundary::ApplyToNodalForcesJacobian() {
         
         /// every node I carries f_I = -A/3 * w with the traction w of CalcForceContributionOfElement.
         /// u and v depend on the nodes through the centroid, which moves by 1/3 of any node, so
-        /// dw/dx_J = -stiffness * P with P = N N^T. The current area A depends on the nodes as well.
+        /// dw/dx_J = -stiffness * P with P = N N^T, or P = I unprojected. The current area A depends on
+        /// the nodes as well.
         Triangle<TFloat> triangle = element->GetTriangle();
         TFloat area = triangle.GetArea();
         TFloat scaling = element->GetSurfaceTractionScaling();
         Vector3<TFloat> N = referenceNormals_.at(i);
         Vector3<TFloat> u = initialPos_.at(i) - triangle.GetCentroid();
         Vector3<TFloat> v = (u - prevDisplacement_.at(i)) / dt_;
-        Vector3<TFloat> w = N * (scaling * (alpha_ * (u * N) + beta_ * (v * N)));
+        Vector3<TFloat> w = Project(u * alpha_ + v * beta_, N) * scaling;
         TFloat stiffness = scaling * (alpha_ + beta_ / dt_) / 3;
         
         TFloat nodalForcesJacobian[3*numNodes*3*numNodes];
@@ -174,7 +177,8 @@ void CBRobinBoundary::ApplyToNodalForcesJacobian() {
                 CrossProduct(triangle.GetNode((J+1)%numNodes) - triangle.GetNode((J+2)%numNodes), triangle.GetNormalVector()) * 0.5;
             for (int a = 0; a < 3; a++)
                 for (int b = 0; b < 3; b++) {
-                    TFloat dfdx = -(w(a) * areaGradient(b) - area * stiffness * N(a) * N(b)) / 3;
+                    TFloat P = projectOnNormal_ ? N(a) * N(b) : (a == b);
+                    TFloat dfdx = -(w(a) * areaGradient(b) - area * stiffness * P) / 3;
                     for (int I = 0; I < numNodes; I++)
                         nodalForcesJacobian[3*numNodes*(3*I+a) + 3*J+b] = (bc[3*I+a] || bc[3*J+b]) ? 0 : dfdx;
                 }
@@ -248,7 +252,7 @@ void CBRobinBoundary::CalcForceContributionOfElement(Vector3<TFloat> u, Vector3<
     /// n = 1
     /// W = 1
     /// l1 = l2 = l3 = 1/3
-    /// p = alpha * u * N  + beta * v * N
+    /// p = P (alpha * u + beta * v), P the projection of Project()
     TFloat area = triangle->GetTriangle().GetArea();
     TFloat W    = 1;
     TFloat scaling = triangle->GetSurfaceTractionScaling();
@@ -260,13 +264,18 @@ void CBRobinBoundary::CalcForceContributionOfElement(Vector3<TFloat> u, Vector3<
     Ni[1] = [](double l1, double l2, double l3) {return l2; };
     Ni[2] = [](double l1, double l2, double l3) {return l3; };
     
+    Vector3<TFloat> w = Project(u * alpha_ + v * beta_, refNormalVector) * scaling;
+    
     /// iterate over nodes
     for (int i = 0; i < numNodes; i++) {
-        TFloat forceMagnitude = scaling * alpha_ * (u * refNormalVector) + scaling * beta_ * (v * refNormalVector);
-        Vector3<TFloat> f = -area * forceMagnitude * W * refNormalVector * Ni[i](1.0/3.0, 1.0/3.0, 1.0/3.0);
+        Vector3<TFloat> f = -area * W * w * Ni[i](1.0/3.0, 1.0/3.0, 1.0/3.0);
         
         nodalForces[3*i]   = f.X();
         nodalForces[3*i+1] = f.Y();
         nodalForces[3*i+2] = f.Z();
     }
 }  // CBRobinBoundary::CalcForceContributionOfElement
+
+Vector3<TFloat> CBRobinBoundary::Project(const Vector3<TFloat> &x, const Vector3<TFloat> &N) const {
+    return projectOnNormal_ ? N * (x * N) : x;
+}
