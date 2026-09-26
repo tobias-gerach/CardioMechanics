@@ -381,13 +381,24 @@ def _jacobian_differences(view_file):
     return entries
 
 
-@pytest.mark.parametrize("fixture", [FIXTURE, DYNAMIC_FIXTURE, ROBIN_FIXTURE],
-                         ids=["static", "generalized_alpha", "robin"])
-def test_p2p1_jacobian_matches_finite_differences(binary, cm_env, tmp_path, fixture):
+# The Robin fixture uses the general plugin without a dashpot. This swaps in the plugin that
+# projects onto the reference normal and gives it a dashpot, so between them the two Robin cases
+# cover both plugins and the dashpot. Beta / TimeStep outweighs Alpha, so a wrong dashpot term
+# cannot hide below the threshold.
+ROBIN_NORMAL_WITH_DASHPOT = (("<RobinBoundaryGeneral>true</RobinBoundaryGeneral>", "<RobinBoundary>true</RobinBoundary>"),
+                             ("<RobinBoundaryGeneral>\n", "<RobinBoundary>\n"),
+                             ("</RobinBoundaryGeneral>\n", "</RobinBoundary>\n"),
+                             ("<Beta>0</Beta>", "<Beta>0.5</Beta>"))
+
+
+@pytest.mark.parametrize("fixture, replace", [(FIXTURE, ()), (DYNAMIC_FIXTURE, ()), (ROBIN_FIXTURE, ()),
+                                              (ROBIN_FIXTURE, ROBIN_NORMAL_WITH_DASHPOT)],
+                         ids=["static", "generalized_alpha", "robin", "robin_normal_dashpot"])
+def test_p2p1_jacobian_matches_finite_differences(binary, cm_env, tmp_path, fixture, replace):
     """Every Jacobian block, coupling and constraint included, against PETSc's finite differences.
     Under generalized-alpha that includes the mass and damping terms and the (1 - alphaF) factor
-    of both fields at the intermediate configuration. The Robin case adds the tangent of the
-    Robin boundary plugin.
+    of both fields at the intermediate configuration. The Robin cases add the tangents of both
+    Robin boundary plugins.
 
     kappa = 1 keeps the -1/kappa constraint block well above the threshold. Entries in clamped
     rows and columns are excluded: the hand-coded Jacobian replaces those rows by the identity and
@@ -397,7 +408,7 @@ def test_p2p1_jacobian_matches_finite_differences(binary, cm_env, tmp_path, fixt
     view = tmp_path / "jacobian.txt"
     env = dict(cm_env, PETSC_OPTIONS=f"-mech_snes_test_jacobian {JACOBIAN_THRESHOLD} "
                                      f"-mech_snes_test_jacobian_view ascii:{view}")
-    _run(binary, cm_env, tmp_path, kappa=1, env=env, fixture=fixture)
+    _run(binary, cm_env, tmp_path, kappa=1, env=env, fixture=fixture, replace=replace)
     clamped = _clamped_dofs()
     wrong = [e for e in _jacobian_differences(view) if e[0] not in clamped and e[1] not in clamped]
     if wrong:
