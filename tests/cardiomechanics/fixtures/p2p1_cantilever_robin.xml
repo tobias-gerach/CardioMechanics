@@ -82,9 +82,9 @@
         </Groups>
     </ApplyPressureFromFunction>
 
-    <!-- The plugin contributes no Jacobian, so Newton converges only linearly, at a rate set by
-         the spring's share of the tip stiffness (about 0.01 here). A weak spring keeps it fast
-         while still moving the tip measurably. No dashpot: a static step has no velocity. -->
+    <!-- The spring carries about 0.01 of the tip stiffness: enough to move the tip measurably,
+         weak enough that the cantilever still bends under the pressure. No dashpot: a static
+         step has no velocity. -->
     <RobinBoundaryGeneral>
         <SurfaceIndex>131</SurfaceIndex>
         <Alpha>0.002</Alpha>
