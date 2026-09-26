@@ -94,8 +94,8 @@ void CBReferenceRecovery::ApplyToNodalForces() {
 }
 
 void CBReferenceRecovery::ApplyToNodalForcesJacobian() {
-    //    for (auto s : surfaces_)
-    //        cavities_.at(s)->ApplyPressureToJacobian(S_.currentPressures_.at(s));
+    for (auto s : surfaces_)
+        cavities_.at(s)->ApplyPressureToJacobian(S_.currentPressures_.at(s));
 }
 
 void CBReferenceRecovery::Export(TFloat time) {

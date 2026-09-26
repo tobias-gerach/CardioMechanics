@@ -1,0 +1,100 @@
+<settings>P2P1 cantilever under a cavity pressure from the Circulation plugin</settings>
+
+<General>
+    <LogFile>./Results/cantilever.log</LogFile>
+</General>
+
+<Mesh>
+    <Type>T10P1</Type>
+    <Format>Tetgen</Format>
+    <Sorting>None</Sorting>
+
+    <Tetgen>
+        <Unit>1</Unit>
+        <Nodes>./tetgen/cantilever.node</Nodes>
+        <Elements>./tetgen/cantilever.ele</Elements>
+        <Surfaces>./tetgen/cantilever.sur</Surfaces>
+    </Tetgen>
+
+    <Surfaces>
+        <!-- The whole boundary, which the plugin requires to be closed. -->
+        <Surface_130><Type>T6</Type></Surface_130>
+    </Surfaces>
+</Mesh>
+
+<Materials>
+    <Mat_30>
+        <Type>NeoHooke</Type>
+        <Density>1</Density>
+        <NeoHooke>
+            <a>1</a>
+            <k>100</k>
+        </NeoHooke>
+        <TensionMax>0</TensionMax>
+    </Mat_30>
+</Materials>
+
+<Export>
+    <Format>VTK</Format>
+    <Prefix>./Results/cantilever</Prefix>
+    <TimeStep>0.25</TimeStep>
+</Export>
+
+<Solver>
+    <NonZeros>2000</NonZeros>
+    <DomainDecomposition>false</DomainDecomposition>
+    <Precision>1e-10</Precision>
+    <!-- Coordinates are O(1) here, so the default finite-difference step of 1e-12 would sit
+         at round-off; 1e-7 is the square root of machine precision for unit-sized values. -->
+    <Epsilon>1e-7</Epsilon>
+
+    <Type>Static</Type>
+
+    <Formulation>TotalLagrangian</Formulation>
+
+    <StartTime>0</StartTime>
+    <StopTime>1</StopTime>
+    <TimeStep>0.25</TimeStep>
+
+    <Plugins>
+        <Circulation>true</Circulation>
+    </Plugins>
+</Solver>
+
+<Plugins>
+    <!-- The whole run is the second preloading phase, which ramps the cavity pressure from zero to
+         the initial ventricular pressure at StopTime without iterating on the coupling, so the
+         load is prescribed and the circulation parameters play no part. -->
+    <Circulation>
+        <IterationsFile>./Results/CirculationIterations.dat</IterationsFile>
+        <PreloadingTime1>0</PreloadingTime1>
+        <PreloadingTime2>1</PreloadingTime2>
+        <PressureUnit>Pa</PressureUnit>
+        <VolumeUnit>m3</VolumeUnit>
+        <Circs>
+            <Circ_1>
+                <Active>true</Active>
+                <Type>CircOneVentricle</Type>
+                <ExportFile>./Results/Circulation.dat</ExportFile>
+                <CircParameters>
+                    <ArtValveResist>0.006</ArtValveResist>
+                    <ArtResist>0.05</ArtResist>
+                    <ArtCompli>2.5</ArtCompli>
+                    <ArtVolumeUnstr>800.0</ArtVolumeUnstr>
+                    <PerResist>0.60</PerResist>
+                    <VenResist>0.03</VenResist>
+                    <VenCompli>100.0</VenCompli>
+                    <VenVolumeUnstr>2850.0</VenVolumeUnstr>
+                </CircParameters>
+                <InitialConditions>
+                    <TotalVolume>4654</TotalVolume>
+                    <ArtVolume>1000</ArtVolume>
+                    <VentrPressure>0.003</VentrPressure>
+                </InitialConditions>
+                <Cavities>
+                    <VentrSurface>130</VentrSurface>
+                </Cavities>
+            </Circ_1>
+        </Circs>
+    </Circulation>
+</Plugins>
