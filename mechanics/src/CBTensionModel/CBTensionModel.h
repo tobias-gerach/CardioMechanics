@@ -36,7 +36,14 @@ public:
     /// active stress is the three-dimensional PK2 stress matrix resulting from tension
     virtual math_pack::Matrix3<double> CalcActiveStress(const math_pack::Matrix3<double> &deformation,
                                                         const double time) {
-        double activeStress = CalcActiveTension(deformation, time);
+        lastActiveTension_ = CalcActiveTension(deformation, time);
+        return GetActiveStress(deformation);
+    }
+
+    /// PK2 active stress of the tension returned by GetActiveTension. It evaluates no model, so
+    /// exporters can call it without changing the state the stateful models integrate from.
+    virtual math_pack::Matrix3<double> GetActiveStress(const math_pack::Matrix3<double> &deformation) {
+        double activeStress = GetActiveTension();
         if (pk2ActiveTension_)
             return activeStress * stressCoefficients_;
 
@@ -57,8 +64,9 @@ public:
         return CBStatus::SUCCESS;
     }
 
-    /// current stored active tension (used by the inverse active-stress estimator)
-    virtual TFloat GetActiveTension() { return 0; }
+    /// tension of the last CalcActiveStress call; the inverse active-stress estimator returns the
+    /// tension it was set to instead
+    virtual TFloat GetActiveTension() { return lastActiveTension_; }
     
     virtual void SetfibreRatio(Vector3<TFloat> ffRatio) {}
     
@@ -104,6 +112,7 @@ protected:
 private:
     /// contains local activation time and lat-offset (from lat-reader)
     TFloat activationTime_ = 0.0;
+    TFloat lastActiveTension_ = 0.0;
     Matrix3<TFloat> stressCoefficients_ = {1, 0, 0, 0, 0, 0, 0, 0, 0};
     bool pk2ActiveTension_ = false;
 };

@@ -665,7 +665,7 @@ void CBSolver::Export(TFloat timeStep) {
     
     std::string str = "ActiveStress";
     if (model_->GetExporter()->GetExportOption(str, true) && activeStress_) {
-        UpdateExportActiveStress(model_->GetCurrentTime(), activeStress_);
+        UpdateExportActiveStress(activeStress_);
         ExportElementsScalarData(str, activeStress_);
     }
     
@@ -692,20 +692,15 @@ void CBSolver::Export(TFloat timeStep) {
 /// Takes the active tension (a scalar value, that is basically AS(0,0) ) for
 /// the latest time step and puts it into a vector that can later be exported by
 /// ExportElementsScalarData() .
-void CBSolver::UpdateExportActiveStress(PetscScalar time, Vec &stressVec) {
-    // deprecated: does basically the same as updateActiveStress(time), but uses the function
-    // scaled with Tmax and depending on lambda which is located falsely in
-    // CBConstitutiveModel, but should rather be in a CBStressModel/CBTensionModel
+void CBSolver::UpdateExportActiveStress(Vec &stressVec) {
+    // Reads the stored tension: evaluating the model here would overwrite the state the stateful
+    // models integrate the next step from, so the result would depend on what is exported.
     PetscInt cnt = 0;
     
     // if (activeStressData_) {
     if (activeStressTensorComponents_) {
         for (auto &it : solidElements_) {
-            Matrix3<TFloat> deformationTensor;
-            it->GetDeformationTensor(deformationTensor);
-            
-            TFloat as = it->GetTensionModel()->CalcActiveTension(deformationTensor, time);
-            activeStressTensorComponents_[cnt]        = as;
+            activeStressTensorComponents_[cnt]        = it->GetTensionModel()->GetActiveTension();
             activeStressTensorComponentsIndices_[cnt] = it->GetLocalIndex() + activeStressLowerIndex_;
             cnt++;
         }

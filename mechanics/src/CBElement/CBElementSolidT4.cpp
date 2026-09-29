@@ -178,8 +178,7 @@ CBStatus CBElementSolidT4::GetCauchyStress(Matrix3<TFloat> &cauchyStress) {
     Matrix3<TFloat> a;
     
     // Base::adapter_->GetActiveStressTensor(localIndex_, a);
-    TFloat time = adapter_->GetSolver()->GetTiming().GetCurrentTime();
-    a = GetTensionModel()->CalcActiveStress(deformationTensor, time);
+    a = GetTensionModel()->GetActiveStress(deformationTensor);
     
     pk2Stress += a;
     
