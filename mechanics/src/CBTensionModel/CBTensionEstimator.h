@@ -20,13 +20,13 @@
 /// Mailbox tension model for the inverse problem. The active-stress estimator
 /// solver writes the estimated fiber tension into each element via
 /// SetActiveTensionAtQuadraturePoint; the element stress assembly and the
-/// exporter read it back through CalcActiveTension / CalcActiveStress.
+/// exporters read it back through CalcActiveStress, GetActiveStress and GetActiveTension.
 class CBTensionEstimator : public CBTensionModel {
 public:
     CBTensionEstimator(CBElementSolid *ele, ParameterMap *parameters);
 
     double CalcActiveTension(const math_pack::Matrix3<double> &deformation, const double time) override;
-    math_pack::Matrix3<double> CalcActiveStress(const math_pack::Matrix3<double> &deformation, const double time) override;
+    math_pack::Matrix3<double> GetActiveStress(const math_pack::Matrix3<double> &deformation) override;
     TFloat GetActiveTension() override;
     CBStatus SetActiveTensionAtQuadraturePoint(int indexQP, TFloat activeTension) override;
 

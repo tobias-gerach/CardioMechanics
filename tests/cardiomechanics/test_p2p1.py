@@ -147,6 +147,36 @@ def test_pk2_active_tension_shortens_fibres_less_than_nominal(binary, cm_env, tm
     assert shortening["PK2"] < shortening["Nominal"], f"PK2 shortened at least as much as nominal: {shortening}"
 
 
+@pytest.mark.parametrize("element_type, option", [("T10", "ActiveStress"), ("T4MINI", "Cauchy")])
+def test_exporting_leaves_stateful_tension_unchanged(binary, cm_env, tmp_path, element_type, option):
+    """Land17 integrates its ODEs from the state of its last evaluation. Exports that read the
+    tension of a multi-point element must not evaluate the model again at the centroid, or the
+    trajectory would depend on what is exported."""
+    pytest.importorskip("meshio")
+    land17 = [("<k>100</k>", "<k>1000</k>"),
+              ("<TensionMax>0</TensionMax>",
+               "<TensionMax>5e-4</TensionMax><TensionModel>Land17</TensionModel>"
+               "<Land17><CalciumTransientType>Coppini</CalciumTransientType>"
+               "<rateDependancy>ON</rateDependancy></Land17>"),
+              ("<Amplitude>0.003</Amplitude>", "<Amplitude>0</Amplitude>"),
+              ("<StopTime>1</StopTime>", "<StopTime>0.1</StopTime>")]
+    points = {}
+    for exported in ("true", "false"):
+        wd = tmp_path / exported
+        wd.mkdir()
+        # ActiveStress is exported by default, so it is off whenever another option is tested.
+        options = (f"<Options><ActiveStress>{exported}</ActiveStress></Options>" if option == "ActiveStress" else
+                   f"<Options><ActiveStress>false</ActiveStress><{option}>{exported}</{option}></Options>")
+        # The export step first, so the solver step is the only one left to match.
+        steps = [("<TimeStep>0.25</TimeStep>\n</Export>", f"<TimeStep>0.01</TimeStep>{options}\n</Export>"),
+                 ("<TimeStep>0.25</TimeStep>", "<TimeStep>0.01</TimeStep>")]
+        _, vtu_dir = _run(binary, cm_env, wd, element_type=element_type, replace=land17 + steps)
+        _, points[exported] = _final_points(vtu_dir)
+        _, ref = read_vtu_points(vtu_dir / "cantilever.0.vtu")
+    assert np.linalg.norm(points["false"] - ref, axis=1).max() > 1e-6, "Land17 did not deform the cantilever"
+    np.testing.assert_array_equal(points["true"], points["false"])
+
+
 def test_p2p1_static_run_converges(binary, cm_env, tmp_path):
     pytest.importorskip("meshio")
     _, vtu_dir = _run(binary, cm_env, tmp_path)

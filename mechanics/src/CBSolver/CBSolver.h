@@ -144,7 +144,7 @@ public:
     CBElementAdapter *GetAdapter() {return adapter_; }
     
     void UpdateActiveStress(PetscScalar time);
-    void UpdateExportActiveStress(PetscScalar time, Vec &stressVec);
+    void UpdateExportActiveStress(Vec &stressVec);
     void ExportNodes();
     void ExportElementsVectorData(std::string key, Vec);
     void ExportElementsScalarData(std::string key, Vec);

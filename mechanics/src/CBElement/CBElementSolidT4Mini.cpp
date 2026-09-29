@@ -156,7 +156,7 @@ CBStatus CBElementSolidT4Mini::GetCauchyStress(Matrix3<TFloat> &cauchyStress) {
     if (rc != CBStatus::SUCCESS)
         return rc;
 
-    pk2Stress += GetTensionModel()->CalcActiveStress(deformationTensor, Base::adapter_->GetSolver()->GetTiming().GetCurrentTime());
+    pk2Stress += GetTensionModel()->GetActiveStress(deformationTensor);
     cauchyStress = 1.0 / deformationTensor.Det() * deformationTensor * pk2Stress * deformationTensor.GetTranspose();
     return rc;
 }
