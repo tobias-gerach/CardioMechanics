@@ -275,7 +275,6 @@
         <Material>30,31,32,33</Material>
         <OffsetTime>0.0</OffsetTime>
         <Export>true</Export>
-        <TissuePriority>1,2,3,72,73,74,75,76,77,78,79,80,32,33</TissuePriority>
     </acCELLerate>
 
     <Circulation>

@@ -45,6 +45,7 @@
 
 ### Deleted
 - `Solver.LU`, `Solver.NewmarkBeta.Type` and `Solver.GeneralizedAlpha.Type`. They raise an error naming `Solver.LinearSolver.Preset`; `Type` `superlu` becomes the preset `direct-superlu`.
+- `Plugins.acCELLerate.TissuePriority`. It never had an effect: the plugin assembles the conductivity per element from the element's own material, and the material of each node, which selects its cell model, comes from the tissue vector written by `BidomainMatrixGenerator`, whose `-tissue` option sets the precedence. Settings files that still contain the key load unchanged.
 
 ### Fixed
 - The isochoric/volumetric split of NeoHooke and Holzapfel had no effect: integer division made the exponents of `J^(-2/3)` and `I3^(-1/3)` zero. The split now applies, which changes results of both laws wherever `J != 1`.
