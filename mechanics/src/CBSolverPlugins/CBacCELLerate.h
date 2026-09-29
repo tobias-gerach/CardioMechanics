@@ -117,6 +117,8 @@ private:
     CBStatus status_ = CBStatus::WAITING;
     
     /// Plugin parameters
+    /// kernel quadrature rule of the solid elements; its points are the coupling points
+    const CBQuadratureRule *rule_ = nullptr;
     int NumQP_;
     float offsetTime_ = 0;
     bool export_ = true;
@@ -159,7 +161,7 @@ private:
     /// so that UpdateNodes/UpdateStretch set every entry of the global vectors once.
     std::vector<PointMapping> pointMappings_;
 
-    /// Quadrature point of a solid element expressed in the shape functions of the closest acMesh_ cell
+    /// Quadrature point of a solid element expressed in the shape functions of the acMesh_ cell containing it
     struct QPMapping {
         PetscInt points[4];
         Vector4<TFloat> shapeFun;
@@ -189,8 +191,9 @@ private:
 
     /// Computes on process 0 the mapping of the coupled solid elements of all processes; elements of process r
     /// are elements[elementDispls[r]:elementDispls[r+1]]. points are grouped by owning process, qps follow elements.
-    void MapElements(const std::vector<MappingElement> &elements, const std::vector<int> &elementDispls,
-                     std::vector<MappingPoint> &points, std::vector<int> &pointCounts, std::vector<MappingQP> &qps);
+    /// Returns the number of quadrature points that lie in no acMesh_ cell.
+    long long MapElements(const std::vector<MappingElement> &elements, const std::vector<int> &elementDispls,
+                          std::vector<MappingPoint> &points, std::vector<int> &pointCounts, std::vector<MappingQP> &qps);
 
     /// Per local acMesh_ cell: index 0-11 contains dN/dX; index 12 contains tet volume
     std::vector<std::array<double, 13>> dNdX_;
