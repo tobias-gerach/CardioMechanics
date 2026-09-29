@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from helpers.compare import compare_columns, read_golden, read_vtu_points, write_golden
-from helpers.run import assert_no_petsc_error, run_binary
+from helpers.run import assert_no_petsc_error, assert_refused, run_binary
 
 GOLDEN_DIR = Path(__file__).parent / "golden"
 NP = 4
@@ -115,3 +115,31 @@ def test_em01_runs_on_t4mini(em01_root, em01_sim_length, cm_env, binary):
     assert_no_petsc_error(proc.stdout + proc.stderr)
     vtu = em01_root / "ResultsT4Mini" / "Cube_vtu"
     assert list(vtu.glob("Cube.*.vtu")), f"no deformation output written to {vtu}"
+
+
+@pytest.mark.parametrize("permute", [False, True])
+def test_em01_refuses_non_tetrahedral_ep_mesh(em01_root, cm_env, binary, permute):
+    """The coupling reads every cell of the acCELLerate mesh as a linear tetrahedron. A mesh whose
+    first cell is a quad on the same four points would be misread without a word, so the plugin
+    has to stop at init, on every rank, before the optional permutation rewrites the cells."""
+    meshio = pytest.importorskip("meshio")
+
+    mesh = meshio.read(em01_root / "geoFiles" / "cube_0.25mm.vtu")
+    assert len(mesh.cells) == 1 and mesh.cells[0].type == "tetra", "EM01 EP mesh is no longer all tetrahedra"
+    tets = mesh.cells[0].data
+    meshio.write(em01_root / "geoFiles" / "cube_quad.vtu", meshio.Mesh(
+        mesh.points, [("quad", tets[:1]), ("tetra", tets[1:])],
+        cell_data={k: [v[0][:1], v[0][1:]] for k, v in mesh.cell_data.items()}))
+
+    settings = em01_root / "settings"
+    xml = (settings / "M_1mm.xml").read_text()
+    for old, new in (("../geoFiles/cube_0.25mm.vtu", "../geoFiles/cube_quad.vtu"),
+                     ("../Results/", "../ResultsQuad/"),
+                     ("<Export>true</Export>", f"<Export>true</Export><Permute>{str(permute).lower()}</Permute>")):
+        assert old in xml, f"M_1mm.xml no longer contains {old!r}"
+        xml = xml.replace(old, new)
+    name = f"M_quad_{permute}.xml"
+    (settings / name).write_text(xml)
+    proc = run_binary(binary("CardioMechanics"), ["-settings", name], cwd=settings, env=cm_env, np=2,
+                      timeout=120, check=False)
+    assert_refused(proc, "cube_quad.vtu", "vtkQuad")
