@@ -120,6 +120,8 @@ private:
     /// kernel quadrature rule of the solid elements; its points are the coupling points
     const CBQuadratureRule *rule_ = nullptr;
     int NumQP_;
+    /// whether the solid elements are T10 or T10P1, whose stretch varies over the element
+    bool quadraticElements_ = false;
     float offsetTime_ = 0;
     bool export_ = true;
     bool constStretchRate_ = true;

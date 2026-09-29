@@ -56,8 +56,6 @@ public:
                                  "CBElementSolid::GetPK2Stress(): This function is not implemented for the requested child class:");
     }
     
-    virtual CBStatus GetDeformationTensorAtQuadraturePoints(Matrix3<TFloat> *f) {return CBStatus::SUCCESS;}
-    
     virtual CBStatus CalcNodalForcesAndJacobian() = 0;
     virtual CBStatus CalcConsistentMassMatrix()   = 0;
     virtual CBStatus CalcLumpedMassMatrix()       = 0;

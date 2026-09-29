@@ -378,7 +378,6 @@ void CBacCELLerate::StepBack() {
 void CBacCELLerate::UpdateStretch() {
     PetscErrorCode ierr;
     DCCtrl::debug << "Updating stretch ...";
-    Matrix3<TFloat> f[4];
     double alpha = (5 + 3 * sqrt(5)) / 20;
     double beta = (5 - sqrt(5)) / 20;
     Matrix4<TFloat> QPInv = Matrix4<TFloat>(alpha, beta, beta, beta,
@@ -389,15 +388,20 @@ void CBacCELLerate::UpdateStretch() {
     ierr = VecSet(stretchVecF_, 0); CHKERRQ(ierr);
     
     for (auto &pointMapping : pointMappings_) {
-        pointMapping.element->GetDeformationTensorAtQuadraturePoints(f);
-        
         const Vector4<TFloat> &LocalPos = pointMapping.shapeFun;
-        Vector4<TFloat> StretchAtQP = Vector4<TFloat>(sqrt(f[0].GetCol(0)*f[0].GetCol(0)),
-                                                      sqrt(f[1].GetCol(0)*f[1].GetCol(0)),
-                                                      sqrt(f[2].GetCol(0)*f[2].GetCol(0)),
-                                                      sqrt(f[3].GetCol(0)*f[3].GetCol(0)));
-        
-        TFloat StretchVal = LocalPos * (QPInv * StretchAtQP);
+        TFloat StretchVal;
+        if (quadraticElements_) {
+            StretchVal = static_cast<CBElementSolidT10 *>(pointMapping.element)->GetFibreStretch(
+                {LocalPos(0), LocalPos(1), LocalPos(2), LocalPos(3)});
+        } else {
+            // The deformation is constant over the element. Fitting a linear field through four copies
+            // of its stretch returns the stretch up to rounding; the EM01 reference results carry that
+            // rounding.
+            Matrix3<TFloat> f;
+            pointMapping.element->GetDeformationTensor(f);
+            TFloat s = sqrt(f.GetCol(0)*f.GetCol(0));
+            StretchVal = LocalPos * (QPInv * Vector4<TFloat>(s, s, s, s));
+        }
         ierr = VecSetValue(stretchVecF_, pointMapping.point, StretchVal, INSERT_VALUES);
     }
     ierr = VecAssemblyBegin(stretchVecF_); CHKERRQ(ierr);
@@ -708,13 +712,12 @@ void CBacCELLerate::InitParameters() {
     DCCtrl::debug << "\nLoading settings ...";
     
     rule_ = &solidElements_[0]->GetQuadratureRule();
-    for (CBElementSolid *e : solidElements_)
+    quadraticElements_ = dynamic_cast<CBElementSolidT10 *>(solidElements_[0]) != nullptr;
+    for (CBElementSolid *e : solidElements_) {
         assert(&e->GetQuadratureRule() == rule_);
+        assert((dynamic_cast<CBElementSolidT10 *>(e) != nullptr) == quadraticElements_);
+    }
     NumQP_ = rule_->numPoints;
-    /// UpdateStretch interpolates the stretch from four quadrature points, which T10 gives at degree 2 only
-    if (rule_ == &quadratureRule14 && dynamic_cast<CBElementSolidT10 *>(solidElements_[0]))
-        throw std::runtime_error("CBacCELLerate::InitParameters(): the stretch fed to acCELLerate needs "
-                                 "Mesh.QuadratureDegree 2 on T10 and T10P1 elements.");
     DCCtrl::debug << "\n Number of quad. points: " << NumQP_;
     
     accprojectFile_ = GetParameters()->Get<std::string>("Plugins.acCELLerate.ProjectFile");
