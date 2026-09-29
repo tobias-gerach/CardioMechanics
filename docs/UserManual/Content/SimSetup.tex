@@ -1759,6 +1759,10 @@ The exported file contains pressure and volume data of each specified surface in
 
 Conceptually the same plugin as \nameref{plugin:ApplyPressureFromFunction} but with added functionality.
 You can either choose to terminate the simulation at a certain time (\verb|NodeExportTime|) or when a designated closed surface (\verb|StopSurface|) reaches the desired volume (\verb|StopVolume|).
+The \verb|StopSurface| has to be one of the surfaces the \verb|Groups| apply a pressure to.
+The volume condition is met by the first step whose volume is at or below \verb|StopVolume|.
+The time condition is met by the first step at most half a time step before \verb|NodeExportTime|, or later, so it fires even if no step lands exactly on \verb|NodeExportTime|.
+The step that meets the condition is the last one computed, and its node coordinates [mm] and boundary conditions are written to \verb|NodeExportFile| in the format of a \nameref{nodeFile}.
 
 \begin{lstlisting}[language=XML,caption=.xml settings for the ApplyPressureFromFunctionNodeExport plugin]
 <ApplyPressureFromFunctionNodeExport>

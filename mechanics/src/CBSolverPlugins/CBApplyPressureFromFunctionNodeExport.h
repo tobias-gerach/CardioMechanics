@@ -15,78 +15,29 @@
 #ifndef CB_APPLY_PRESSURE_FROM_FUNCTION_NODE_EXPORT
 #define CB_APPLY_PRESSURE_FROM_FUNCTION_NODE_EXPORT
 
-#include <map>
-#include <memory>
+#include "CBApplyPressureFromFunction.h"
 
-#include "CBSolverPlugin.h"
-#include "CBDataFromFunction.h"
-#include "CBCirculationCavity.h"
-#include "CBSolverPluginCavities.h"
-
-class CBApplyPressureFromFunctionNodeExport : public CBSolverPluginCavities
+/// ApplyPressureFromFunction that stops the run once a cavity volume or a time is reached, and
+/// writes the deformed nodes of that step as a tetgen node file.
+class CBApplyPressureFromFunctionNodeExport : public CBApplyPressureFromFunction
 {
 public:
-    CBApplyPressureFromFunctionNodeExport(){}
-    virtual ~CBApplyPressureFromFunctionNodeExport(){}
+    ~CBApplyPressureFromFunctionNodeExport() override;
     
-    virtual void Init() override;
-    virtual void Apply(TFloat time) override;
-    virtual void ApplyToNodalForces() override;
-    virtual void ApplyToNodalForcesJacobian() override;
-    virtual void AnalyzeResults() override;
-    virtual void WriteHeaderToFile();
-    virtual void WriteToFile(TFloat time) override;
-    bool WantsToAnalyzeResults() override { return true; }
-    bool ExitCheck(TFloat time) override { return shallExit_; };
-    CBStatus GetStatus() override {return status_;}
-    virtual std::string GetName() override { return("ApplyPressureFromFunctionNodeExport"); };
+    void Init() override;
+    bool ExitCheck(TFloat time) override;
+    std::string GetName() override { return("ApplyPressureFromFunctionNodeExport"); }
     
 private:
+    void ExportNodeFile();
+    
     TInt stopSurface_;
     TFloat stopVolume_;
     TFloat nodeExportTime_;
-    bool shallExit_ = false;
     std::string nodeFilename_;
-    std::ofstream nodeFile_;
-    Vec coords_;
-    Vec coordsSeq_;
-    VecScatter coordsScatter_;
-    void InitPetscVectors();
-    void ExportNodeFile();
-    TFloat currentTime_;
-    
-    std::ofstream file_;
-    std::string filename_;
-    bool headerWritten_ = false;
-    
-    struct IntervalStruct
-    {
-        std::shared_ptr<CBDataFromFunction> function;
-        bool relaxElementsAtStart;
-        std::vector<TInt> materialsToRelax;
-        bool invert;
-        TFloat startTime;
-        TFloat stopTime;
-        TFloat offset;
-        TFloat amplitude;
-    };
-    
-    struct ValueStruct
-    {
-        TFloat pressure;
-        TFloat volume;
-    };
-    
-    std::map<TInt, std::vector<IntervalStruct>> groups_;
-    std::map<TInt, std::vector<IntervalStruct>>::iterator groupsIt_;
-    std::map<TInt, ValueStruct> valuesStructs_;
-    std::map<TInt, ValueStruct>::iterator valuesIt_;
-    
-    std::map<TInt, TFloat> materialsRelaxed_;
-    std::map<TInt, TFloat>::iterator materialsRelaxedIt_;
-    
-    typedef CBSolverPlugin Base;
+    Vec coords_ = nullptr;
+    Vec coordsSeq_ = nullptr;
+    VecScatter coordsScatter_ = nullptr;
 };
 
 #endif
-
