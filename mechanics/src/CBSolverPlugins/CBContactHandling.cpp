@@ -539,33 +539,36 @@ void CBContactHandling::ApplyToNodalForcesJacobian() {
     VecRestoreArray(slaveElementsNodesSeq_, &slaveNodes);
 }  // CBContactHandling::ApplyToNodalForcesJacobian
 
-void CBContactHandling::Export(TFloat time) {
-    /// contact pressure of master element i, negative where the contact force points along the slave normal
-    auto pressureAt = [this](size_t i) {
-        PetscScalar p = masterContactForces_.at(i).Norm() / masterElements_.at(i).element->GetArea();
-        return masterContactForces_.at(i) * masterCorrespondingSlaveNormal_.at(i) < 0 ? -p : p;
-    };
+void CBContactHandling::AnalyzeResults() {
+    if (!IsActive() || !hasStarted_)
+        return;
     
-    /// WriteToFile() writes the average in every step, so it is needed whether or not the element data is exported
+    // The gaps come from the last force evaluation of the step, which is at the converged solution (the intermediate
+    // configuration for generalized-alpha). Rerunning the slave search here would change the pairing a repeated step
+    // reuses. Component j of masterContactDistances_ holds the gap at Gauss point j.
+    averageDist_ = 0;
+    TInt numContacts = 0;
     averageContactPressure_ = 0;
-    for (size_t i = 0; i < masterElements_.size(); i++)
-        averageContactPressure_ += pressureAt(i);
+    for (size_t i = 0; i < masterElements_.size(); i++) {
+        for (int j = 0; j < numGaussPoints; j++) {
+            if (masterElements_.at(i).slaveAtGaussPoint[j] != -1) {
+                averageDist_ += masterContactDistances_.at(i)(j);
+                numContacts++;
+            }
+        }
+        averageContactPressure_ += ContactPressure(i);
+    }
+    if (numContacts != 0)
+        averageDist_ /= numContacts;
     if (masterElements_.size() != 0)
         averageContactPressure_ /= masterElements_.size();
     
-    if (DCCtrl::IsParallel()) {
-        DCCtrl::WeightedAverage(averageContactPressure_, double(masterElements_.size()), globalAverageContactPressure_);
-    } else {
-        globalAverageContactPressure_ = averageContactPressure_;
-    }
-    
+    DCCtrl::WeightedAverage(averageDist_, double(masterElements_.size()), globalAverageDist_);
+    DCCtrl::WeightedAverage(averageContactPressure_, double(masterElements_.size()), globalAverageContactPressure_);
+}
+
+void CBContactHandling::Export(TFloat time) {
     if (export_) {
-        if (DCCtrl::IsParallel()) {
-            DCCtrl::WeightedAverage(averageDist_, double(masterElements_.size()), globalAverageDist_);
-        } else {
-            globalAverageDist_ = averageDist_;
-        }
-        
         Vec contactForce;
         Vec contactPressure;
         Vec contactSlaveFound;
@@ -605,7 +608,7 @@ void CBContactHandling::Export(TFloat time) {
             
             VecSetValues(contactForce, 3, indices, f, INSERT_VALUES);
             
-            VecSetValue(contactPressure, from2 + e->GetLocalIndex(), pressureAt(i), INSERT_VALUES);
+            VecSetValue(contactPressure, from2 + e->GetLocalIndex(), ContactPressure(i), INSERT_VALUES);
             
             PetscScalar slaveFound = masterCorrespondingSlaveFound_.at(i);  // alternative: masterCorrespondingSlaveFound_.at(i)
                                                                             // * e->GetArea()
@@ -694,6 +697,11 @@ void CBContactHandling::Export(TFloat time) {
 //    VecDestroy(&cnt);
 
 // }
+
+PetscScalar CBContactHandling::ContactPressure(size_t i) const {
+    PetscScalar p = masterContactForces_.at(i).Norm() / masterElements_.at(i).element->GetArea();
+    return masterContactForces_.at(i) * masterCorrespondingSlaveNormal_.at(i) < 0 ? -p : p;
+}
 
 void CBContactHandling::WriteToFile(TFloat time) {
     if (filename_ != "") {
@@ -817,9 +825,6 @@ void CBContactHandling::DetermineSlaveElementsAtGaussPoints() {
     TFloat *slaveNodes;
     VecGetArray(slaveElementsNodesSeq_, &slaveNodes);
     
-    averageDist_ = 0;
-    TInt numContacts = 0;
-    
     for (auto &m : masterElements_) {
         TFloat nodesCoords[3*numNodes];
         
@@ -837,8 +842,6 @@ void CBContactHandling::DetermineSlaveElementsAtGaussPoints() {
             
             if (slave != -1) {
                 m.distanceVectorToSlave[i] = nv*dist;
-                averageDist_ += std::abs(dist);
-                numContacts++;
             } else {
                 m.distanceVectorToSlave[i] = Vector3<TFloat>(0, 0, 0);
             }
@@ -846,9 +849,6 @@ void CBContactHandling::DetermineSlaveElementsAtGaussPoints() {
             m.slaveAtGaussPoint[i] = slave;
         }
     }
-    if (numContacts != 0)
-        averageDist_ /= numContacts;
-    DCCtrl::WeightedAverage(averageDist_, double(masterElements_.size()), globalAverageDist_);
     
     if (status_ == CBStatus::PREPARING_SIMULATION) {
         DCCtrl::debug << "\t--- --- Contact Handling --- ---" << std::endl;
@@ -863,9 +863,6 @@ void CBContactHandling::DetermineSlaveElementsAtVertices() {
     DetermineSlaveNodes();
     TFloat *slaveNodes;
     VecGetArray(slaveElementsNodesSeq_, &slaveNodes);
-    
-    averageDist_ = 0;
-    TInt numContacts = 0;
     
     for (auto &m : masterElements_) {
         TFloat nodesCoords[3*numNodes];
@@ -884,8 +881,6 @@ void CBContactHandling::DetermineSlaveElementsAtVertices() {
             
             if (slave != -1) {
                 m.distanceVectorToSlave[i] = nv*dist;
-                averageDist_ += std::abs(dist);
-                numContacts++;
             } else {
                 m.distanceVectorToSlave[i] = Vector3<TFloat>(0, 0, 0);
             }
@@ -893,9 +888,6 @@ void CBContactHandling::DetermineSlaveElementsAtVertices() {
             m.slaveAtVertex[i] = slave;
         }
     }
-    if (numContacts != 0)
-        averageDist_ /= numContacts;
-    DCCtrl::WeightedAverage(averageDist_, double(masterElements_.size()), globalAverageDist_);
     
     if (status_ == CBStatus::PREPARING_SIMULATION) {
         DCCtrl::debug << "\t--- --- Contact Handling --- ---" << std::endl;
