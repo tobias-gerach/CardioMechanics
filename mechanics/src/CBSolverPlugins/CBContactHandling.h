@@ -36,6 +36,8 @@ public:
     void ApplyToNodalForces() override;
     void ApplyToNodalForcesJacobian() override;
     void StepBack() override;
+    bool WantsToAnalyzeResults() override {return true; }
+    void AnalyzeResults() override;
     void Export(TFloat time) override;
     void WriteToFile(TFloat time) override;
     
@@ -83,6 +85,8 @@ private:
     void LoadMasterElements();
     void LoadSlaveElements();
     void UpdateDistancesMasterSlave();
+    /// Contact pressure of master element i, negative where the contact force points along the slave normal.
+    PetscScalar ContactPressure(size_t i) const;
     void CalcContributionToContactForceAtGaussPoint(const Triangle<TFloat> &masterTriangle,
                                                     const Triangle<TFloat> &slaveTriangle, TInt gaussPointIndex,
                                                     TFloat *nodalForces, TFloat *distances, TFloat scaling);
@@ -144,8 +148,8 @@ private:
     std::vector<TInt> masterCorrespondingSlaveFound_;
     PetscScalar averageDist_;
     PetscScalar averageContactPressure_;
-    PetscScalar globalAverageDist_;  // only process zero !!!
-    PetscScalar globalAverageContactPressure_;  // only process zero !!!
+    PetscScalar globalAverageDist_ = 0;  // only process zero !!!
+    PetscScalar globalAverageContactPressure_ = 0;  // only process zero !!!
     bool export_;
     
     typedef CBSolverPlugin Base;
