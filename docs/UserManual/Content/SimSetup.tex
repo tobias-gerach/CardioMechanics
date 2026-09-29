@@ -1983,12 +1983,9 @@ It is important that these materials exist in both the mechanical and electrophy
 Ideally, the points of the EP mesh lie within the mechanical mesh elements or on the edges of them to ensure that the mapping algorithm works properly.
 In general, mesh features that exist in the EP mesh should exist in the mechanics mesh as well.
 This is not necessarily the case the other way around.
-The \verb|INT| array specified using the option \verb|TissuePriority| defines a custom material priority list.
-Materials with higher precedence should be given first.
+The material of a point shared by elements of different materials, and thus its cell model, is set by \nameref{tools:BidomainMatrixGenerator} when it writes the tissue vector, following the material precedence of its option \verb|-tissue|.
 This is especially important for smaller structures such as pectinate muscles or a thin endocardial layer that might only have a one element thickness.
-In such a case, if the surrounding tissue would have a higher precedence, the smaller structure is not properly considered when building the matrices.
-By default, lower numbers are prioritized, \ie 1, 2, 3, 4, ..., 255.
-Make sure to use the same tissue priority list when you allocate the matrices with \nameref{tools:BidomainMatrixGenerator}.
+In such a case, if the surrounding tissue would have a higher precedence, the smaller structure is not properly considered.
 Supply the \nameref{files:material} using the option \verb|MaterialFile| and the \nameref{files:ACCConfig} using the option \verb|ProjectFile|.
 The mesh for electrophysiology should be given as a \nameref{subsubsec:VTK}
 using the option \verb|acCELLerateMesh| and needs to contain the arrays \verb|Material|, \verb|Fiber|, \verb|Sheet|, and \verb|Sheetnormal|.
@@ -1999,7 +1996,6 @@ using the option \verb|acCELLerateMesh| and needs to contain the arrays \verb|Ma
     <acCELLerateMesh> STR </acCELLerateMesh>
     <Permute> false </Permute>
     <MaterialFile> STR </MaterialFile>
-    <TissuePriority> INT, INT, ... </TissuePriority>
     <ResultPreFix> STR </ResultPreFix>
     <ResultFolder> STR </ResultFolder>
     <PvdFileName> STR </PvdFileName>

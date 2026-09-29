@@ -133,7 +133,6 @@ private:
     std::string pvdFilename_;
     std::string accprojectFile_;
     std::vector<TInt> materialCoupling_;
-    std::vector<TInt> priorityVector_;
     
     /// Global vectors
     Vec stretchVecF_ = NULL;

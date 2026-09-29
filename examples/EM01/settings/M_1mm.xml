@@ -105,7 +105,6 @@
         <constStretchRate>false</constStretchRate>
         <MEF>FULL</MEF>
         <Material>30</Material>
-        <TissuePriority>30,31</TissuePriority>
         <Export>true</Export>
     </acCELLerate>
 </Plugins>
