@@ -46,7 +46,7 @@ void CBTensionFactory::Init(ParameterMap *parameters, CBTiming *timing, CBFileMa
 }
 
 /// returns a new tensionModel, that fits to the tensionName found in the passed elements material properties
-CBTensionModel *CBTensionFactory::New(CBElementSolid *ele) {
+CBTensionModel *CBTensionFactory::New(CBElementSolid *ele, int quadraturePoint) {
     CBTensionModel *tensionModel = 0;
     
     std::string elementType = ele->GetMaterial()->GetTensionName();
@@ -69,6 +69,7 @@ CBTensionModel *CBTensionFactory::New(CBElementSolid *ele) {
         ProducerFunction pf = producer->second;
         tensionModel = pf(ele);
         tensionModel->SetPK2ActiveTension(ele->GetMaterial()->GetPK2ActiveTension());
+        tensionModel->SetQuadraturePoint(quadraturePoint);
     }
     assert(tensionModel != 0);
     return tensionModel;

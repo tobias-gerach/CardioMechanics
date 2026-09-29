@@ -180,9 +180,11 @@ inline void CBLumensTension::WriteToFile(const StateVariables& S) {
     if (!file.good())
         throw std::runtime_error("CBTensionModelLumens::WriteToFile: Couldn't create " + filename_ + ".");
     
-    // write header
-    if (!headerWritten_) {
+    // write header, once per element: the models of an element share the file, and the kernel
+    // evaluates point 0 first
+    if (!headerWritten_ && GetQuadraturePoint() == 0) {
         file << "\t" << "index";
+        file << "\t" << "qp";
         file << "\t" << "t";
         file << "\t" << "eps_f";
         file << "\t" << "f_rise";
@@ -198,6 +200,7 @@ inline void CBLumensTension::WriteToFile(const StateVariables& S) {
     
     // write content to file
     file << "\t" << ei_;
+    file << "\t" << GetQuadraturePoint();
     file << "\t" << S.t;
     file << "\t" << S.eps_f;
     file << "\t" << S.f_rise;
@@ -212,6 +215,7 @@ inline void CBLumensTension::WriteToFile(const StateVariables& S) {
     
     // show content on terminal, too
     std::cout << "  " << ei_;
+    std::cout << "  " << GetQuadraturePoint();
     std::cout << "  " << S.t;
     // std::cout << "  " << S.f_rise;
     std::cout << "  " << S.eps_f;

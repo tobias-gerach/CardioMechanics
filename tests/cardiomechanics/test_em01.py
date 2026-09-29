@@ -92,9 +92,9 @@ def _generalized_alpha(xml):
 
 
 def test_em01_runs_on_t4mini(em01_root, em01_sim_length, cm_env, binary):
-    """Land17 takes the calcium of the electrophysiology through a dispatch on the element type,
-    which has to know T4MINI. T4MINI does not support NewmarkBeta, so the run uses
-    generalized-alpha, and there is nothing to compare against."""
+    """Land17 on T4MINI has a model per quadrature point, each taking the calcium the
+    electrophysiology gives the element. T4MINI does not support NewmarkBeta, so the run uses generalized-alpha, and
+    there is nothing to compare against."""
     settings = em01_root / "settings"
     xml = (settings / "M_1mm.xml").read_text()
     for old, new in (("<StopTime>1.0</StopTime>", f"<StopTime>{em01_sim_length}</StopTime>"),

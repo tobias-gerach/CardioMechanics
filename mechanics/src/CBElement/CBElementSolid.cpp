@@ -15,11 +15,21 @@ extern "C" double dgesvd_(const char*,const char*,int*,int*,double*,int*,double*
 // #endif
 
 #include "CBElementSolid.h"
+#include "CBElementKernel.h"
 
 CBElementSolid::CBElementSolid(CBElementSolid& other) : CBElement(other){
     initialVolume_ = other.initialVolume_;
     isDefect_ = other.isDefect_;
     targetStrain = other.targetStrain;
+}
+
+TFloat CBElementSolid::GetActiveTension() {
+    const CBQuadratureRule &rule = GetQuadratureRule();
+    assert(tensionModels_.size() == static_cast<size_t>(rule.numPoints));
+    TFloat tension = 0;
+    for (int q = 0; q < rule.numPoints; q++)
+        tension += rule.weights[q] * tensionModels_[q]->GetActiveTension();
+    return tension;
 }
 
 CBStatus CBElementSolid::ReportCorruptElement(CBStatus rc) {

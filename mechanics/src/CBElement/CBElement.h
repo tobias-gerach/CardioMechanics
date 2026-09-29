@@ -104,8 +104,11 @@ public:
     void SetMaterial(CBMaterial* material){material_ = material;}
     CBMaterial* GetMaterial(){return(material_);}
     
-    void SetTensionModel(CBTensionModel* tension) {tensionModel_ = tension;}
-    CBTensionModel* GetTensionModel(){ return(tensionModel_); }
+    /// one model per quadrature point of the element's kernel rule
+    void SetTensionModels(std::vector<CBTensionModel*> tensions) {tensionModels_ = std::move(tensions);}
+    const std::vector<CBTensionModel*>& GetTensionModels() {return(tensionModels_);}
+    /// model of the first quadrature point, the only one of a T4 element
+    CBTensionModel* GetTensionModel(){ return(tensionModels_.at(0)); }
     
     void SetIndex(TInt i){index_ = i;}
     TInt GetIndex() const {return(index_);}
@@ -139,7 +142,7 @@ protected:
     CBElementAdapter* adapter_;
     ParameterMap* parameters_ = 0;
     CBMaterial*      material_;
-    CBTensionModel* tensionModel_ = 0;
+    std::vector<CBTensionModel*> tensionModels_;
     
 private:
     //CBElement(const CBElement &) = delete;

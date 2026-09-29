@@ -37,7 +37,7 @@ math_pack::Matrix3<double> CBTensionEstimator::GetActiveStress(const math_pack::
     return GetActiveTension() * math_pack::Matrix3<double> {1, 0, 0,  0, 0, 0,  0, 0, 0};
 }
 
-CBStatus CBTensionEstimator::SetActiveTensionAtQuadraturePoint(int, TFloat activeTension) {
+CBStatus CBTensionEstimator::SetActiveTensionAtQuadraturePoint(TFloat activeTension) {
     activeTension_ = activeTension;
     return CBStatus::SUCCESS;
 }

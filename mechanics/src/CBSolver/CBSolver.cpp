@@ -17,6 +17,7 @@
 #include "CBFileManager.h"
 #include "CBElementSurfaceT6.h"
 #include "CBElementSurfaceT3.h"
+#include "CBElementKernel.h"
 #include "CBRuntimeEstimator.h"
 #include "CBModelLoader.h"
 #include "CBModelLoaderTetgen.h"
@@ -209,15 +210,15 @@ void CBSolver::InitTensionModels() {
     
     // generate necessary CBData* objects using a factory and assign them to the corresponding element
     for (auto solidElement : solidElements_) {
-        solidElement->SetTensionModel(tensionFactory_.New(solidElement) );
-        
         // set individual activation times for each element, if a LAT file was given.
-        if (fileManager_.GetProcessLAT()) {
-            solidElement->GetTensionModel()->AddToActivationTime(fileManager_.GetActivationTimesVector().at(solidElement->
-                                                                                                            GetIndex()).second);
-        } else {
-            solidElement->GetTensionModel()->AddToActivationTime(0.0 + latOffset);
+        const TFloat activationTime = fileManager_.GetProcessLAT() ?
+            fileManager_.GetActivationTimesVector().at(solidElement->GetIndex()).second : latOffset;
+        std::vector<CBTensionModel *> tensionModels(solidElement->GetQuadratureRule().numPoints);
+        for (size_t q = 0; q < tensionModels.size(); q++) {
+            tensionModels[q] = tensionFactory_.New(solidElement, q);
+            tensionModels[q]->AddToActivationTime(activationTime);
         }
+        solidElement->SetTensionModels(std::move(tensionModels));
     }
 } // CBSolver::InitTensionModels
 
@@ -700,7 +701,7 @@ void CBSolver::UpdateExportActiveStress(Vec &stressVec) {
     // if (activeStressData_) {
     if (activeStressTensorComponents_) {
         for (auto &it : solidElements_) {
-            activeStressTensorComponents_[cnt]        = it->GetTensionModel()->GetActiveTension();
+            activeStressTensorComponents_[cnt]        = it->GetActiveTension();
             activeStressTensorComponentsIndices_[cnt] = it->GetLocalIndex() + activeStressLowerIndex_;
             cnt++;
         }

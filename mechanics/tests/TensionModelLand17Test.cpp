@@ -1,19 +1,18 @@
-#include <stdexcept>
 #include <string>
 
 #include <gtest/gtest.h>
 
+#include "CBElementKernel.h"
 #include "CBTensionModelLand17.h"
 
 namespace {
 
-// A solid element of any type. Land17 reads only the type, the material, the indices, the
-// quadrature-point count and the deformation tensor; the rest is never called.
+// A solid element. Land17 reads only the material, the indices and the deformation tensor; the
+// rest is never called.
 class StubSolidElement : public CBElementSolid {
 public:
-    std::string type;
     CBElement *Clone() override { return nullptr; }
-    std::string GetType() override { return type; }
+    std::string GetType() override { return "T4"; }
     void SetNodeIndex(unsigned int, TInt) override {}
     TInt GetNodeIndex(unsigned int) override { return 0; }
     unsigned int GetNumberOfNodesIndices() override { return 0; }
@@ -34,24 +33,15 @@ public:
     void CheckNodeSorting() override {}
     void UpdateShapeFunctions() override {}
     TFloat GetVolume() override { return 0; }
+    const CBQuadratureRule &GetQuadratureRule() override { return quadratureRule1; }
     TFloat *GetShapeFunctionsDerivatives() override { return nullptr; }
 };
-
-template <class F>
-std::string ErrorMessage(F f) {
-    try {
-        f();
-    } catch (const std::runtime_error &e) {
-        return e.what();
-    }
-    return "";
-}
 
 class Land17OnStubElement : public ::testing::Test {
 protected:
     void SetUp() override {
-        // Calcium from electrophysiology is the path that dispatches on the element type.
         parameters_.Set("Materials.Mat_1.Land17.CalciumTransientType", std::string("Elphy"));
+        parameters_.Set("Materials.Mat_1.TensionMax", 1.0);
         material_.Init(&parameters_, 1);
         element_.SetIndex(0);
         element_.SetMaterialIndex(1);
@@ -65,25 +55,15 @@ protected:
 
 }  // namespace
 
-TEST_F(Land17OnStubElement, CalciumFromElectrophysiologyThrowsNamingUnknownType) {
-    element_.type = "H8";
-    CBTensionModelLand17 land(&element_, &parameters_);
-    const std::string message = ErrorMessage([&] { land.CalcActiveTension(Matrix3<TFloat>::Identity(), 0.001); });
-    EXPECT_NE(message.find("H8"), std::string::npos) << message;
-}
-
-TEST_F(Land17OnStubElement, SettingCalciumAtQuadraturePointThrowsNamingUnknownType) {
-    element_.type = "H8";
-    CBTensionModelLand17 land(&element_, &parameters_);
-    const std::string message = ErrorMessage([&] { land.SetActiveTensionAtQuadraturePoint(0, 0.1); });
-    EXPECT_NE(message.find("H8"), std::string::npos) << message;
-}
-
-// T4MINI keeps one tension state per element, as T4.
-TEST_F(Land17OnStubElement, T4MiniTakesCalciumAtItsSingleQuadraturePoint) {
-    element_.type = "T4MINI";
-    CBTensionModelLand17 land(&element_, &parameters_);
-    EXPECT_NO_THROW(land.SetActiveTensionAtQuadraturePoint(0, 0.1));
-    EXPECT_NO_THROW(land.CalcActiveTension(Matrix3<TFloat>::Identity(), 0.001));
-    EXPECT_THROW(land.SetActiveTensionAtQuadraturePoint(1, 0.1), std::runtime_error);
+// A model belongs to one quadrature point and integrates from the calcium set for it.
+TEST_F(Land17OnStubElement, TensionFollowsCalciumFromElectrophysiology) {
+    CBTensionModelLand17 resting(&element_, &parameters_);
+    CBTensionModelLand17 activated(&element_, &parameters_);
+    activated.SetActiveTensionAtQuadraturePoint(1.0);
+    TFloat restingTension = 0, activatedTension = 0;
+    for (int step = 1; step <= 50; step++) {
+        restingTension   = resting.CalcActiveTension(Matrix3<TFloat>::Identity(), 0.001 * step);
+        activatedTension = activated.CalcActiveTension(Matrix3<TFloat>::Identity(), 0.001 * step);
+    }
+    EXPECT_GT(activatedTension, restingTension + 1);  // kPa
 }

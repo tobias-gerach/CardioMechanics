@@ -60,9 +60,14 @@ public:
     /// a constant second Piola-Kirchhoff stress.
     void SetPK2ActiveTension(bool pk2ActiveTension) { pk2ActiveTension_ = pk2ActiveTension; }
 
-    virtual CBStatus SetActiveTensionAtQuadraturePoint(int indexQP, TFloat activeTension) {
+    /// input from a coupled model at the model's quadrature point
+    virtual CBStatus SetActiveTensionAtQuadraturePoint(TFloat activeTension) {
         return CBStatus::SUCCESS;
     }
+
+    /// index of the point of the element kernel's quadrature rule that the model belongs to
+    void SetQuadraturePoint(int quadraturePoint) { quadraturePoint_ = quadraturePoint; }
+    int GetQuadraturePoint() const { return quadraturePoint_; }
 
     /// tension of the last CalcActiveStress call; the inverse active-stress estimator returns the
     /// tension it was set to instead
@@ -113,6 +118,7 @@ private:
     /// contains local activation time and lat-offset (from lat-reader)
     TFloat activationTime_ = 0.0;
     TFloat lastActiveTension_ = 0.0;
+    int quadraturePoint_ = 0;
     Matrix3<TFloat> stressCoefficients_ = {1, 0, 0, 0, 0, 0, 0, 0, 0};
     bool pk2ActiveTension_ = false;
 };

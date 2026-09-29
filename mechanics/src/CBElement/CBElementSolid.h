@@ -18,6 +18,8 @@
 #include "CBElement.h"
 #include <typeinfo>
 
+struct CBQuadratureRule;
+
 using namespace math_pack;
 
 class CBElementSolid : public CBElement {
@@ -110,6 +112,12 @@ public:
     }
     
     TFloat GetInitialVolume() {return initialVolume_;}
+
+    /// quadrature rule of the element kernel, which has a tension model per point
+    virtual const CBQuadratureRule& GetQuadratureRule() = 0;
+
+    /// rule-weighted mean of the tensions the element's models last computed
+    TFloat GetActiveTension();
     
     static void RepairDeformationTensorIfInverted(Matrix3<TFloat> &deformationTensor);
     

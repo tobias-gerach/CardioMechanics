@@ -33,6 +33,7 @@ public:
     unsigned int GetNumberOfPressureNodesIndices() {return 4;}
     void GetNodesPressures(TFloat *pressures);
     void UpdateShapeFunctions();
+    const CBQuadratureRule &GetQuadratureRule() override {return *miniGeometry_.rule;}
     CBStatus CalcNodalForces();
     CBStatus CalcNodalForcesJacobian();
 

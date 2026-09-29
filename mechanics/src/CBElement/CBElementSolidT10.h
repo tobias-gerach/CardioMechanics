@@ -54,6 +54,7 @@ public:
     virtual Matrix3<TFloat> GetDeformationTensorWithGlobalBasis(TFloat l1, TFloat l2, TFloat l3, TFloat l4);
     virtual Matrix3<TFloat> GetRightCauchyDeformationTensorWithGlobalBasis(TFloat l1, TFloat l2, TFloat l3, TFloat l4);
     TFloat GetVolume();
+    const CBQuadratureRule &GetQuadratureRule() override {return *geometry_.rule;}
     void SetBasisAtQuadraturePoint(int i, const Matrix3<TFloat>& basis);
     virtual CBStatus CalculateLaplacian();
     virtual CBStatus CalculateLaplacianT4();
@@ -79,7 +80,7 @@ protected:
         Matrix3<TFloat> bases[maxQuadraturePoints];
         for (int q = 0; q < geometry_.rule->numPoints; q++)
             bases[q] = QuadraturePointBasis(q);
-        return K(geometry_, bases, *Base::material_->GetConstitutiveModel(), *Base::tensionModel_, CurrentTime());
+        return K(geometry_, bases, *Base::material_->GetConstitutiveModel(), Base::tensionModels_.data(), CurrentTime());
     }
 
     std::array<TInt, 10> nodesIndices_;

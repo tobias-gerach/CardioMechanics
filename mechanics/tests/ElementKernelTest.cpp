@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 #include <tuple>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -58,6 +59,24 @@ public:
     double CalcActiveTension(const Matrix3<double> &F, const double time) override { return std::nan(""); }
 };
 
+// Remembers every deformation it is evaluated with, so a test sees which point's deformation
+// reached which model, as a stateful model integrates from them.
+class RecordingTension : public CBTensionModel {
+public:
+    double CalcActiveTension(const Matrix3<double> &F, const double time) override {
+        deformations.push_back(F);
+        return 0;
+    }
+    std::vector<Matrix3<double>> deformations;
+};
+
+// The same model at every quadrature point.
+std::array<CBTensionModel *, CBQuadratureRule::maxPoints> Everywhere(CBTensionModel &tension) {
+    std::array<CBTensionModel *, CBQuadratureRule::maxPoints> models;
+    models.fill(&tension);
+    return models;
+}
+
 // Parameterised by material law and number of quadrature points. The unknowns of a kernel are the
 // nodal coordinates followed by the vertex pressures, if it has any. Every displacement basis
 // numbers the vertices first, so a linear element, and a MINI element once its bubble is condensed,
@@ -83,7 +102,7 @@ protected:
         return points == 1 ? quadratureRule1 : points == 4 ? quadratureRule4 : quadratureRule14;
     }
 
-    Kernel MakeKernel(CBTensionModel &tension) { return Kernel(geometry_, bases_.data(), *law_, tension, 0.0); }
+    Kernel MakeKernel(CBTensionModel &tension) { return Kernel(geometry_, bases_.data(), *law_, Everywhere(tension).data(), 0.0); }
 
     // The reference configuration, where the pressures vanish.
     Unknowns ReferenceUnknowns() const {
@@ -192,6 +211,39 @@ protected:
                 EXPECT_NEAR(tangent[n * i + j], tangent[n * j + i], 1e-6) << "entry " << i << ", " << j;
     }
 
+    // Evaluates the residual of InnerKernel, a kernel without internal unknowns, at x with a
+    // recording model per point, and checks that each model saw only its own point's deformation.
+    template <class InnerKernel>
+    void EachPointEvaluatesItsOwnTensionModel(const TFloat *x) {
+        constexpr int nodes = DisplacementBasis::numNodes;
+        const int numPoints = geometry_.rule->numPoints;
+        std::array<RecordingTension, CBQuadratureRule::maxPoints> tensions;
+        std::array<CBTensionModel *, CBQuadratureRule::maxPoints> models;
+        for (int q = 0; q < numPoints; q++)
+            models[q] = &tensions[q];
+        const bool noBoundaryConditions[3 * nodes] = {};
+        TFloat r[InnerKernel::numUnknowns];
+        ASSERT_EQ(InnerKernel(geometry_, bases_.data(), *law_, models.data(), 0.0).Residual(x, noBoundaryConditions, r),
+                  CBStatus::SUCCESS);
+
+        for (int q = 0; q < numPoints; q++) {
+            const TFloat *dNdX = &geometry_.dNdX[3 * nodes * q];
+            Matrix3<TFloat> F;
+            for (int i = 0; i < 3; i++)
+                for (int j = 0; j < 3; j++) {
+                    F(i, j) = 0;
+                    for (int a = 0; a < nodes; a++)
+                        F(i, j) += dNdX[3 * a + j] * x[3 * a + i];
+                }
+            F = bases_[q].GetTranspose() * F * bases_[q].GetInverse().GetTranspose();
+
+            ASSERT_EQ(tensions[q].deformations.size(), 1u) << "point " << q;
+            for (int i = 0; i < 3; i++)
+                for (int j = 0; j < 3; j++)
+                    EXPECT_NEAR(tensions[q].deformations[0](i, j), F(i, j), 1e-12) << "point " << q << ", entry " << i << ", " << j;
+        }
+    }
+
     const Coords X_ = ReferenceCoords();
     const bool free_[numCoords] = {};
     CBNoTension noTension_;
@@ -231,6 +283,22 @@ TEST_P(ElementKernelMini, TangentColumnIsDerivativeOfForcesWrtUnknown) { Tangent
 TEST_P(ElementKernelP2P1, ElementMatrixIsSymmetricForHyperelasticLaw) { ElementMatrixIsSymmetricForHyperelasticLaw(); }
 TEST_P(ElementKernelMini, ElementMatrixIsSymmetricForHyperelasticLaw) { ElementMatrixIsSymmetricForHyperelasticLaw(); }
 
+TEST_P(ElementKernelT4, EachPointEvaluatesItsOwnTensionModel) { EachPointEvaluatesItsOwnTensionModel<Kernel>(CurrentUnknowns().data()); }
+TEST_P(ElementKernelT10, EachPointEvaluatesItsOwnTensionModel) { EachPointEvaluatesItsOwnTensionModel<Kernel>(CurrentUnknowns().data()); }
+TEST_P(ElementKernelP2P1, EachPointEvaluatesItsOwnTensionModel) { EachPointEvaluatesItsOwnTensionModel<Kernel>(CurrentUnknowns().data()); }
+
+// The uncondensed kernel, with a bubble, so that the deformation differs from the vertices' alone.
+TEST_P(ElementKernelMini, EachPointEvaluatesItsOwnTensionModel) {
+    const int bubble = 3 * CBLinearTetBasis::numNodes;  // the first bubble unknown of the inner kernel
+    const Unknowns x = CurrentUnknowns();
+    std::array<TFloat, MiniKernel::numUnknowns> y;
+    std::copy_n(x.begin(), bubble, y.begin());
+    for (int k = 0; k < 3; k++)
+        y[bubble + k] = 0.01 * (k + 1);
+    std::copy(x.begin() + bubble, x.end(), y.begin() + bubble + 3);
+    EachPointEvaluatesItsOwnTensionModel<MiniKernel>(y.data());
+}
+
 // The energy is stationary in the bubble at the state the condensed kernel solves for. The pressures
 // vary over the vertices, so the bubble does not vanish there.
 TEST_P(ElementKernelMini, InnerBubbleRowsVanishAtCondensedState) {
@@ -240,7 +308,7 @@ TEST_P(ElementKernelMini, InnerBubbleRowsVanishAtCondensedState) {
     ASSERT_GT(std::abs(y[bubble]) + std::abs(y[bubble + 1]) + std::abs(y[bubble + 2]), 1e-4);
 
     const bool noBoundaryConditions[3 * MiniKernel::numNodes] = {};
-    ASSERT_EQ(MiniKernel(geometry_, bases_.data(), *law_, noTension_, 0.0).Residual(y.data(), noBoundaryConditions, r.data()),
+    ASSERT_EQ(MiniKernel(geometry_, bases_.data(), *law_, Everywhere(noTension_).data(), 0.0).Residual(y.data(), noBoundaryConditions, r.data()),
               CBStatus::SUCCESS);
     for (int k = 0; k < 3; k++)
         EXPECT_NEAR(r[bubble + k], 0, 1e-12) << "bubble component " << k;
@@ -277,7 +345,7 @@ TEST_P(MiniKernelAtHardSwitch, LocalSolveConverges) {
     std::array<Matrix3<TFloat>, CBQuadratureRule::maxPoints> bases;
     bases.fill(Matrix3<TFloat>::Identity());
     CBNoTension noTension;
-    const CBCondensedKernel<MiniKernel, 3> kernel(geometry, bases.data(), law, noTension, 0.0);
+    const CBCondensedKernel<MiniKernel, 3> kernel(geometry, bases.data(), law, Everywhere(noTension).data(), 0.0);
 
     const bool free[3 * CBLinearTetBasis::numNodes] = {};
     for (TFloat stretch : {-1e-7, 0.0, 1e-7})

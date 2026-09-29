@@ -206,8 +206,13 @@ void CBacCELLerate::Apply(TFloat CMtime) {
                         cout << "Force is NaN or inf  --> We might crash soon" << endl;
                     }
                     
-                    e->GetTensionModel()->SetfibreRatio(ffr);
-                    e->GetTensionModel()->SetActiveTensionAtQuadraturePoint(QPi, Force);
+                    // Every quadrature point takes the centroid value, coupling point 0, until the
+                    // coupling points are the kernel's quadrature points.
+                    if (QPi == 0)
+                        for (CBTensionModel *model : e->GetTensionModels()) {
+                            model->SetfibreRatio(ffr);
+                            model->SetActiveTensionAtQuadraturePoint(Force);
+                        }
                 }
             }
         }
@@ -271,8 +276,11 @@ void CBacCELLerate::Apply(TFloat CMtime) {
                             cout << "Force is NaN or Inf --> we might crash soon" << endl;
                             Force = 0;
                         }
-                        e->GetTensionModel()->SetfibreRatio(ffr);
-                        e->GetTensionModel()->SetActiveTensionAtQuadraturePoint(QPi, Force);
+                        if (QPi == 0)
+                            for (CBTensionModel *model : e->GetTensionModels()) {
+                                model->SetfibreRatio(ffr);
+                                model->SetActiveTensionAtQuadraturePoint(Force);
+                            }
                     }
                 }
             }
