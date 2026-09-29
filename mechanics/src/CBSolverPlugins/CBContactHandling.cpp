@@ -777,7 +777,7 @@ int CBContactHandling::SearchForSlave(TFloat *slaveNodes, int oldSlave, Vector3<
     int numNeighbors = 1;
     
     while (numNeighbors > 0 && depth <= maxDepth_) {
-        // std::cout << std::endl << oldSlave << "\t\tdepth " << depth << ": ";
+        // DCCtrl::print << std::endl << oldSlave << "\t\tdepth " << depth << ": ";
         
         numNeighbors = 0;
         
@@ -786,7 +786,7 @@ int CBContactHandling::SearchForSlave(TFloat *slaveNodes, int oldSlave, Vector3<
                 if ((std::find(prevStartSlaves.begin(), prevStartSlaves.end(), neighbor) == prevStartSlaves.end()) &&
                     (std::find(startSlaves.begin(), startSlaves.end(), neighbor) == startSlaves.end()) &&
                     (std::find(checkedSlaves.begin(), checkedSlaves.end(), neighbor) == checkedSlaves.end())) {
-                    // std::cout << neighbor << " " << std::flush;
+                    // DCCtrl::print << neighbor << " " << std::flush;
                     
                     checkedSlaves.push_back(neighbor);
                     isNewSlave = CheckIfSlave(slaveNodes, neighbor, p, nv, dist);

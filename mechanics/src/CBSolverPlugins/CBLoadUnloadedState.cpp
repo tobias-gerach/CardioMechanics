@@ -176,17 +176,15 @@ void CBLoadUnloadedState::LoadNodes(std::string filename) {
                 
                 currentNode = std::atoi(currentNodeAsString.c_str());
                 if (i+1 != currentNode) {
-                    std::cout << line << std::endl;
                     throw std::runtime_error(
-                                             "CBLoadUnloadedState::LoadNodes: Node indices are not consistent! Do they increase one by one, beginning from 1?");
+                                             "CBLoadUnloadedState::LoadNodes: Node indices are not consistent! Do they increase one by one, beginning from 1? Line: " + line);
                 }
                 
                 // read x, y, z
                 if (!(linestream >> x >> y >> z)) {
-                    std::cout << line << std::endl;
                     throw std::runtime_error(
                                              "CBLoadUnloadedState::LoadNodes: Something went wrong with reading a line from the nodes file " + filename +
-                                             "! Did you check if all lines have a sufficient number of coordinates?");
+                                             "! Did you check if all lines have a sufficient number of coordinates? Line: " + line);
                 }
                 
                 TInt internalIndex = model->GetForwardMapping(i);

@@ -163,13 +163,13 @@ void CBApplyPressureFromFunctionNodeExport::WriteToFile(TFloat time) {
     if (!file_.good())
         throw std::runtime_error(
                                  "void CBApplyPressureFromFunctionNodeExport::WriteToFile(TFloat time): Couldn't create " + filename_);
-    file_ << std::setprecision(7) << std::fixed << std::setw(16) << time;
+    std::ostringstream row;
+    row << std::setprecision(7) << std::fixed << std::setw(16) << time;
     for (valuesIt_ = valuesStructs_.begin(); valuesIt_ != valuesStructs_.end(); valuesIt_++) {
-        file_ << std::setw(16) << valuesIt_->second.pressure/133.322 << std::setw(16) << (valuesIt_->second).volume*1e6;
-        std::cout << std::setw(16) << valuesIt_->second.pressure/133.322 << std::setw(16) << (valuesIt_->second).volume*1e6;
+        row << std::setw(16) << valuesIt_->second.pressure/133.322 << std::setw(16) << (valuesIt_->second).volume*1e6;
     }
-    std::cout << std::endl;
-    file_ << std::endl;
+    file_ << row.str() << std::endl;
+    DCCtrl::debug << row.str() << std::endl;
     file_.close();
 }
 
