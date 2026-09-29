@@ -384,6 +384,21 @@ TEST_P(ElementKernelP2P1, PressureBlockIsPressureMassMatrix) {
                 << "pressures " << a << ", " << b;
 }
 
+// An affine deformation x = A X + b has F = A everywhere, also on the curved reference element.
+TEST(Stretch, T10UnderAffineDeformationIsLengthOfDeformedFibre) {
+    const Coords          X = ReferenceCoords();
+    const Matrix3<TFloat> A(1.1, 0.2, -0.1, 0.05, 0.9, 0.15, -0.1, 0.1, 1.05);
+    const Vector3<TFloat> b(0.1, -0.2, 0.3);
+    Coords                x;
+    for (int a = 0; a < CBQuadraticTetBasis::numNodes; a++) {
+        const Vector3<TFloat> xa = A * Vector3<TFloat>(&X[3 * a]) + b;
+        for (int i = 0; i < 3; i++)
+            x[3 * a + i] = xa(i);
+    }
+    const Vector3<TFloat> f0 = (GetRotationZ(0.3) * GetRotationY(0.5)).GetCol(0);
+    EXPECT_NEAR(Stretch<CBQuadraticTetBasis>({0.1, 0.2, 0.3, 0.4}, X.data(), x.data(), f0), (A * f0).Norm(), 1e-13);
+}
+
 const auto laws         = testing::Values(std::string("NeoHooke"), std::string("Holzapfel"),
                                           std::string("Guccione"), std::string("Usyk"));
 const auto lawsAndRules = testing::Combine(laws, testing::Values(4, 14));

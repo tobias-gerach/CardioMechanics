@@ -74,9 +74,6 @@ protected:
     std::array<TInt, 4>   nodesIndices_;
     CBReferenceGeometry<CBLinearTetBasis> geometry_{};  // under the single-point rule, set in UpdateShapeFunctions
     
-    // ek717: needed for the CBAccelerate Plug in
-    CBStatus GetDeformationTensorAtQuadraturePoints(Matrix3<TFloat> *f);
-    
 private:
     typedef CBElement        Base;
     typedef CBElementSolid   Ancestor;

@@ -431,11 +431,3 @@ CBStatus CBElementSolidT4::CalculateLaplacian() {
     Base::adapter_->AddLaplacianEntriesGlobal(4, nodesIndices_.data(), 4, nodesIndices_.data(), laplacian);
     return CBStatus::SUCCESS;
 }
-
-CBStatus CBElementSolidT4::GetDeformationTensorAtQuadraturePoints(Matrix3<TFloat> *f) {
-    for (int i = 0; i < 4; i++) {
-        CBElementSolidT4::GetDeformationTensor(f[i]);
-    }
-    
-    return CBStatus::SUCCESS;
-}

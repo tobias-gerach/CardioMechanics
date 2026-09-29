@@ -341,6 +341,18 @@ CBReferenceGeometry<Basis> CalcReferenceGeometry(const TFloat *X, const CBQuadra
     return geometry;
 }
 
+//! Stretch |F d| of the reference direction d at barycentric coordinates l of the element with
+//! reference nodal coordinates X and current nodal coordinates x.
+template <class Basis>
+TFloat Stretch(const std::array<TFloat, 4> &l, const TFloat *X, const TFloat *x, const Vector3<TFloat> &d) {
+    std::array<TFloat, 3*Basis::numNodes> dNdX;
+    Basis::Derivatives(l, X, dNdX.data());
+    Vector3<TFloat> Fd;
+    for (int a = 0; a < Basis::numNodes; a++)
+        Fd += (dNdX[3*a]*d(0) + dNdX[3*a + 1]*d(1) + dNdX[3*a + 2]*d(2)) * Vector3<TFloat>(&x[3*a]);
+    return Fd.Norm();
+}
+
 //! Element kernel: residual, tangent and energy of one solid element from its gathered
 //! configuration. Knows nothing of global index layout; the element's Adapter gathers and scatters.
 //!

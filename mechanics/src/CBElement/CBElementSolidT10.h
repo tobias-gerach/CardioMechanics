@@ -49,7 +49,8 @@ public:
     CBStatus CalcConsistentMassMatrix();
     CBStatus CalcLumpedMassMatrix();
     CBStatus GetDeformationTensor(Matrix3<TFloat>& f);
-    CBStatus GetDeformationTensorAtQuadraturePoints(Matrix3<TFloat>* f);
+    //! Stretch of the centroid's fibre direction at barycentric coordinates l.
+    TFloat GetFibreStretch(const std::array<TFloat, 4> &l);
     CBStatus GetCauchyStress(Matrix3<TFloat>& cauchyStress);
     virtual Matrix3<TFloat> GetDeformationTensorWithGlobalBasis(TFloat l1, TFloat l2, TFloat l3, TFloat l4);
     virtual Matrix3<TFloat> GetRightCauchyDeformationTensorWithGlobalBasis(TFloat l1, TFloat l2, TFloat l3, TFloat l4);
@@ -84,6 +85,7 @@ protected:
     }
 
     std::array<TInt, 10> nodesIndices_;
+    std::array<TFloat, 30> referenceCoords_;  // nodal coordinates geometry_ was computed from
     CBReferenceGeometry<CBQuadraticTetBasis> geometry_;  // under the rule selected by Mesh.QuadratureDegree in UpdateShapeFunctions
     std::array<TFloat, 30> dNdXCentroid_;
     std::array<TFloat, 12> dNdXt4_;

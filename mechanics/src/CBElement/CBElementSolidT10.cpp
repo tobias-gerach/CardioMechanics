@@ -24,6 +24,7 @@
 
 CBElementSolidT10::CBElementSolidT10(CBElementSolidT10 &other) : CBElementSolid(other) {
     nodesIndices_ = other.nodesIndices_;
+    referenceCoords_ = other.referenceCoords_;
     geometry_ = other.geometry_;
     dNdXCentroid_ = other.dNdXCentroid_;
     dNdXt4_ = other.dNdXt4_;
@@ -104,6 +105,7 @@ void CBElementSolidT10::CalcShapeFunctionDerivativesAtQuadraturePoints(const CBQ
 
     GetNodesCoordsIndices(nodesCoordsIndices);
     Base::adapter_->GetNodesCoords(30, nodesCoordsIndices, nodesCoords);
+    std::copy(nodesCoords, nodesCoords + 30, referenceCoords_.begin());
     geometry_ = CalcReferenceGeometry<CBQuadraticTetBasis>(nodesCoords, rule);
     detJ_ = CBQuadraticTetBasis::Derivatives({0.25, 0.25, 0.25, 0.25}, nodesCoords, dNdXCentroid_.data());
     CalcT4ShapeFunctionsDerivatives();
@@ -510,22 +512,13 @@ CBStatus CBElementSolidT10::GetDeformationTensor(Matrix3<TFloat> &f) {
     return CBStatus::SUCCESS;
 }
 
-CBStatus CBElementSolidT10::GetDeformationTensorAtQuadraturePoints(Matrix3<TFloat> *f) {
-    // Its callers interpolate from the four points of the default rule.
-    if (geometry_.rule != &quadratureRule4)
-        throw std::runtime_error("CBElementSolidT10::GetDeformationTensorAtQuadraturePoints() needs Mesh.QuadratureDegree 2");
+TFloat CBElementSolidT10::GetFibreStretch(const std::array<TFloat, 4> &l) {
     TFloat nodesCoords[30];
     TInt   nodesCoordsIndices[30];
-    
-    for (unsigned int i = 0; i < 10; i++) {
-        nodesCoordsIndices[3*i]   = 3*nodesIndices_[i];
-        nodesCoordsIndices[3*i+1] = 3*nodesIndices_[i]+1;
-        nodesCoordsIndices[3*i+2] = 3*nodesIndices_[i]+2;
-    }
-    
+
+    GetNodesCoordsIndices(nodesCoordsIndices);
     Base::adapter_->GetNodesCoords(30, nodesCoordsIndices, nodesCoords);
-    CBElementSolidT10::CalcDeformationTensorsAtQuadraturePointsWithLocalBasis(nodesCoords, f);
-    return CBStatus::SUCCESS;
+    return Stretch<CBQuadraticTetBasis>(l, referenceCoords_.data(), nodesCoords, basisAtQuadraturePoint_[0].GetCol(0));
 }
 
 TFloat CBElementSolidT10::GetDeformationEnergy() {
