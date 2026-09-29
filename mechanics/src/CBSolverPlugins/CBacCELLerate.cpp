@@ -17,6 +17,8 @@
 #include "CBDataCtrl.h"
 #include "CBSolver.h"
 #include "CBElementSolidT4.h"
+#include "CBElementSolidT10.h"
+#include "CBElementKernel.h"
 #include <iostream>
 #include <vtkTetra.h>
 #include <vtkCellTypes.h>
@@ -206,13 +208,9 @@ void CBacCELLerate::Apply(TFloat CMtime) {
                         cout << "Force is NaN or inf  --> We might crash soon" << endl;
                     }
                     
-                    // Every quadrature point takes the centroid value, coupling point 0, until the
-                    // coupling points are the kernel's quadrature points.
-                    if (QPi == 0)
-                        for (CBTensionModel *model : e->GetTensionModels()) {
-                            model->SetfibreRatio(ffr);
-                            model->SetActiveTensionAtQuadraturePoint(Force);
-                        }
+                    CBTensionModel *model = e->GetTensionModels()[QPi];
+                    model->SetfibreRatio(ffr);
+                    model->SetActiveTensionAtQuadraturePoint(Force);
                 }
             }
         }
@@ -276,11 +274,9 @@ void CBacCELLerate::Apply(TFloat CMtime) {
                             cout << "Force is NaN or Inf --> we might crash soon" << endl;
                             Force = 0;
                         }
-                        if (QPi == 0)
-                            for (CBTensionModel *model : e->GetTensionModels()) {
-                                model->SetfibreRatio(ffr);
-                                model->SetActiveTensionAtQuadraturePoint(Force);
-                            }
+                        CBTensionModel *model = e->GetTensionModels()[QPi];
+                        model->SetfibreRatio(ffr);
+                        model->SetActiveTensionAtQuadraturePoint(Force);
                     }
                 }
             }
@@ -337,23 +333,23 @@ void CBacCELLerate::Export(TFloat time) {
             CBElementSolid *e = solidElements_[eIdx];
             if (std::find(materialCoupling_.begin(), materialCoupling_.end(),
                           e->GetMaterialIndex()) != materialCoupling_.end()) {
+                TFloat Calcium = 0, Potential = 0;
                 for (int QPi = 0; QPi < NumQP_; QPi++) {
                     const QPMapping &qpMapping = qpMappings_[eIdx*NumQP_ + QPi];
                     Vector4<TFloat> CalciumV4 = {piC[qpMapping.points[0]],
                         piC[qpMapping.points[1]],
                         piC[qpMapping.points[2]],
                         piC[qpMapping.points[3]]};
-                    TFloat Calcium = CalciumV4 * qpMapping.shapeFun;
+                    Calcium += rule_->weights[QPi] * (CalciumV4 * qpMapping.shapeFun);
                     
                     Vector4<TFloat> PotentialV4 = {piV[qpMapping.points[0]],
                         piV[qpMapping.points[1]],
                         piV[qpMapping.points[2]],
                         piV[qpMapping.points[3]]};
-                    TFloat Potential = PotentialV4 * qpMapping.shapeFun * 1000;
-                    
-                    VecSetValue(calcium, from2 + e->GetLocalIndex(), Calcium, INSERT_VALUES);
-                    VecSetValue(potential, from1 + e->GetLocalIndex(), Potential, INSERT_VALUES);
+                    Potential += rule_->weights[QPi] * (PotentialV4 * qpMapping.shapeFun * 1000);
                 }
+                VecSetValue(calcium, from2 + e->GetLocalIndex(), Calcium, INSERT_VALUES);
+                VecSetValue(potential, from1 + e->GetLocalIndex(), Potential, INSERT_VALUES);
             }
         }
         
@@ -711,7 +707,14 @@ void CBacCELLerate::AssembleMatrix() {
 void CBacCELLerate::InitParameters() {
     DCCtrl::debug << "\nLoading settings ...";
     
-    NumQP_ = solidElements_[0]->GetNumberOfQuadraturePoints();
+    rule_ = &solidElements_[0]->GetQuadratureRule();
+    for (CBElementSolid *e : solidElements_)
+        assert(&e->GetQuadratureRule() == rule_);
+    NumQP_ = rule_->numPoints;
+    /// UpdateStretch interpolates the stretch from four quadrature points, which T10 gives at degree 2 only
+    if (rule_ == &quadratureRule14 && dynamic_cast<CBElementSolidT10 *>(solidElements_[0]))
+        throw std::runtime_error("CBacCELLerate::InitParameters(): the stretch fed to acCELLerate needs "
+                                 "Mesh.QuadratureDegree 2 on T10 and T10P1 elements.");
     DCCtrl::debug << "\n Number of quad. points: " << NumQP_;
     
     accprojectFile_ = GetParameters()->Get<std::string>("Plugins.acCELLerate.ProjectFile");
@@ -876,14 +879,21 @@ void CBacCELLerate::InitMapping() {
     }
     std::vector<MappingPoint> allPoints;
     std::vector<MappingQP> allQPs;
+    long long numOutsideQPs = 0;
     if (mpirank_ == 0)
-        MapElements(allElements, elementDispls, allPoints, pointCounts, allQPs);
+        numOutsideQPs = MapElements(allElements, elementDispls, allPoints, pointCounts, allQPs);
     for (int r = 0; r < mpisize_; r++)
         pointDispls[r + 1] = pointDispls[r] + pointCounts[r];
 
     /// UpdateNodes() places a point that no solid element maps at the origin, which would silently distort its cells
     long long numUnmapped = mpirank_ == 0 ? nPoints_ - pointDispls[mpisize_] : 0;
-    ierr = MPI_Bcast(&numUnmapped, 1, MPI_LONG_LONG, 0, PETSC_COMM_WORLD); CHKERRQ(ierr);
+    long long numFailed[2] = {numUnmapped, numOutsideQPs};
+    ierr = MPI_Bcast(numFailed, 2, MPI_LONG_LONG, 0, PETSC_COMM_WORLD); CHKERRQ(ierr);
+    numUnmapped = numFailed[0];
+    numOutsideQPs = numFailed[1];
+    if (numOutsideQPs > 0)
+        throw std::runtime_error("CBacCELLerate::InitMapping(): " + std::to_string(numOutsideQPs) +
+                                 " quadrature points of the coupled solid elements lie outside all acCELLerate mesh cells.");
     if (numUnmapped > 0)
         throw std::runtime_error("CBacCELLerate::InitMapping(): " + std::to_string(numUnmapped) + " of " +
                                  std::to_string(nPoints_) + " acCELLerate mesh points lie outside all solid elements "
@@ -919,20 +929,9 @@ void CBacCELLerate::InitMapping() {
     DCCtrl::debug << "Done\n";
 } // CBacCELLerate::InitMapping
 
-void CBacCELLerate::MapElements(const std::vector<MappingElement> &elements, const std::vector<int> &elementDispls,
-                                std::vector<MappingPoint> &points, std::vector<int> &pointCounts,
-                                std::vector<MappingQP> &qps) {
-    /// shape functions for gauss points of tetrahedron
-    std::vector<double> ShapeFunVec(20, 0);
-    double alpha  = (5 + 3 * sqrt(5)) / 20;
-    double beta   = (5 - sqrt(5)) / 20;
-    
-    ShapeFunVec   = { 0.25, 0.25, 0.25, 0.25,
-        alpha, beta, beta, beta,
-        beta, alpha, beta, beta,
-        beta, beta, alpha, beta,
-        beta, beta, beta, alpha };
-    
+long long CBacCELLerate::MapElements(const std::vector<MappingElement> &elements, const std::vector<int> &elementDispls,
+                                     std::vector<MappingPoint> &points, std::vector<int> &pointCounts,
+                                     std::vector<MappingQP> &qps) {
     vtkSmartPointer<vtkPoints> CenterPoints = vtkSmartPointer<vtkPoints>::New();
     vtkSmartPointer<vtkUnstructuredGrid> TempVTK = vtkSmartPointer<vtkUnstructuredGrid>::New();
     vtkSmartPointer<vtkIdList> CellPoints = vtkSmartPointer<vtkIdList>::New();
@@ -958,6 +957,28 @@ void CBacCELLerate::MapElements(const std::vector<MappingElement> &elements, con
     vtkSmartPointer<vtkPointLocator> PointLocator = vtkSmartPointer<vtkPointLocator>::New();
     PointLocator->SetDataSet(TempVTK);
     PointLocator->BuildLocator();
+    
+    /// locates the acMesh_ cells that may contain a quadrature point
+    vtkSmartPointer<vtkCellLocator> cellLocator = vtkSmartPointer<vtkCellLocator>::New();
+    cellLocator->SetDataSet(acMesh_);
+    cellLocator->BuildLocator();
+    vtkSmartPointer<vtkIdList> nearCells = vtkSmartPointer<vtkIdList>::New();
+    long long numOutsideQPs = 0;
+    
+    /// shape functions of acMesh_ cell c at point x; a point is inside the cell if none is below -1e-9 (round-off)
+    auto acShapeFun = [&](vtkIdType c, const TFloat *x) {
+        vtkIdList *Points = acMesh_->GetCell(c)->GetPointIds();
+        Vector3<TFloat> acCellPoints[4];
+        for (int i = 0; i < 4; i++)
+            acCellPoints[i] = acMesh_->GetPoint(Points->GetId(i));
+        Matrix4<TFloat> mAcc = {acCellPoints[0].X(), acCellPoints[1].X(), acCellPoints[2].X(), acCellPoints[3].X(),
+            acCellPoints[0].Y(), acCellPoints[1].Y(), acCellPoints[2].Y(), acCellPoints[3].Y(),
+            acCellPoints[0].Z(), acCellPoints[1].Z(), acCellPoints[2].Z(), acCellPoints[3].Z(),
+            1,           1,           1,          1};
+        mAcc.Invert();
+        return mAcc * Vector4<TFloat>(x[0], x[1], x[2], 1);
+    };
+    const double insideTol = -1e-9;
     
     /// locates the acMesh_ points that are candidates for a solid element
     vtkSmartPointer<vtkStaticPointLocator> acPointLocator = vtkSmartPointer<vtkStaticPointLocator>::New();
@@ -1029,47 +1050,43 @@ void CBacCELLerate::MapElements(const std::vector<MappingElement> &elements, con
                 }
             }
             
-            /// build gauss point i of solidElement_ e
-            /// NumQP_ = 1: centroid
-            /// NumQP_ = 5: centroid, QP1, QP2, QP3, QP4
-            for (int QPi = 0; QPi < NumQP_; QPi++) { // NumQP_ = 1 or 5
-                TFloat QP[3];
-                QP[0] = ((p1.Get(0) * ShapeFunVec[QPi*NumQP_ + 0] +
-                          p2.Get(0) * ShapeFunVec[QPi*NumQP_ + 1] +
-                          p3.Get(0) * ShapeFunVec[QPi*NumQP_ + 2] +
-                          p4.Get(0) * ShapeFunVec[QPi*NumQP_ + 3])) * 1000;
-                QP[1] = ((p1.Get(1) * ShapeFunVec[QPi*NumQP_ + 0] +
-                          p2.Get(1) * ShapeFunVec[QPi*NumQP_ + 1] +
-                          p3.Get(1) * ShapeFunVec[QPi*NumQP_ + 2] +
-                          p4.Get(1) * ShapeFunVec[QPi*NumQP_ + 3])) * 1000;
-                QP[2] = ((p1.Get(2) * ShapeFunVec[QPi*NumQP_ + 0] +
-                          p2.Get(2) * ShapeFunVec[QPi*NumQP_ + 1] +
-                          p3.Get(2) * ShapeFunVec[QPi*NumQP_ + 2] +
-                          p4.Get(2) * ShapeFunVec[QPi*NumQP_ + 3])) * 1000;
+            /// quadrature point QPi of solid element k, placed with the vertices' barycentric coordinates
+            for (int QPi = 0; QPi < NumQP_; QPi++) {
+                const std::array<TFloat, 4> &l = rule_->points[QPi];
+                Vector3<TFloat> x = (p1 * l[0] + p2 * l[1] + p3 * l[2] + p4 * l[3]) * 1000;
+                TFloat QP[3] = {x.X(), x.Y(), x.Z()};
                 
-                /// Find closest Cell in accMesh to later interpolate Force/Cai from EP to CM
-                vtkIdType CellId = PointLocator->FindClosestPoint(QP);
-                vtkIdList *Points = acMesh_->GetCell(CellId)->GetPointIds();
-                Vector3<TFloat> acCellPoints[4];
-                MappingQP &qp = qps[k*NumQP_ + QPi];
-                
-                /// assign acMesh_ nodes to QP
-                for (int i = 0; i < 4; i++) {
-                    acCellPoints[i] = acMesh_->GetPoint(Points->GetId(i));
-                    qp.points[i] = PetscInt(Points->GetId(i));
+                /// Of the acMesh_ cells containing the point, the one with the closest centroid: a point on an acMesh_
+                /// vertex, edge or face lies in several cells, and the closest centroid picks one reproducibly.
+                vtkIdType cellId = PointLocator->FindClosestPoint(QP);
+                if (acShapeFun(cellId, QP).Min() < insideTol) {
+                    /// a neighbour's centroid can be closer than that of the cell containing the point
+                    double bounds[6] = {QP[0], QP[0], QP[1], QP[1], QP[2], QP[2]};
+                    cellLocator->FindCellsWithinBounds(bounds, nearCells);
+                    cellId = -1;
+                    double closest = std::numeric_limits<double>::infinity();
+                    for (vtkIdType c = 0; c < nearCells->GetNumberOfIds(); c++) {
+                        vtkIdType id = nearCells->GetId(c);
+                        double dist2 = vtkMath::Distance2BetweenPoints(QP, CenterPoints->GetPoint(id));
+                        if (dist2 < closest && acShapeFun(id, QP).Min() >= insideTol) {
+                            closest = dist2;
+                            cellId = id;
+                        }
+                    }
+                    if (cellId < 0) {
+                        numOutsideQPs++;
+                        continue;
+                    }
                 }
                 
-                /// Determine Shape fun to interpolate force from Acc points to QP later on
-                Matrix4<TFloat> mAcc = {acCellPoints[0].X(), acCellPoints[1].X(), acCellPoints[2].X(), acCellPoints[3].X(),
-                    acCellPoints[0].Y(), acCellPoints[1].Y(), acCellPoints[2].Y(), acCellPoints[3].Y(),
-                    acCellPoints[0].Z(), acCellPoints[1].Z(), acCellPoints[2].Z(), acCellPoints[3].Z(),
-                    1,           1,           1,          1};
-                mAcc.Invert();
-                
                 /// Gauss point of solid element e expressed with shape functions of acc element
-                Vector4<TFloat> shapeFun = mAcc * Vector4<TFloat>(QP[0],  QP[1], QP[2], 1);
-                for (int i = 0; i < 4; i++)
+                MappingQP &qp = qps[k*NumQP_ + QPi];
+                Vector4<TFloat> shapeFun = acShapeFun(cellId, QP);
+                vtkIdList *Points = acMesh_->GetCell(cellId)->GetPointIds();
+                for (int i = 0; i < 4; i++) {
+                    qp.points[i] = PetscInt(Points->GetId(i));
                     qp.shapeFun[i] = shapeFun(i);
+                }
             } // end loop over QPs
         } // end loop over elements of process r
         
@@ -1098,6 +1115,7 @@ void CBacCELLerate::MapElements(const std::vector<MappingElement> &elements, con
         for (int j = 0; j < 4; j++)
             point.shapeFun[j] = owner.shapeFun(j);
     }
+    return numOutsideQPs;
 } // CBacCELLerate::MapElements
 
 void CBacCELLerate::InitPetscVec() {

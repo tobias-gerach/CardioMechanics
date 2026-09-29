@@ -143,3 +143,19 @@ def test_em01_refuses_non_tetrahedral_ep_mesh(em01_root, cm_env, binary, permute
     proc = run_binary(binary("CardioMechanics"), ["-settings", name], cwd=settings, env=cm_env, np=2,
                       timeout=120, check=False)
     assert_refused(proc, "cube_quad.vtu", "vtkQuad")
+
+
+def test_em01_refuses_quadrature_points_outside_ep_mesh(em01_root, cm_env, binary):
+    """A quadrature point in no cell of the acCELLerate mesh would take calcium extrapolated from a
+    neighbouring cell. Scaling the mechanics cube by 5 % puts the points of its outer elements
+    outside the EP cube, so the plugin has to stop at init, on every rank."""
+    settings = em01_root / "settings"
+    xml = (settings / "M_1mm.xml").read_text()
+    for old, new in (("<Unit>1e-3</Unit>", "<Unit>1.05e-3</Unit>"),
+                     ("../Results/", "../ResultsScaled/")):
+        assert old in xml, f"M_1mm.xml no longer contains {old!r}"
+        xml = xml.replace(old, new)
+    (settings / "M_scaled.xml").write_text(xml)
+    proc = run_binary(binary("CardioMechanics"), ["-settings", "M_scaled.xml"], cwd=settings, env=cm_env, np=2,
+                      timeout=120, check=False)
+    assert_refused(proc, "quadrature points", "outside all acCELLerate mesh cells")
