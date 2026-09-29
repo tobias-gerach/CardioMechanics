@@ -19,15 +19,18 @@
 
 void CBApplyPressureFromFunction::Init()
 {
+    // Keys and the default file name follow the plugin name, so that each subclass reads its own section.
+    const std::string key = "Plugins." + GetName();
+    
     // init filenames
-    std::string defaultFilename = adapter_->GetSolver()->GetModel()->GetExporter()->GetExportDir() + "/ApplyPressureFromFunction.dat";
-    filename_ = parameters_->Get<std::string>("Plugins.ApplyPressureFromFunction.ExportFile", defaultFilename);
+    std::string defaultFilename = adapter_->GetSolver()->GetModel()->GetExporter()->GetExportDir() + "/" + GetName() + ".dat";
+    filename_ = parameters_->Get<std::string>(key + ".ExportFile", defaultFilename);
     
     // init cavities map using function from base class
-    CBSolverPluginCavities::InitCavities("Plugins.ApplyPressureFromFunction");
+    CBSolverPluginCavities::InitCavities(key);
     
     // init groups and intervals
-    std::vector<std::string> groupKeys = parameters_->GetChildNodes("Plugins.ApplyPressureFromFunction.Groups");
+    std::vector<std::string> groupKeys = parameters_->GetChildNodes(key + ".Groups");
     for (auto &groupKey : groupKeys)
     {
         std::vector<TInt> surfaces = parameters_->GetArray<TInt>(groupKey + ".Surfaces");

@@ -40,6 +40,16 @@ public:
     CBStatus GetStatus() override {return status_;}
     virtual std::string GetName() override { return("ApplyPressureFromFunction"); };
     
+protected:
+    struct ValueStruct
+    {
+        TFloat pressure;
+        TFloat volume;
+    };
+    
+    /// Pressure applied to and volume enclosed by each loaded surface, keyed by surface index.
+    std::map<TInt, ValueStruct> valuesStructs_;
+    
 private:
     std::ofstream file_;
     std::string filename_;
@@ -57,15 +67,8 @@ private:
         TFloat amplitude;
     };
     
-    struct ValueStruct
-    {
-        TFloat pressure;
-        TFloat volume;
-    };
-    
     std::map<TInt, std::vector<IntervalStruct>> groups_;
     std::map<TInt, std::vector<IntervalStruct>>::iterator groupsIt_;
-    std::map<TInt, ValueStruct> valuesStructs_;
     std::map<TInt, ValueStruct>::iterator valuesIt_;
     
     std::map<TInt, TFloat> materialsRelaxed_;
