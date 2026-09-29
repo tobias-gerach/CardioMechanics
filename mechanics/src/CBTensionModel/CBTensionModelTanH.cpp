@@ -137,9 +137,11 @@ inline void CBTensionModelTanH::WriteToFile(const StateVariables &S) {
     if (!file.good())
         throw std::runtime_error("CBTensionModelTanH::WriteToFile: Couldn't create " + filename_ + ".");
     
-    // write header
-    if (!headerWritten_) {
+    // write header, once per element: the models of an element share the file, and the kernel
+    // evaluates point 0 first
+    if (!headerWritten_ && GetQuadraturePoint() == 0) {
         file << "index";
+        file << "\t" << "qp";
         file << "\t" << "t";
         file << "\t" << "lambda";
         file << "\t" << "Ta";
@@ -150,6 +152,7 @@ inline void CBTensionModelTanH::WriteToFile(const StateVariables &S) {
     // write content to file
     file << std::setprecision(14);  // needed to increase precision of export to compare with matlab
     file << ei_;
+    file << "\t" << GetQuadraturePoint();
     file << "\t" << S.t;
     file << "\t" << S.lambda;
     file << "\t" << S.Ta;

@@ -285,7 +285,7 @@ CBStatus CBSolverActiveStressEstimator::SolverStep(PetscScalar time, bool forceJ
         PetscScalar *t;
         VecGetArray(ti1_, &t);
         for (auto &it : this->GetSolidElementVector())
-            it->GetTensionModel()->SetActiveTensionAtQuadraturePoint(0, -t[it->GetLocalIndex()]);
+            it->GetTensionModel()->SetActiveTensionAtQuadraturePoint(-t[it->GetLocalIndex()]);
         VecRestoreArray(ti1_, &t);
         VecCopy(ti1_, ti_);
     } else {
@@ -463,7 +463,7 @@ CBStatus CBSolverActiveStressEstimator::EstimatorStep(PetscScalar time, int step
         }
 
         t2[i] += t[i];
-        it->GetTensionModel()->SetActiveTensionAtQuadraturePoint(0, valT);
+        it->GetTensionModel()->SetActiveTensionAtQuadraturePoint(valT);
         VecSetValue(currTension, i, valT, INSERT_VALUES);
     }
     VecAssemblyBegin(currTension);

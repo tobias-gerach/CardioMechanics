@@ -259,16 +259,7 @@ TFloat CBTensionModelLand17::CaExternal(TFloat t) {
 
 TFloat CBTensionModelLand17::CaElphy(TFloat t) {
     // Method to process calcium from electrophysiology
-    TFloat calcium = 0;
-    if (e_->GetType() == "T4" || e_->GetType() == "T4MINI")
-        calcium = caiQP_[0];
-    // even though we have calcium at QPs, there is currently only one tension model initialized per element
-    // therefore, we use the centroid value as well in case of T10 and T10P1
-    else if (e_->GetType() == "T10" || e_->GetType() == "T10P1")
-        calcium = caiQP_[0];
-    else
-        throw std::runtime_error("CBTensionModelLand17::CaElphy: no calcium for element type [" + e_->GetType() + "].");
-    return calcium;
+    return cai_;
 }
 
 TFloat CBTensionModelLand17::Cai(std::string flag, TFloat t) {
@@ -302,7 +293,6 @@ CBTensionModelLand17::CBTensionModelLand17(CBElementSolid *e, ParameterMap *para
     Matrix3<TFloat> deformationTensor;
     e_ = e;
     assert(e_ != nullptr);
-    caiQP_.resize(e_->GetNumberOfQuadraturePoints());
     e->GetDeformationTensor(deformationTensor);
     Tmax_ = e->GetMaterial()->GetProperties()->tensionMax_;
     int mi = e->GetMaterialIndex();
@@ -509,9 +499,11 @@ inline void CBTensionModelLand17::WriteToFile(const StateVariables &S) {
     if (!file.good())
         throw std::runtime_error("CBTensionModelLand17::WriteToFile: Couldn't create " + filename_ + ".");
     
-    // write header
-    if (!headerWritten_) {
+    // write header, once per element: the models of an element share the file, and the kernel
+    // evaluates point 0 first
+    if (!headerWritten_ && GetQuadraturePoint() == 0) {
         file << "index";
+        file << "\t" << "qp";
         file << "\t" << "t";
         file << "\t" << "delta_t";
         file << "\t" << "XS";
@@ -533,6 +525,7 @@ inline void CBTensionModelLand17::WriteToFile(const StateVariables &S) {
     // write content to file
     file << std::setprecision(14); // needed to increase precision of export to compare with matlab
     file << ei_;
+    file << "\t" << GetQuadraturePoint();
     file << "\t" << S.t;
     file << "\t" << S.delta_t;
     file << "\t" << S.XS;
@@ -559,22 +552,7 @@ inline void CBTensionModelLand17::ReadExternalCai(std::string filename) {
     }
 }
 
-CBStatus CBTensionModelLand17::SetActiveTensionAtQuadraturePoint(TInt indexQP, TFloat Cai) {
-    if (e_->GetType() == "T4" || e_->GetType() == "T4MINI") {
-        if (indexQP == 0) {
-            caiQP_[indexQP] = Cai;
-        } else {
-            throw std::runtime_error("CBTensionModelLand17::SetActiveTensionAtQuadraturePoint: try to access a not existing quadrature point for T4 elements.");
-        }
-    } else if (e_->GetType() == "T10" || e_->GetType() == "T10P1") {
-        if (indexQP < 5) {
-            caiQP_[indexQP] = Cai;
-        } else {
-            throw std::runtime_error("CBTensionModelLand17::SetActiveTensionAtQuadraturePoint: try to access a not existing quadrature point for T10 elements.");
-        }
-    } else {
-        throw std::runtime_error("CBTensionModelLand17::SetActiveTensionAtQuadraturePoint: no quadrature points for element type [" + e_->GetType() + "].");
-    }
-
+CBStatus CBTensionModelLand17::SetActiveTensionAtQuadraturePoint(TFloat Cai) {
+    cai_ = Cai;
     return CBStatus::SUCCESS;
 }

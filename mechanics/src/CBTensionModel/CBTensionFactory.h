@@ -39,5 +39,6 @@ public:
     ~CBTensionFactory() {}
     
     void Init(ParameterMap *parameters,  CBTiming *timing,  CBFileManager *fileManager);
-    CBTensionModel *New(CBElementSolid *ele);
+    /// model of quadrature point quadraturePoint of the element's kernel rule
+    CBTensionModel *New(CBElementSolid *ele, int quadraturePoint);
 };

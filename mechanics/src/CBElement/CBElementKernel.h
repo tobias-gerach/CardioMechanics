@@ -355,14 +355,17 @@ public:
     static constexpr int numUnknowns  = 3*numNodes + numPressures;
     static constexpr int maxPoints    = DisplacementBasis::maxQuadraturePoints;
 
-    //! fibreBases holds one basis per quadrature point; the stresses of both models are taken in it.
+    //! fibreBases and tensionModels hold one entry per quadrature point; the stresses of both models
+    //! are taken in the basis. Each point has its own tension model, so that a stateful model
+    //! integrates the stretch history of its point alone.
     CBElementKernel(const CBReferenceGeometry<DisplacementBasis> &geometry, const Matrix3<TFloat> *fibreBases,
-                    CBConstitutiveModel &constitutiveModel, CBTensionModel &tensionModel, TFloat time)
-    : geometry_(geometry), constitutiveModel_(constitutiveModel), tensionModel_(tensionModel), time_(time),
+                    CBConstitutiveModel &constitutiveModel, CBTensionModel *const *tensionModels, TFloat time)
+    : geometry_(geometry), constitutiveModel_(constitutiveModel), time_(time),
       kappa_(numPressures ? constitutiveModel.GetBulkModulus() : 0) {
         for (int q = 0; q < geometry_.rule->numPoints; q++) {
             basisTranspose_[q]        = fibreBases[q].GetTranspose();
             basisInverseTranspose_[q] = fibreBases[q].GetInverse().GetTranspose();
+            tensionModels_[q]         = tensionModels[q];
         }
     }
 
@@ -390,7 +393,7 @@ public:
             }
             // Active stress is added raw, also with a pressure field. Whether a mixed formulation
             // should project it onto its deviatoric part is an open modelling question.
-            S[q] += tensionModel_.CalcActiveStress(F[q], time_);
+            S[q] += tensionModels_[q]->CalcActiveStress(F[q], time_);
         }
         Forces(F, S, boundaryConditions, residual);
         return CBStatus::SUCCESS;
@@ -534,11 +537,11 @@ private:
 
     const CBReferenceGeometry<DisplacementBasis> &geometry_;
     CBConstitutiveModel &constitutiveModel_;
-    CBTensionModel &tensionModel_;
     TFloat time_;
     TFloat kappa_;  // bulk modulus, used only with a pressure field
     std::array<Matrix3<TFloat>, maxPoints> basisTranspose_;
     std::array<Matrix3<TFloat>, maxPoints> basisInverseTranspose_;
+    std::array<CBTensionModel *, maxPoints> tensionModels_;
 };
 
 //! Element kernel with its internal unknowns, the last numInternal displacement components of the
@@ -560,8 +563,8 @@ public:
     //! As the Inner kernel. Templated on the basis because Inner does not name its own.
     template <class Basis>
     CBCondensedKernel(const CBReferenceGeometry<Basis> &geometry, const Matrix3<TFloat> *fibreBases,
-                      CBConstitutiveModel &constitutiveModel, CBTensionModel &tensionModel, TFloat time)
-    : inner_(geometry, fibreBases, constitutiveModel, tensionModel, time),
+                      CBConstitutiveModel &constitutiveModel, CBTensionModel *const *tensionModels, TFloat time)
+    : inner_(geometry, fibreBases, constitutiveModel, tensionModels, time),
       length_(std::cbrt(std::accumulate(geometry.dV.begin(), geometry.dV.begin() + geometry.rule->numPoints, TFloat(0)))) {
         // A bubble's gradient vanishes at the centroid, so under the single-point rule its block is singular.
         assert(geometry.rule->numPoints > 1);

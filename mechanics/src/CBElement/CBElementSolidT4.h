@@ -61,6 +61,7 @@ public:
     void UpdateShapeFunctions() {CalcShapeFunctionsDerivatives();}
     
     TFloat GetVolume();
+    const CBQuadratureRule &GetQuadratureRule() override {return *geometry_.rule;}
     void SetBasisAtQuadraturePoint(int i, const Matrix3<TFloat> &basis);
     Matrix3<TFloat> *GetBasisAtQuadraturePoint(int i);
     static std::vector<double> *conds;

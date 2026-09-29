@@ -43,7 +43,8 @@ protected:
     // external Cai
     std::vector<double> humanCai_;
     std::string calciumFile_ = "";
-    std::vector<TFloat> caiQP_;
+    // calcium from electrophysiology at the model's quadrature point
+    TFloat cai_ = 0;
     
     // CONSTANTS / PARAMETER VALUES
     // cooperativity of the calcium-troponin C binding rate
@@ -207,7 +208,7 @@ public:
     
     /// Even though the name suggest this function sets active tension, it sets calcium at a QP
     /// This way, we can use both staggered coupling schemes without additional code
-    CBStatus SetActiveTensionAtQuadraturePoint(TInt, TFloat) override;
+    CBStatus SetActiveTensionAtQuadraturePoint(TFloat) override;
     
     /// active tension computation function of the  model. Performs an explicit euler step for the ode parts and tracks active step backs.
     virtual double CalcActiveTension(const math_pack::Matrix3<double> &deformation, const double time) override;

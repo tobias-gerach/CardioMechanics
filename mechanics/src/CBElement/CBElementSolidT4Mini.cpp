@@ -45,7 +45,7 @@ CBElementSolidT4Mini::Kernel CBElementSolidT4Mini::MakeKernel() {
     // The element has a single fibre basis, used at every quadrature point.
     Matrix3<TFloat> bases[CBQuadratureRule::maxPoints];
     std::fill_n(bases, miniGeometry_.rule->numPoints, *GetBasisAtQuadraturePoint(0));
-    return Kernel(miniGeometry_, bases, *Base::material_->GetConstitutiveModel(), *Base::tensionModel_,
+    return Kernel(miniGeometry_, bases, *Base::material_->GetConstitutiveModel(), Base::tensionModels_.data(),
                   Base::adapter_->GetSolver()->GetTiming().GetCurrentTime());
 }
 
@@ -156,7 +156,10 @@ CBStatus CBElementSolidT4Mini::GetCauchyStress(Matrix3<TFloat> &cauchyStress) {
     if (rc != CBStatus::SUCCESS)
         return rc;
 
-    pk2Stress += GetTensionModel()->GetActiveStress(deformationTensor);
+    // The active stress is linear in the tension, so this is the stress of the mean tension.
+    const CBQuadratureRule &rule = GetQuadratureRule();
+    for (int q = 0; q < rule.numPoints; q++)
+        pk2Stress += rule.weights[q] * GetTensionModels()[q]->GetActiveStress(deformationTensor);
     cauchyStress = 1.0 / deformationTensor.Det() * deformationTensor * pk2Stress * deformationTensor.GetTranspose();
     return rc;
 }

@@ -98,7 +98,7 @@ void CBElementSolidT4::CalcDeformationTensorWithLocalBasis(const TFloat *nodesCo
 }
 
 CBElementSolidT4::Kernel CBElementSolidT4::MakeKernel() {
-    return Kernel(geometry_, &basisAtQuadraturePoint_, *Base::material_->GetConstitutiveModel(), *Base::tensionModel_,
+    return Kernel(geometry_, &basisAtQuadraturePoint_, *Base::material_->GetConstitutiveModel(), Base::tensionModels_.data(),
                   Base::adapter_->GetSolver()->GetTiming().GetCurrentTime());
 }
 
@@ -226,18 +226,20 @@ CBStatus CBElementSolidT4::CalcNodalForcesActiveStressJacobian() {
     Base::adapter_->GetNodesCoords(12, nodesCoordsIndices, nodesCoords);
     Base::adapter_->GetNodesComponentsBoundaryConditions(12, nodesCoordsIndices, boundaryConditions);
 
-    // The kernel queries the tension model at each evaluation, so it sees the perturbed tension.
+    // The kernel queries the tension model at each evaluation, so it sees the perturbed tension. It
+    // perturbs a single model, which is the element's whole tension only under the one-point rule.
+    assert(GetTensionModels().size() == 1);
     const Kernel kernel  = MakeKernel();
     const TFloat epsilon = 1.0;
     const TFloat tau     = GetTensionModel()->GetActiveTension();
 
-    GetTensionModel()->SetActiveTensionAtQuadraturePoint(0, tau + epsilon);
+    GetTensionModel()->SetActiveTensionAtQuadraturePoint(tau + epsilon);
     CBStatus rc = kernel.Residual(nodesCoords, boundaryConditions, f1);
     if (rc == CBStatus::SUCCESS) {
-        GetTensionModel()->SetActiveTensionAtQuadraturePoint(0, tau - epsilon);
+        GetTensionModel()->SetActiveTensionAtQuadraturePoint(tau - epsilon);
         rc = kernel.Residual(nodesCoords, boundaryConditions, f2);
     }
-    GetTensionModel()->SetActiveTensionAtQuadraturePoint(0, tau);
+    GetTensionModel()->SetActiveTensionAtQuadraturePoint(tau);
     if (ReportCorruptElement(rc) != CBStatus::SUCCESS)
         return rc;
 

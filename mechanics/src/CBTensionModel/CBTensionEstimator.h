@@ -28,7 +28,7 @@ public:
     double CalcActiveTension(const math_pack::Matrix3<double> &deformation, const double time) override;
     math_pack::Matrix3<double> GetActiveStress(const math_pack::Matrix3<double> &deformation) override;
     TFloat GetActiveTension() override;
-    CBStatus SetActiveTensionAtQuadraturePoint(int indexQP, TFloat activeTension) override;
+    CBStatus SetActiveTensionAtQuadraturePoint(TFloat activeTension) override;
 
 protected:
     CBElementSolid *e_;

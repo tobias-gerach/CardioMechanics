@@ -147,9 +147,11 @@ inline void CBTensionModelBestel::WriteToFile(const StateVariables &S) {
     if (!file.good())
         throw std::runtime_error("CBTensionModelBestel::WriteToFile: Couldn't create " + filename_ + ".");
     
-    // write header
-    if (!headerWritten_) {
+    // write header, once per element: the models of an element share the file, and the kernel
+    // evaluates point 0 first
+    if (!headerWritten_ && GetQuadraturePoint() == 0) {
         file << "index";
+        file << "\t" << "qp";
         file << "\t" << "time";
         file << "\t" << "activation";
         file << "\t" << "indicator";
@@ -160,6 +162,7 @@ inline void CBTensionModelBestel::WriteToFile(const StateVariables &S) {
     
     // write content to file
     file << ei_;
+    file << "\t" << GetQuadraturePoint();
     file << "\t" << S.t;
     file << "\t" << S.a;
     file << "\t" << S.f;
