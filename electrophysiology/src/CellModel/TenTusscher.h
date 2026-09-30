@@ -15,6 +15,7 @@
 #ifndef TENTUSSCHERETAL
 #define TENTUSSCHERETAL
 
+#include <memory>
 #include <TenTusscherEtAlParameters.h>
 
 #define HETERO
@@ -40,7 +41,7 @@ class TenTusscherEtAl : public vbElphyModel<ML_CalcType> {
   TenTusscherEtAl(TenTusscherEtAlParameters *pp);
   ~TenTusscherEtAl();
 #ifdef HETERO
-  ParameterSwitch *PS;
+  std::unique_ptr<ParameterSwitch> PS;
 #endif  // ifdef HETERO
   virtual inline bool AddHeteroValue(string desc, double val);
 

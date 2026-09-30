@@ -17,7 +17,7 @@
 GrandiEtAlVentricle::GrandiEtAlVentricle(GrandiEtAlVentricleParameters *pp) {
   ptTeaP = pp;
 #ifdef HETERO
-  PS = new ParameterSwitch(ptTeaP, NS_GrandiEtAlVentricleParameters::vtLast);
+  PS = std::make_unique<ParameterSwitch>(ptTeaP, NS_GrandiEtAlVentricleParameters::vtLast);
 #endif  // ifdef HETERO
   Init();
 }

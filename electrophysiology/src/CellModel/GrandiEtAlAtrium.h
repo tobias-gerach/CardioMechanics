@@ -15,6 +15,7 @@
 #ifndef GRANDIETALATRIUM
 #define GRANDIETALATRIUM
 
+#include <memory>
 #include <GrandiEtAlAtriumParameters.h>
 
 #define HETERO
@@ -73,7 +74,7 @@ class GrandiEtAlAtrium : public vbElphyModel<ML_CalcType> {
   GrandiEtAlAtrium(GrandiEtAlAtriumParameters *pp);
   ~GrandiEtAlAtrium();
 #ifdef HETERO
-  ParameterSwitch *PS;
+  std::unique_ptr<ParameterSwitch> PS;
 #endif  // ifdef HETERO
   virtual inline bool AddHeteroValue(string desc, double val);
 

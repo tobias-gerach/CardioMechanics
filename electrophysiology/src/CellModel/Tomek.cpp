@@ -17,7 +17,7 @@
 Tomek::Tomek(TomekParameters *pp) {
   ptTeaP = pp;
 #ifdef HETERO
-  PS = new ParameterSwitch(ptTeaP, NS_TomekParameters::vtLast);
+  PS = std::make_unique<ParameterSwitch>(ptTeaP, NS_TomekParameters::vtLast);
 #endif  // ifdef HETERO
   Init();
 }
@@ -43,7 +43,7 @@ inline bool Tomek::AddHeteroValue(string desc, double val) {
 inline int Tomek::GetSize(void) {
   return sizeof(Tomek)-sizeof(vbElphyModel<ML_CalcType>)-sizeof(TomekParameters *)
 #ifdef HETERO
-         -sizeof(ParameterSwitch *)
+         -sizeof(PS)
 #endif  // ifdef HETERO
   ;
 }

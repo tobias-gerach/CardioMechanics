@@ -15,6 +15,7 @@
 #ifndef TENTUSSCHER2
 #define TENTUSSCHER2
 
+#include <memory>
 #include <TenTusscher2Parameters.h>
 
 
@@ -185,7 +186,7 @@ ML_CalcType Array[18]; //lh326 for longPrint arra
 #endif  // ifdef ACTIVATE_IKATP_CHANNEL
 
 #ifdef HETERO
-  ParameterSwitch *PS;
+  std::unique_ptr<ParameterSwitch> PS;
 #endif  // ifdef HETERO
 
   TenTusscherEtAl2(TenTusscher2Parameters *pp);

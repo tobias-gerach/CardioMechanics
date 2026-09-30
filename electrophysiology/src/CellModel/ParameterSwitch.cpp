@@ -17,8 +17,6 @@
 ParameterSwitch::ParameterSwitch(vbNewElphyParameters *s, unsigned int vtLASTEntry) {
   // cerr<<"ParaSwitch() mit vbNewElphyParameters, last="<<vtLASTEntry<<"\n";
   stat             = s;
-  dyn              = NULL;
-  cnt              = 0;
   vtLAST           = vtLASTEntry;
   useDynamicValues = false;
 }
@@ -40,7 +38,7 @@ ML_CalcType ParameterSwitch::getValue(int vt) {
     return stat->P[vt].value;
   } else {
     cerr<<"dynamic ...\t(staticValue="<<stat->P[vt].value<<")\n";
-    if ((int)cnt < stat->P[vt].dynamicVar) {
+    if ((int)dyn.size() < stat->P[vt].dynamicVar) {
       cerr<<"undefined in this parameterset - using static value ...\n";
       return stat->P[vt].value;
     } else {
@@ -50,39 +48,25 @@ ML_CalcType ParameterSwitch::getValue(int vt) {
 }
 
 bool ParameterSwitch::addDynamicParameter(Parameter pDynPara) {
-  // cerr<<"bisher sind "<<cnt<<" dynamische Parameter angelegt ...\n";
-  ML_CalcType *tmp;
-
-  if (cnt > 0) {
-    // copy entries from dyn to tmp
-    tmp = new ML_CalcType[cnt];
-    memcpy(tmp, dyn, sizeof(ML_CalcType)*cnt);
-    delete[]dyn;
-  }
-  dyn = new ML_CalcType[cnt+1];
-  if (cnt > 0) {
-    memcpy(dyn, tmp, sizeof(ML_CalcType)*cnt);
-    delete[]tmp;
-  }
-  dyn[cnt] = pDynPara.value;
+  // cerr<<"bisher sind "<<dyn.size()<<" dynamische Parameter angelegt ...\n";
+  dyn.push_back(pDynPara.value);
   unsigned int index = vtFirst;
   for (unsigned int y = vtFirst; y < vtLAST; y++) {
     if (stat->P[y].name == pDynPara.name) {
-      stat->P[y].dynamicVar = cnt;
+      stat->P[y].dynamicVar = dyn.size()-1;
 
-      // cerr<<y<<" -> "<<cnt<<endl;
+      // cerr<<y<<" -> "<<dyn.size()-1<<endl;
       index = y;
     }
   }
-  cnt++;
 
   if (index == vtFirst) {
     throw kaBaseException("Parameter '%s' was not defined in the current implementation of the model!",
                           pDynPara.name.c_str());
   }
 
-  // cerr<<"jetzt sind "<<cnt<<" dynamische Parameter angelegt ...\n";
-  // for (int x=0;x<cnt+1;x++){
+  // cerr<<"jetzt sind "<<dyn.size()<<" dynamische Parameter angelegt ...\n";
+  // for (int x=0;x<dyn.size();x++){
   // cerr<<"\t"<<x<<": "<<(float)dyn[x]<<endl;
   // }
   // if (!useDynamicValues)

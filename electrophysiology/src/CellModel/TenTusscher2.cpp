@@ -23,7 +23,7 @@
 TenTusscherEtAl2::TenTusscherEtAl2(TenTusscher2Parameters *pp) {
   ptTeaP = pp;
 #ifdef HETERO
-  PS = new ParameterSwitch(ptTeaP, NS_TenTusscher2Parameters::vtLast);
+  PS = std::make_unique<ParameterSwitch>(ptTeaP, NS_TenTusscher2Parameters::vtLast);
 #endif  // ifdef HETERO
   Init();
 }

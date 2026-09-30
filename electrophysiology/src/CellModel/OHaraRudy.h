@@ -15,6 +15,7 @@
 #ifndef OHARARUDY
 #define OHARARUDY
 
+#include <memory>
 #include <OHaraRudyParameters.h>
 
 #define HETERO
@@ -56,7 +57,7 @@ class OHaraRudy : public vbElphyModel<ML_CalcType> {
   OHaraRudy(OHaraRudyParameters *pp);
   ~OHaraRudy();
 #ifdef HETERO
-  ParameterSwitch *PS;
+  std::unique_ptr<ParameterSwitch> PS;
 #endif  // ifdef HETERO
   virtual inline bool AddHeteroValue(string desc, double val);
 

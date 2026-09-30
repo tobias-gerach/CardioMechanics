@@ -17,7 +17,7 @@
 MitchellSchaeffer::MitchellSchaeffer(MitchellSchaefferParameters *pp) {
   ptTeaP = pp;
 #ifdef HETERO
-  PS = new ParameterSwitch(ptTeaP, NS_MitchellSchaefferParameters::vtLast);
+  PS = std::make_unique<ParameterSwitch>(ptTeaP, NS_MitchellSchaefferParameters::vtLast);
 #endif // ifdef HETERO
   Init();
 }
@@ -43,7 +43,7 @@ inline bool MitchellSchaeffer::AddHeteroValue(string desc, double val) {
 inline int MitchellSchaeffer::GetSize(void) {
   return sizeof(MitchellSchaeffer)-sizeof(vbElphyModel<ML_CalcType>)-sizeof(MitchellSchaefferParameters *)
 #ifdef HETERO
-         -sizeof(ParameterSwitch *)
+         -sizeof(PS)
 #endif // ifdef HETERO
   ;
 }

@@ -15,6 +15,7 @@
 #ifndef HIMENO
 #define HIMENO
 
+#include <memory>
 #include <HimenoParameters.h>
 
 #define HETERO
@@ -52,7 +53,7 @@ class Himeno : public vbElphyModel<ML_CalcType> {
   Himeno(HimenoParameters *pp);
   ~Himeno();
 #ifdef HETERO
-  ParameterSwitch *PS;
+  std::unique_ptr<ParameterSwitch> PS;
 #endif  // ifdef HETERO
   virtual inline bool AddHeteroValue(string desc, double val);
 

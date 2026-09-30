@@ -17,7 +17,7 @@
 TenTusscherEtAl::TenTusscherEtAl(TenTusscherEtAlParameters *pp) {
   ptTeaP = pp;
 #ifdef HETERO
-  PS = new ParameterSwitch(ptTeaP, NS_TenTusscherEtAlParameters::vtLast);
+  PS = std::make_unique<ParameterSwitch>(ptTeaP, NS_TenTusscherEtAlParameters::vtLast);
 #endif  // ifdef HETERO
   Init();
 }
@@ -44,7 +44,7 @@ inline bool TenTusscherEtAl::AddHeteroValue(string desc, double val) {
 inline int TenTusscherEtAl::GetSize(void) {
   return sizeof(TenTusscherEtAl)-sizeof(vbElphyModel<ML_CalcType>)-sizeof(TenTusscherEtAlParameters *)
 #ifdef HETERO
-         -sizeof(ParameterSwitch *)
+         -sizeof(PS)
 #endif  // ifdef HETERO
   ;
 }

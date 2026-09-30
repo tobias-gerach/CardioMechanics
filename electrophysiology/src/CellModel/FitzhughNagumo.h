@@ -15,6 +15,7 @@
 #ifndef FITZHUGHNAGUMO
 #define FITZHUGHNAGUMO
 
+#include <memory>
 #include <FitzhughNagumoParameters.h>
 
 #define HETERO
@@ -34,7 +35,7 @@ class FitzhughNagumo : public vbElphyModel<ML_CalcType>{
   FitzhughNagumo(FitzhughNagumoParameters *pp);
   ~FitzhughNagumo();
 #ifdef HETERO
-  ParameterSwitch *PS;
+  std::unique_ptr<ParameterSwitch> PS;
 #endif // ifdef HETERO
   virtual inline bool AddHeteroValue(string desc, double val);
 

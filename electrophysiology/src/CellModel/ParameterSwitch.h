@@ -16,6 +16,7 @@
 #define PARAMETERSWITCH
 
 #include <ElphyModelBasis.h>
+#include <vector>
 
 class ParameterSwitch {
  public:
@@ -25,8 +26,7 @@ class ParameterSwitch {
 
  private:
   vbNewElphyParameters *stat;
-  ML_CalcType *dyn;
-  unsigned int cnt;
+  std::vector<ML_CalcType> dyn;
   unsigned int vtLAST;
   bool useDynamicValues;
 };

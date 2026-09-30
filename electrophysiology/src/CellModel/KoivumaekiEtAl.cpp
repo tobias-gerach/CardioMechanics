@@ -17,7 +17,7 @@
 KoivumaekiEtAl::KoivumaekiEtAl(KoivumaekiEtAlParameters *pp) {
   ptKeaP = pp;
 #ifdef HETERO
-  PS = new ParameterSwitch(ptKeaP, NS_KoivumaekiEtAlParameters::vtLast);
+  PS = std::make_unique<ParameterSwitch>(ptKeaP, NS_KoivumaekiEtAlParameters::vtLast);
 #endif  // ifdef HETERO
   Init();
 }

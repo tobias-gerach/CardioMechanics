@@ -17,7 +17,7 @@
 Courtemanche::Courtemanche(CourtemancheParameters *pp) {
   pCmP = pp;
 #ifdef HETERO
-  PS = new ParameterSwitch(pCmP, NS_CourtemancheParameters::vtLast);
+  PS = std::make_unique<ParameterSwitch>(pCmP, NS_CourtemancheParameters::vtLast);
 #endif  // ifdef HETERO
   Init();
 }
@@ -44,7 +44,7 @@ inline int Courtemanche::GetSize(void) {
   // return ( &fT - &Ca_i + 1 ) * sizeof( ML_CalcType );
   return sizeof(Courtemanche)-sizeof(vbElphyModel<ML_CalcType>)-sizeof(CourtemancheParameters *)
 #ifdef HETERO
-         -sizeof(ParameterSwitch *)
+         -sizeof(PS)
 #endif  // ifdef HETERO
   ;
 }
