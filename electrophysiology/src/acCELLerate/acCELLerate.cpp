@@ -36,6 +36,8 @@ acCELLerate::acCELLerate() {
     pElphyFibro = NULL;
     pForceIntra = NULL;
     pForceFibro = NULL;
+    numIntraModels = 0;
+    numFibroModels = 0;
     
     MatImp            = NULL;
     VecDiag           = NULL;
@@ -52,6 +54,12 @@ acCELLerate::acCELLerate() {
     IntraIndexSetFile = "";
     VecSaveTmp        = NULL;
     MaterialV         = NULL;
+    VecResultValues   = NULL;
+    Stim              = NULL;
+    Force             = NULL;
+    VecVolMyo         = NULL;
+    VecVolExtra       = NULL;
+    VecVolFibro       = NULL;
     
     ActivationTime      = NULL;
     ActivationThreshold = .0;
@@ -115,16 +123,25 @@ acCELLerate::acCELLerate() {
     PrintDebug("acCELLerate finished");
 }
 
+template<class T>
+static void DeleteModels(T **models, PetscInt n) {
+    if (!models)
+        return;
+    for (PetscInt i = 0; i < n; ++i)
+        delete models[i];
+    delete[] models;
+}
+
 /*!
  Destructor to free memory and close protocol file
  */
 acCELLerate::~acCELLerate() {
     PrintDebug("~acCELLerate()");
     
-    delete[] pElphyIntra;
-    delete[] pElphyFibro;
-    delete[] pForceIntra;
-    delete[] pForceFibro;
+    DeleteModels(pElphyIntra, numIntraModels);
+    DeleteModels(pForceIntra, numIntraModels);
+    DeleteModels(pElphyFibro, numFibroModels);
+    DeleteModels(pForceFibro, numFibroModels);
     
     if (fprot)
         fclose(fprot);
@@ -178,6 +195,15 @@ acCELLerate::~acCELLerate() {
     if (ActivationTime) {
         ierr = VecDestroy(&ActivationTime); CHKERRV(ierr);
     }
+    // VecDestroy ignores NULL handles, and the run paths that destroy some of these early leave them NULL.
+    ierr = VecDestroy(&VecICell); CHKERRV(ierr);
+    ierr = VecDestroy(&VecResultValues); CHKERRV(ierr);
+    ierr = VecDestroy(&Stim); CHKERRV(ierr);
+    ierr = VecDestroy(&Force); CHKERRV(ierr);
+    ierr = VecDestroy(&VecVolMyo); CHKERRV(ierr);
+    ierr = VecDestroy(&VecVolExtra); CHKERRV(ierr);
+    ierr = VecDestroy(&VecVolFibro); CHKERRV(ierr);
+    ierr = VecDestroy(&MaterialV); CHKERRV(ierr);
 }
 
 /*!
@@ -706,6 +732,8 @@ void acCELLerate::InitMono(Vec materials) {
     if (materials) {
         // if InitMono is called with a material vector, ignore material vec in .aclt if given
         MaterialV = materials;
+        // The caller keeps its own reference, so the destructor releases only ours.
+        ierr = PetscObjectReference((PetscObject)MaterialV); CHKERRQ(ierr);
     } else if (Material.size()) {
         LoadVec(Material.c_str(), MaterialV, ot_bin);
     } else {
@@ -722,12 +750,12 @@ void acCELLerate::InitMono(Vec materials) {
     
     ierr = VecGetOwnershipRange(MaterialV, &StartCells, &EndCells); CHKERRQ(ierr);
     
-    pElphyIntra = new vbElphyModel<double> *[EndCells-StartCells];
-    assert(pElphyIntra);
-    pForceIntra = new vbForceModel<double> *[EndCells-StartCells];
-    assert(pForceIntra);
+    // Value-initialized so that the destructor can delete every slot if model creation throws partway.
+    numIntraModels = EndCells-StartCells;
+    pElphyIntra = new vbElphyModel<double> *[numIntraModels]();
+    pForceIntra = new vbForceModel<double> *[numIntraModels]();
     
-    EMIntra.New(EndCells-StartCells);
+    EMIntra.New(numIntraModels);
     
     PetscScalar *pm;
     ierr = VecGetArray(MaterialV, &pm); CHKERRQ(ierr);
@@ -1034,12 +1062,11 @@ void acCELLerate::InitTri() {
     // TODO assert len(MaterialFV) == IntraSize
     ierr = VecGetOwnershipRange(MaterialFV, &StartCells, &EndCells); CHKERRQ(ierr);
     
-    pElphyFibro = new vbElphyModel<double> *[EndCells-StartCells];
-    assert(pElphyFibro);
-    pForceFibro = new vbForceModel<double> *[EndCells-StartCells];
-    assert(pForceFibro);
+    numFibroModels = EndCells-StartCells;
+    pElphyFibro = new vbElphyModel<double> *[numFibroModels]();
+    pForceFibro = new vbForceModel<double> *[numFibroModels]();
     
-    EMFibro.New(EndCells-StartCells);
+    EMFibro.New(numFibroModels);
     
     PetscScalar *pm;
     ierr = VecGetArray(MaterialFV, &pm); CHKERRQ(ierr);
