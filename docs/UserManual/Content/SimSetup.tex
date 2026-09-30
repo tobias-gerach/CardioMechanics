@@ -72,6 +72,7 @@ The tag \verb+Mesh+, contains all parameters for the configuration of the model/
 The mesh has to be provided in the TetGen format.
 See \nameref{nodeFile}, \nameref{eleFile}, \nameref{surFile}, and \nameref{basesFile} for details about this format.
 Linear (\verb+T4+) and quadratic tetrahedral (\verb+T10+) elements are supported as volume elements, together with the mixed displacement-pressure elements \verb+T4MINI+ and \verb+T10P1+ described in \Sec{settings:MixedElements}.
+To use \verb+T10+ or \verb+T10P1+ elements, convert a \verb+T4+ mesh with \nameref{tools:ConvertT4toT10}.
 \verb|QuadratureDegree| selects the quadrature rule of \verb+T10+, \verb+T10P1+ and \verb+T4MINI+ elements: \verb|2|, the default, is the 4-point rule and \verb|5| the 14-point rule.
 Any other value is refused; \verb+T4+ elements ignore the setting.
 With \verb|5|, every element needs a single fibre basis in the \nameref{basesFile}, because the file provides frames only at the points of the 4-point rule.
@@ -84,9 +85,6 @@ Surfaces and surface types for boundary condition applications have to be define
 Only linear (\verb|T3|) and quadratic (\verb|T6|) triangular elements are supported.
 However, most plugins supplying traction forces are only implemented for linear triangles.
 See the code example below for available options.
-
-The tag \verb|Transform| is meant to transform linear to quadratic elements on the fly, but it is not implemented and has no effect.
-Convert the mesh with \nameref{tools:ConvertT4toT10} instead.
 
 Finally, a \nameref{LATFile} can be defined, if you want to run mechanical simulations with precalculated electrophysiological activations, \eg from solutions to the eikonal equation.
 
@@ -114,12 +112,6 @@ Finally, a \nameref{LATFile} can be defined, if you want to run mechanical simul
     <Surfaces>
         <Surface_XXX> surfaceType </Surface_XXX>
     </Surfaces>
-
-    <!-- Not implemented, has no effect: convert the mesh with ConvertT4toT10 -->
-    <Transform>
-    	<T4toT10> 	false </T4toT10>
-    	<T3toT6> 	false </T3toT6>
-    </Transform>
 
     <!-- Define a filename with local activation times (LAT) -->
     <LAT>

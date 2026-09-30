@@ -27,7 +27,6 @@ public:
     virtual CBModel* Load(std::string Tag = "Mesh") = 0;
     
     void InitParameters(ParameterMap* parameters){parameters_ = parameters;}
-    void TransformT4toT10(){}
 protected:
     void InitModelOutputFile();
     CBModel* model_;
