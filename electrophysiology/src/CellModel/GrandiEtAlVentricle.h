@@ -15,6 +15,7 @@
 #ifndef GRANDIETALVENTRICLE
 #define GRANDIETALVENTRICLE
 
+#include <memory>
 #include <GrandiEtAlVentricleParameters.h>
 
 #define HETERO
@@ -71,7 +72,7 @@ class GrandiEtAlVentricle : public vbElphyModel<ML_CalcType> {
   GrandiEtAlVentricle(GrandiEtAlVentricleParameters *pp);
   ~GrandiEtAlVentricle();
 #ifdef HETERO
-  ParameterSwitch *PS;
+  std::unique_ptr<ParameterSwitch> PS;
 #endif  // ifdef HETERO
   virtual inline bool AddHeteroValue(string desc, double val);
 

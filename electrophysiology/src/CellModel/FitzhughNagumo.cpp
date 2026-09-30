@@ -17,7 +17,7 @@
 FitzhughNagumo::FitzhughNagumo(FitzhughNagumoParameters *pp) {
   ptTeaP = pp;
 #ifdef HETERO
-  PS = new ParameterSwitch(ptTeaP, NS_FitzhughNagumoParameters::vtLast);
+  PS = std::make_unique<ParameterSwitch>(ptTeaP, NS_FitzhughNagumoParameters::vtLast);
 #endif // ifdef HETERO
   Init();
 }
@@ -43,7 +43,7 @@ inline bool FitzhughNagumo::AddHeteroValue(string desc, double val) {
 inline int FitzhughNagumo::GetSize(void) {
   return sizeof(FitzhughNagumo)-sizeof(vbElphyModel<ML_CalcType>)-sizeof(FitzhughNagumoParameters *)
 #ifdef HETERO
-         -sizeof(ParameterSwitch *)
+         -sizeof(PS)
 #endif // ifdef HETERO
   ;
 }

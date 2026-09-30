@@ -17,7 +17,7 @@
 Kurata::Kurata(KurataParameters *pp) {
   pCmP = pp;
 #ifdef HETERO
-  PS = new ParameterSwitch(pCmP, NS_KurataParameters::vtLast);
+  PS = std::make_unique<ParameterSwitch>(pCmP, NS_KurataParameters::vtLast);
 #endif  // ifdef HETERO
   Init();
 }
@@ -43,7 +43,7 @@ inline bool Kurata::AddHeteroValue(string desc, double val) {
 inline int Kurata::GetSize(void) {
   return sizeof(Kurata)-sizeof(vbElphyModel<ML_CalcType>)-sizeof(KurataParameters *)
 #ifdef HETERO
-         -sizeof(ParameterSwitch *)
+         -sizeof(PS)
 #endif  // ifdef HETERO
   ;
 }

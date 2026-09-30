@@ -15,6 +15,7 @@
 #ifndef MITCHELLSCHAEFFER
 #define MITCHELLSCHAEFFER
 
+#include <memory>
 #include <MitchellSchaefferParameters.h>
 
 #define HETERO
@@ -35,7 +36,7 @@ class MitchellSchaeffer : public vbElphyModel<ML_CalcType>{
   ~MitchellSchaeffer();
 
 #ifdef HETERO
-  ParameterSwitch *PS;
+  std::unique_ptr<ParameterSwitch> PS;
 #endif // ifdef HETERO
   virtual inline bool AddHeteroValue(string desc, double val);
 

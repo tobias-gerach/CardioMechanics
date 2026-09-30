@@ -17,7 +17,7 @@
 BeelerReuter::BeelerReuter(BeelerReuterParameters *pp) {
   pBRP = pp;
 #ifdef HETERO
-  PS = new ParameterSwitch(pBRP, NS_BeelerReuterParameters::vtLast);
+  PS = std::make_unique<ParameterSwitch>(pBRP, NS_BeelerReuterParameters::vtLast);
 #endif  // ifdef HETERO
   Init();
 }

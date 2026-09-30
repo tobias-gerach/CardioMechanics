@@ -15,6 +15,7 @@
 #ifndef KURATA
 #define KURATA
 
+#include <memory>
 #include <KurataParameters.h>
 
 #undef HETERO
@@ -36,7 +37,7 @@ class Kurata : public vbElphyModel<ML_CalcType> {
   ML_CalcType Nai;
   ML_CalcType Ki;
 #ifdef HETERO
-  ParameterSwitch *PS;
+  std::unique_ptr<ParameterSwitch> PS;
 #endif  // ifdef HETERO
   Kurata(KurataParameters *pp);
   ~Kurata();

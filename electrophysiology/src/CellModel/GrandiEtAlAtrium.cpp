@@ -17,7 +17,7 @@
 GrandiEtAlAtrium::GrandiEtAlAtrium(GrandiEtAlAtriumParameters *pp) {
   ptTeaP = pp;
 #ifdef HETERO
-  PS = new ParameterSwitch(ptTeaP, NS_GrandiEtAlAtriumParameters::vtLast);
+  PS = std::make_unique<ParameterSwitch>(ptTeaP, NS_GrandiEtAlAtriumParameters::vtLast);
 #endif  // ifdef HETERO
   Init();
 }

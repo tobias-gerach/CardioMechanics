@@ -15,6 +15,7 @@
 #ifndef COURTEMANCHE
 #define COURTEMANCHE
 
+#include <memory>
 #include <CourtemancheParameters.h>
 
 #define HETERO
@@ -41,7 +42,7 @@ class Courtemanche : public vbElphyModel<ML_CalcType> {
   ML_CalcType Ca_TRPN;
 #endif // ifdef TRPN
 #ifdef HETERO
-  ParameterSwitch *PS;
+  std::unique_ptr<ParameterSwitch> PS;
 #endif  // ifdef HETERO
   Courtemanche(CourtemancheParameters *pp);
   ~Courtemanche();

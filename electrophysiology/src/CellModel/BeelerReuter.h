@@ -15,6 +15,7 @@
 #ifndef BEELER_REUTER
 #define BEELER_REUTER
 
+#include <memory>
 #include <BeelerReuterParameters.h>
 
 #undef HETERO
@@ -33,7 +34,7 @@ class BeelerReuter : public vbElphyModel<ML_CalcType> {
   ML_CalcType m, h, j, d, f, x1;
 
 #ifdef HETERO
-  ParameterSwitch *PS;
+  std::unique_ptr<ParameterSwitch> PS;
 #endif  // ifdef HETERO
 
   BeelerReuter(BeelerReuterParameters *);
@@ -44,7 +45,7 @@ class BeelerReuter : public vbElphyModel<ML_CalcType> {
   virtual inline int GetSize(void) {
     return sizeof(BeelerReuter)-sizeof(vbElphyModel<ML_CalcType>)-sizeof(BeelerReuterParameters *)
 #ifdef HETERO
-           -sizeof(ParameterSwitch *)
+           -sizeof(PS)
 #endif  // ifdef HETERO
     ;
   }

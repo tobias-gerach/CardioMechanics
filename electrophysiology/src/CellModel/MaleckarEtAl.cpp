@@ -17,7 +17,7 @@
 MaleckarEtAl::MaleckarEtAl(MaleckarEtAlParameters *pp) {
   ptTeaP = pp;
 #ifdef HETERO
-  PS = new ParameterSwitch(ptTeaP, NS_MaleckarEtAlParameters::vtLast);
+  PS = std::make_unique<ParameterSwitch>(ptTeaP, NS_MaleckarEtAlParameters::vtLast);
 #endif  // ifdef HETERO
   Init();
 }

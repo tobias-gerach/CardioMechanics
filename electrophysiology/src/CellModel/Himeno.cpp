@@ -18,7 +18,7 @@
 Himeno::Himeno(HimenoParameters *pp) {
   pHimP = pp;
 #ifdef HETERO
-  PS = new ParameterSwitch(pHimP, NS_HimenoParameters::vtLast);
+  PS = std::make_unique<ParameterSwitch>(pHimP, NS_HimenoParameters::vtLast);
 #endif  // ifdef HETERO
   Init();
 }
@@ -48,7 +48,7 @@ inline bool Himeno::AddHeteroValue(string desc, double val) {
 inline int Himeno::GetSize(void) {
   return sizeof(Himeno)-sizeof(vbElphyModel<ML_CalcType>)-sizeof(HimenoParameters *)
 #ifdef HETERO
-         -sizeof(ParameterSwitch *)
+         -sizeof(PS)
 #endif  // ifdef HETERO
   ;
 }

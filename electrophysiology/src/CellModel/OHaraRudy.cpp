@@ -17,7 +17,7 @@
 OHaraRudy::OHaraRudy(OHaraRudyParameters *pp) {
   ptTeaP = pp;
 #ifdef HETERO
-  PS = new ParameterSwitch(ptTeaP, NS_OHaraRudyParameters::vtLast);
+  PS = std::make_unique<ParameterSwitch>(ptTeaP, NS_OHaraRudyParameters::vtLast);
 #endif  // ifdef HETERO
   Init();
 }
@@ -43,7 +43,7 @@ inline bool OHaraRudy::AddHeteroValue(string desc, double val) {
 inline int OHaraRudy::GetSize(void) {
   return sizeof(OHaraRudy)-sizeof(vbElphyModel<ML_CalcType>)-sizeof(OHaraRudyParameters *)
 #ifdef HETERO
-         -sizeof(ParameterSwitch *)
+         -sizeof(PS)
 #endif  // ifdef HETERO
   ;
 }

@@ -15,6 +15,7 @@
 #ifndef MALECKARETAL
 #define MALECKARETAL
 
+#include <memory>
 #include <MaleckarEtAlParameters.h>
 
 #define HETERO
@@ -62,7 +63,7 @@ class MaleckarEtAl : public vbElphyModel<ML_CalcType> {
   MaleckarEtAl(MaleckarEtAlParameters *pp);
   ~MaleckarEtAl();
 #ifdef HETERO
-  ParameterSwitch *PS;
+  std::unique_ptr<ParameterSwitch> PS;
 #endif  // ifdef HETERO
   virtual inline bool AddHeteroValue(string desc, double val);
 

@@ -15,6 +15,7 @@
 #ifndef KOIVUMAEKIETAL
 #define KOIVUMAEKIETAL
 
+#include <memory>
 #include <KoivumaekiEtAlParameters.h>
 
 #define HETERO
@@ -82,7 +83,7 @@ class KoivumaekiEtAl : public vbElphyModel<ML_CalcType> {
   KoivumaekiEtAl(KoivumaekiEtAlParameters *pp);
   ~KoivumaekiEtAl();
 #ifdef HETERO
-  ParameterSwitch *PS;
+  std::unique_ptr<ParameterSwitch> PS;
 #endif  // ifdef HETERO
   virtual inline bool AddHeteroValue(string desc, double val);
 
