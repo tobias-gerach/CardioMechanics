@@ -46,6 +46,7 @@
 ### Deleted
 - `Solver.LU`, `Solver.NewmarkBeta.Type` and `Solver.GeneralizedAlpha.Type`. They raise an error naming `Solver.LinearSolver.Preset`; `Type` `superlu` becomes the preset `direct-superlu`.
 - `Plugins.acCELLerate.TissuePriority`. It never had an effect: the plugin assembles the conductivity per element from the element's own material, and the material of each node, which selects its cell model, comes from the tissue vector written by `BidomainMatrixGenerator`, whose `-tissue` option sets the precedence. Settings files that still contain the key load unchanged.
+- `Plugins.acCELLerate.Permute`. The PCA sorting it enabled renumbered only the plugin's copy of the EP mesh, not the inputs acCELLerate reads in file order, so the EP matrix assembly failed. Settings files that still contain the key load unchanged. The mechanics-side `Mesh.Sorting` is unaffected.
 
 ### Fixed
 - The isochoric/volumetric split of NeoHooke and Holzapfel had no effect: integer division made the exponents of `J^(-2/3)` and `I3^(-1/3)` zero. The split now applies, which changes results of both laws wherever `J != 1`.
@@ -55,6 +56,7 @@
 - Corrected the sign of the master-to-target gap vector in `CBContactHandling`. The gap was taken as `(ip - p).Norm()`, which discards the sign of the signed distance along the master normal, so the vector pointed the wrong way whenever the target lay on the negative-normal side. Only the estimator consumes this vector; the forward contact force computes its own distance and is unaffected.
 - `CBDataFromFile`'s default constructor left `startTime_` and `period_` uninitialized, which produced NaN sampled values on the default-constructed path used by `CBPointsCtrl`.
 - The `ApplyPressure` ramp ran from zero at `t = 0` rather than at `StartTime`, so a non-zero `StartTime` loaded the surface before the start time and reached `MaxPressure` at `StopTime - StartTime` instead of `StopTime`. The ramp now runs from zero at `StartTime` to `MaxPressure` at `StopTime`, and the pressure is zero before `StartTime`. Results change for every run whose effective start time is non-zero: `Plugins.ApplyPressure.StartTime`, or the solver's `StartTime` where the plugin sets none.
+- An exception on process 0 while the acCELLerate plugin loaded its mesh left the other processes waiting forever; it now stops every process. An unreadable acCELLerate mesh file is reported by name instead of as "Automatic mapping of fibers currently not supported."
 
 ### Known Issues
 - The active-stress estimator is serial only and aborts if launched under `mpirun`.

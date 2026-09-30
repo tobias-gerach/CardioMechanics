@@ -117,11 +117,10 @@ def test_em01_runs_on_t4mini(em01_root, em01_sim_length, cm_env, binary):
     assert list(vtu.glob("Cube.*.vtu")), f"no deformation output written to {vtu}"
 
 
-@pytest.mark.parametrize("permute", [False, True])
-def test_em01_refuses_non_tetrahedral_ep_mesh(em01_root, cm_env, binary, permute):
+def test_em01_refuses_non_tetrahedral_ep_mesh(em01_root, cm_env, binary):
     """The coupling reads every cell of the acCELLerate mesh as a linear tetrahedron. A mesh whose
     first cell is a quad on the same four points would be misread without a word, so the plugin
-    has to stop at init, on every rank, before the optional permutation rewrites the cells."""
+    has to stop at init, on every rank."""
     meshio = pytest.importorskip("meshio")
 
     mesh = meshio.read(em01_root / "geoFiles" / "cube_0.25mm.vtu")
@@ -134,15 +133,28 @@ def test_em01_refuses_non_tetrahedral_ep_mesh(em01_root, cm_env, binary, permute
     settings = em01_root / "settings"
     xml = (settings / "M_1mm.xml").read_text()
     for old, new in (("../geoFiles/cube_0.25mm.vtu", "../geoFiles/cube_quad.vtu"),
-                     ("../Results/", "../ResultsQuad/"),
-                     ("<Export>true</Export>", f"<Export>true</Export><Permute>{str(permute).lower()}</Permute>")):
+                     ("../Results/", "../ResultsQuad/")):
         assert old in xml, f"M_1mm.xml no longer contains {old!r}"
         xml = xml.replace(old, new)
-    name = f"M_quad_{permute}.xml"
-    (settings / name).write_text(xml)
-    proc = run_binary(binary("CardioMechanics"), ["-settings", name], cwd=settings, env=cm_env, np=2,
+    (settings / "M_quad.xml").write_text(xml)
+    proc = run_binary(binary("CardioMechanics"), ["-settings", "M_quad.xml"], cwd=settings, env=cm_env, np=2,
                       timeout=120, check=False)
     assert_refused(proc, "cube_quad.vtu", "vtkQuad")
+
+
+def test_em01_refuses_unreadable_ep_mesh(em01_root, cm_env, binary):
+    """VTK only logs a file it cannot open and returns an empty mesh, which later checks would
+    report as something unrelated. The plugin has to stop at init, on every rank, naming the file."""
+    settings = em01_root / "settings"
+    xml = (settings / "M_1mm.xml").read_text()
+    for old, new in (("../geoFiles/cube_0.25mm.vtu", "../geoFiles/missing.vtu"),
+                     ("../Results/", "../ResultsMissing/")):
+        assert old in xml, f"M_1mm.xml no longer contains {old!r}"
+        xml = xml.replace(old, new)
+    (settings / "M_missing.xml").write_text(xml)
+    proc = run_binary(binary("CardioMechanics"), ["-settings", "M_missing.xml"], cwd=settings, env=cm_env, np=2,
+                      timeout=120, check=False)
+    assert_refused(proc, "missing.vtu", "could not be read")
 
 
 def test_em01_refuses_quadrature_points_outside_ep_mesh(em01_root, cm_env, binary):
