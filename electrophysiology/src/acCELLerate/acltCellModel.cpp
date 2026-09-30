@@ -173,15 +173,15 @@ void CellModelStruct::setForceModel(vbForceModel<double> **pfm, int mat) {
 
 void EMCoupling::Delete() {
     if (CouplingMethod) {
-        delete CouplingMethod;
+        delete[] CouplingMethod;
         CouplingMethod = NULL;
     }
     if (GetResultParameters) {
-        delete GetResultParameters;
+        delete[] GetResultParameters;
         GetResultParameters = NULL;
     }
     if (GetResultValues) {
-        delete GetResultValues;
+        delete[] GetResultValues;
         GetResultValues = NULL;
     }
 }

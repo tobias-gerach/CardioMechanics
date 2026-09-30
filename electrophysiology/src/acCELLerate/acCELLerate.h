@@ -66,6 +66,8 @@ class acCELLerate : public ACLTConditions, public ACLTSensors, public CellModelS
   vbElphyModel<double> **pElphyFibro;  //!< Pointer on the fibroblast electrophysiological equations
   vbForceModel<double> **pForceIntra;  //!< Pointer on the intracellular force equations
   vbForceModel<double> **pForceFibro;  //!< Pointer on the fibroblast force equations
+  PetscInt numIntraModels;             //!< Length of pElphyIntra and pForceIntra
+  PetscInt numFibroModels;             //!< Length of pElphyFibro and pForceFibro
 
   EMCoupling EMIntra;                 //!< Electromechanical coupling for intracellular space
   EMCoupling EMFibro;                 //!< Electromechanical coupling for fibroblast space
