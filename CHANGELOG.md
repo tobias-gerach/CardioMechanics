@@ -34,7 +34,6 @@
 - The manual's `ReferenceRecovery` section documents the plugin's convergence tolerance under the key the plugin actually reads, `Tolerance`, instead of `Precision`, which is read nowhere, and states what the tolerance is measured on. It also states how the cavity surfaces are declared. Its own error message suggests the `CAVITY` type, which the mesh loader rejects for the 6-node faces of a quadratic mesh; the plugin selects cavity elements by element type and needs no such declaration.
 - The `Static`, `NewmarkBeta` and `GeneralizedAlpha` solvers read PETSc options under the prefix `mech_`, so options for them cannot change the acCELLerate solve of a coupled run. Unprefixed `-ksp_*`, `-pc_*` and `-snes_*` options no longer affect these solvers; use `-mech_ksp_*` and so on. `Solver.LinearSolver.Options` accepts only prefixed options.
 - Land17 raises an error naming the element type for element types it does not know, instead of returning zero calcium.
-- The manual marks the `Mesh.Transform` tags as not implemented; they never had an effect.
 - The manual documents the optional surface-file argument of `ConvertT4toT10`.
 - Corrected the statement in the manual that two solver classes are available, which no longer held once `ActiveStressEstimator` was added.
 - `docs/BUILD.md` and the CI PETSc image now recommend and use OpenBLAS (`--download-openblas`) instead of reference BLAS. Results are unaffected; the inverse problem is roughly 7x faster, pure mechanics roughly 2x, and EP-dominated runs largely unchanged.
@@ -47,6 +46,7 @@
 - `Solver.LU`, `Solver.NewmarkBeta.Type` and `Solver.GeneralizedAlpha.Type`. They raise an error naming `Solver.LinearSolver.Preset`; `Type` `superlu` becomes the preset `direct-superlu`.
 - `Plugins.acCELLerate.TissuePriority`. It never had an effect: the plugin assembles the conductivity per element from the element's own material, and the material of each node, which selects its cell model, comes from the tissue vector written by `BidomainMatrixGenerator`, whose `-tissue` option sets the precedence. Settings files that still contain the key load unchanged.
 - `Plugins.acCELLerate.Permute`. The PCA sorting it enabled renumbered only the plugin's copy of the EP mesh, not the inputs acCELLerate reads in file order, so the EP matrix assembly failed. Settings files that still contain the key load unchanged. The mechanics-side `Mesh.Sorting` is unaffected.
+- `Mesh.Transform`. It never had an effect: no code read it, and T4 meshes are converted with `ConvertT4toT10`. Settings files that still contain the key load unchanged.
 
 ### Fixed
 - The isochoric/volumetric split of NeoHooke and Holzapfel had no effect: integer division made the exponents of `J^(-2/3)` and `I3^(-1/3)` zero. The split now applies, which changes results of both laws wherever `J != 1`.
