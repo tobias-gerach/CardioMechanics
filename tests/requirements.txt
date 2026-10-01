@@ -1,5 +1,6 @@
 pytest>=7.0
 numpy
 meshio
+vtk
 
 # petsc4py intentionally not required: the field/matrix tests read PETSc binary format directly.
