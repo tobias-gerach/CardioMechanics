@@ -130,3 +130,23 @@ def test_scale_multiplies_node_coordinates(tmp_path, monkeypatch):
     prefix = _convert(tmp_path, monkeypatch, False, PLAIN_FULL, "-scale", "2")
     assert prefix.with_suffix(".node").read_text() == (
         "4 3 1 0\n1 0.0 0.0 0.0 0\n2 2.0 0.0 0.0 0\n3 0.0 2.0 0.0 0\n4 0.0 0.0 2.0 0\n")
+
+
+def _convert_with_surface(tmp_path, monkeypatch, surface_index):
+    """Convert a tetrahedron plus one triangle of material 30, optionally with a SurfaceIndex array."""
+    cell_data = {"Material": [np.array([7]), np.array([30])]}
+    if surface_index is not None:
+        cell_data["SurfaceIndex"] = [np.array([0]), np.array([surface_index])]
+    vtu = tmp_path / "mesh.vtu"
+    meshio.write(vtu, meshio.Mesh(UNIT_TET, [("tetra", [[0, 1, 2, 3]]), ("triangle", [[0, 2, 1]])],
+                                  cell_data=cell_data))
+    prefix = tmp_path / "out"
+    monkeypatch.setattr("sys.argv", ["VTK2tetgen.py", str(vtu), "-outfile", str(prefix)])
+    vt.main()
+    return prefix
+
+
+@pytest.mark.parametrize("surface_index, columns", [(None, "30 30"), (3, "30 3")], ids=["material", "surface_index"])
+def test_surface_index_column_from_surface_index_array_or_material(tmp_path, monkeypatch, surface_index, columns):
+    prefix = _convert_with_surface(tmp_path, monkeypatch, surface_index)
+    assert prefix.with_suffix(".sur").read_text() == f"1 3 2\n1 1 3 2 {columns}\n"

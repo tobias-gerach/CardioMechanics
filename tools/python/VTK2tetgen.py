@@ -9,7 +9,8 @@ Features:
 - .ele is T4 or T10 depending on the vtk Tetrahedron type
 - .bases uses vtk "Fiber" field, or one basis per quadrature point of a T10 mesh from
   "Fiber_q", "Sheet_q", "Sheetnormal_q" (q = 0 centroid, 1..4 the 4-point rule's points in vertex order)
-- .sur has "0 0" as vtk/surface numbers
+- .sur takes the material of each triangle from "Material" and its surface index from "SurfaceIndex",
+  or from "Material" without that array
 
 Tobias Gerach, Tue Dec 11 2018
 Merged the two versions of VTK2tetgen.py. Specifically, I moved the fixMaterial option from Robin Andlauer's version
@@ -222,6 +223,8 @@ def main():
         basesLines.append(f"{cid} {NumQP}")
 
     print("Surfaces:", data.GetNumberOfCells())
+    # The surface index keys the surface types and plugins; without its own array it repeats the material.
+    surfaceIndexArray = data.GetCellData().GetArray("SurfaceIndex")
     # same code as for elements, except number of nodes per cell
     surLines = []
     scid = 0
@@ -236,7 +239,8 @@ def main():
                 for pid in range(pids.GetNumberOfIds()):
                     parts.append(str(pids.GetId(pid) + 1))
                 mat = int(data.GetCellData().GetArray("Material").GetTuple1(vtkscid)) if hasMaterial else 0
-                parts.append(f"{mat} {mat}")
+                surface = int(surfaceIndexArray.GetTuple1(vtkscid)) if surfaceIndexArray else mat
+                parts.append(f"{mat} {surface}")
             else:
                 for pid in range(pids.GetNumberOfIds()):
                     parts.append(str(pids.GetId(pid)))
