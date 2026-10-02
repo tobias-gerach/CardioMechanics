@@ -3,5 +3,6 @@ numpy
 meshio
 gmsh
 scipy
+vtk
 
 # petsc4py intentionally not required: the field/matrix tests read PETSc binary format directly.

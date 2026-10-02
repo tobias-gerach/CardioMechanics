@@ -7,7 +7,8 @@ Features:
 - .node takes fixation from vtk "Fixation" field
 - .ele evaluates vtk "Material" field
 - .ele is T4 or T10 depending on the vtk Tetrahedron type
-- .bases uses vtk "Fiber" field
+- .bases uses vtk "Fiber" field, or one basis per quadrature point of a T10 mesh from
+  "Fiber_q", "Sheet_q", "Sheetnormal_q" (q = 0 centroid, 1..4 the 4-point rule's points in vertex order)
 - .sur has "0 0" as vtk/surface numbers
 
 Tobias Gerach, Tue Dec 11 2018
@@ -24,11 +25,16 @@ The .bases file will now be written in T10 format if VTU is a T10 mesh.
 
 import argparse
 import os
+import re
 
 import numpy as np
 
 # CardioMechanics ids start from 1, vtk ids start from 0.
 START_FROM_ONE = True
+
+# Names of the per-quadrature-point basis arrays, in the order the T10 element stores its bases.
+BASIS_COMPONENTS = ("Fiber", "Sheet", "Sheetnormal")
+PER_POINT_ARRAYS = [[f"{c}_{q}" for c in BASIS_COMPONENTS] for q in range(5)]
 
 
 def nodeIsFixed(data, array, point, fixMaterial):
@@ -155,8 +161,11 @@ def main():
     sheetArrayName = ""
     sheetnormalArrayName = ""
     hasFibers = hasSheets = hasSheetNormals = False
+    perPointNames = set()
     for i in range(data.GetCellData().GetNumberOfArrays()):
         name = data.GetCellData().GetArray(i).GetName()
+        if re.fullmatch(rf"({'|'.join(BASIS_COMPONENTS)})_\d+", name):
+            perPointNames.add(name)
         if name in ("Fiber", "DifferenceVector"):
             fibersArrayName, hasFibers = name, True
         if name == "Sheet":
@@ -164,11 +173,22 @@ def main():
         if name == "Sheetnormal":
             sheetnormalArrayName, hasSheetNormals = name, True
 
+    hasPerPointBases = bool(perPointNames)
+    if hasPerPointBases:
+        expected = {name for names in PER_POINT_ARRAYS for name in names}
+        if perPointNames != expected:
+            raise ValueError(f"Per-quadrature-point bases need exactly the arrays {sorted(expected)}; "
+                             f"missing {sorted(expected - perPointNames)}, unexpected {sorted(perPointNames - expected)}")
+        hasFibers = True
+
     basesLines = []
     NumQP = 1
     if hasFibers:
         print("Bases:", data.GetNumberOfCells())
-        print("  Fiber information found in array", "\"" + fibersArrayName + "\"")
+        if hasPerPointBases:
+            print("  Per-quadrature-point bases found")
+        else:
+            print("  Fiber information found in array", "\"" + fibersArrayName + "\"")
         cid = 0
         for vtkcid in range(data.GetNumberOfCells()):
             cell = data.GetCell(vtkcid)
@@ -177,16 +197,26 @@ def main():
                 hasT10 = True
             if npts in (4, 10):
                 idx = cid + 1 if START_FROM_ONE else cid
-                f = data.GetCellData().GetArray(fibersArrayName)
-                if hasSheets and hasSheetNormals:
-                    s = data.GetCellData().GetArray(sheetArrayName)
-                    sn = data.GetCellData().GetArray(sheetnormalArrayName)
-                    m = NormFiberSheetNormal(f.GetTuple3(vtkcid), s.GetTuple3(vtkcid), sn.GetTuple3(vtkcid))
+                if hasPerPointBases:
+                    if npts != 10:
+                        raise ValueError("Per-quadrature-point bases require a T10 mesh; "
+                                         f"cell {vtkcid} has {npts} nodes")
+                    cellData = data.GetCellData()
+                    m = [x for names in PER_POINT_ARRAYS
+                         for x in NormFiberSheetNormal(*(cellData.GetArray(n).GetTuple3(vtkcid) for n in names))]
                 else:
-                    m = createONS(f.GetTuple3(vtkcid))
+                    f = data.GetCellData().GetArray(fibersArrayName)
+                    if hasSheets and hasSheetNormals:
+                        s = data.GetCellData().GetArray(sheetArrayName)
+                        sn = data.GetCellData().GetArray(sheetnormalArrayName)
+                        m = NormFiberSheetNormal(f.GetTuple3(vtkcid), s.GetTuple3(vtkcid), sn.GetTuple3(vtkcid))
+                    else:
+                        m = createONS(f.GetTuple3(vtkcid))
                 NumQP = 5 if hasT10 else 1
+                if not hasPerPointBases:
+                    m = m * NumQP
                 parts = [str(idx)]
-                parts.extend(str(m[k]) for _ in range(NumQP) for k in range(9))
+                parts.extend(str(x) for x in m)
                 basesLines.append(" ".join(parts))
                 cid += 1
         basesLines.append(f"{cid} {NumQP}")
