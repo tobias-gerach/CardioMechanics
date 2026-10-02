@@ -49,6 +49,7 @@
 - `Mesh.Transform`. It never had an effect: no code read it, and T4 meshes are converted with `ConvertT4toT10`. Settings files that still contain the key load unchanged.
 
 ### Fixed
+- `ConvertT4toT10` wrote node coordinates with six significant digits, which moved the corner nodes of the T10 mesh by up to half a micrometre at 100 mm off those of its T4 mesh. It now writes them so that they read back exactly.
 - The isochoric/volumetric split of NeoHooke and Holzapfel had no effect: integer division made the exponents of `J^(-2/3)` and `I3^(-1/3)` zero. The split now applies, which changes results of both laws wherever `J != 1`.
 - Guccione computed its exponential term from the full instead of the isochoric right Cauchy-Green tensor, so deviatoric strain leaked into the pressure. It now performs the isochoric/volumetric split. Results of Guccione models change: the tip of the Land 2015 Problem 1 benchmark moves from 4.160 mm to 4.215 mm at its `K=1e5`.
 - Usyk built its exponential term on the full instead of the isochoric right Cauchy-Green tensor, the same defect as Guccione, so deviatoric strain acted as a second incompressibility penalty on top of its `k/2 (ln J)^2` term. It now performs the isochoric/volumetric split, which also makes it available under the mixed elements. Results of Usyk models change, including all of `examples/JPhys`; the size of the change is not measured here, as no regression fixture covers the law.

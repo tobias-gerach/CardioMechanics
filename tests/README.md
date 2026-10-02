@@ -61,6 +61,8 @@ Coverage:
   acCELLerate plugin + Land17) at `mpirun -np 4`; compares final deformation and
   the coupled P8 sensor traces, and runs the same case on T4MINI under
   `GeneralizedAlpha`. Marked `mpi slow`.
+- **ConvertT4toT10**: one tetrahedron converted to T10; the corner nodes read
+  back exactly and every midside node sits exactly at its edge's midpoint.
 
 The three EM01 tests share one staged tree and a single matrix-assembly step
 (the `em01_root` fixture). The EM01 electromechanics runs are shortened to

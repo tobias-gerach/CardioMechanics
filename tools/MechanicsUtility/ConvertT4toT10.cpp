@@ -17,6 +17,7 @@
 #include<map>
 #include<stdexcept>
 #include<cmath>
+#include<limits>
 
 
 
@@ -509,6 +510,8 @@ int main(int argc, char* argv[])
 
         // output nodes
 
+		// Enough digits to read back the same doubles, so the corner nodes stay those of the T4 mesh.
+		nodesOutput.precision(std::numeric_limits<double>::max_digits10);
 		nodesOutput << nodes.size() << " 3 " << nodes.at(0).attributes.size() << " 0 " << std::endl;
 		for(int i=0; i < nodes.size(); i++)
 		{
