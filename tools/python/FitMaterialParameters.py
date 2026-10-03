@@ -130,21 +130,25 @@ def set_output(root, key, value):
     element.text = str(value)
 
 
-def material_law(root):
-    """The constitutive law the settings file declares, and the key prefix of every material block
-    that carries it, in document order. Raises ValueError when the blocks disagree on the law: the
-    fit scales one law's parameters, and which of several it should scale is not the tool's
-    choice."""
+def material_law(root, law=None):
+    """The constitutive law to fit, and the key prefix of every material block that carries it, in
+    document order. Without `law` the blocks must agree on one; raises ValueError when they do not,
+    because the fit scales one law's parameters, and which of several it should scale is not the
+    tool's choice. A named `law` is fitted among other laws, whose blocks stay as they are; raises
+    ValueError when no block carries it."""
     materials = root.find("Materials")
     laws = {material.tag: material.find("Type").text
             for material in ([] if materials is None else materials)
             if isinstance(material.tag, str) and material.find("Type") is not None}
     if not laws:
         raise ValueError("the settings file declares no material with a Type")
-    if len(set(laws.values())) > 1:
-        raise ValueError(f"the materials declare more than one law: {laws}")
-    law = next(iter(laws.values()))
-    return law, [f"Materials.{material}.{law}" for material in laws]
+    if law is None:
+        if len(set(laws.values())) > 1:
+            raise ValueError(f"the materials declare more than one law: {laws}; name the one to fit")
+        law = next(iter(laws.values()))
+    elif law not in laws.values():
+        raise ValueError(f"no material declares {law}: {laws}")
+    return law, [f"Materials.{material}.{law}" for material, declared in laws.items() if declared == law]
 
 
 def law_parameters(law, stiffness=None, exponents=None):
@@ -595,6 +599,10 @@ def parse_arguments(argv=None):
                              "(default: %(default)s).")
     parser.add_argument("--binary", default="CardioMechanics",
                         help="The CardioMechanics binary (default: %(default)s).")
+    parser.add_argument("--law",
+                        help="The law to fit when the materials declare several, such as Usyk for "
+                             "the myocardium beside an aortic wall of another law, whose parameters "
+                             "stay as they are.")
     parser.add_argument("--stiffness", nargs="+",
                         help="The names of the law's stiffness parameters, for a law the table does "
                              "not list.")
@@ -631,7 +639,7 @@ def main(argv=None):
     arguments = parse_arguments(argv)
     settings = Path(arguments.settings).resolve()
     root = read_settings(settings)
-    law, blocks = material_law(root)
+    law, blocks = material_law(root, arguments.law)
     stiffness, exponents = law_parameters(law, arguments.stiffness, arguments.exponents)
     nodes, surfaces, unit = mesh_files(root, settings)
     measured = arguments.volume

@@ -151,6 +151,20 @@ def test_materials_of_different_laws_raise(tmp_path):
         fmp.material_law(fmp.read_settings(tmp_path / "mixed.xml"))
 
 
+def test_the_named_law_is_fitted_among_several(tmp_path):
+    """A model can hold tissue the fit does not describe, such as an aortic wall of another law."""
+    mixed = SETTINGS.replace("</Materials>", "<Mat_4><Type>NeoHooke</Type></Mat_4></Materials>")
+    (tmp_path / "mixed.xml").write_text(mixed)
+    law, prefixes = fmp.material_law(fmp.read_settings(tmp_path / "mixed.xml"), "Usyk")
+    assert law == "Usyk"
+    assert prefixes == ["Materials.Mat_30.Usyk"]
+
+
+def test_a_named_law_no_material_declares_raises(settings_file):
+    with pytest.raises(ValueError, match="Guccione"):
+        fmp.material_law(fmp.read_settings(settings_file), "Guccione")
+
+
 @pytest.mark.parametrize("law,stiffness,exponents", [
     ("Usyk", ("a",), ("bff", "bss", "bnn", "bfs", "bfn", "bns")),
     ("Guccione", ("C",), ("bf", "bt", "bfs")),
@@ -634,6 +648,11 @@ def test_the_parameter_names_of_an_unlisted_law_can_be_named_on_the_command_line
                                      "--stiffness", "mu", "--exponents", "b1", "b2"])
     assert fmp.law_parameters("NeoHooke", arguments.stiffness, arguments.exponents) == \
         (("mu",), ("b1", "b2"))
+
+
+def test_the_law_to_fit_can_be_named_on_the_command_line():
+    assert fmp.parse_arguments(["recovery.xml", "--pressure", "8", "--law", "Usyk"]).law == "Usyk"
+    assert fmp.parse_arguments(["recovery.xml", "--pressure", "8"]).law is None
 
 
 def test_a_recovery_that_did_not_reach_the_target_is_not_fitted():
