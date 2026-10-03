@@ -39,6 +39,7 @@ public:
     void ApplyToNodalForces() override;
     void ApplyToNodalForcesJacobian() override;
     void StepBack() override;
+    void ReferenceChanged() override;
     void Export(TFloat time) override;
     void WriteToFile(TFloat time) override;
     void Prepare() override;

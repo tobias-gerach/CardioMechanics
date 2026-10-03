@@ -25,11 +25,12 @@ def node(p):
     return 1 + i + SHAPE[0] * (j + SHAPE[1] * k)
 
 
-def write_mesh(tetgen_dir, scale=(1, 1, 1), linear=False, quadratic_end=False, closed=False):
+def write_mesh(tetgen_dir, scale=(1, 1, 1), linear=False, quadratic_end=False, closed=False, end=False):
     """Write the cantilever as tetgen .node/.ele/.sur files, T10 elements with T6 top faces, or T4
     elements with T3 top faces if linear, and T3 end faces, T6 if quadratic_end, with the block
     stretched by scale along each axis. If closed, the loaded surface is the whole boundary instead and
-    there is no end surface, for plugins that refuse a cavity that does not enclose a volume. Nodes
+    there is no end surface, for plugins that refuse a cavity that does not enclose a volume; end adds
+    the free end as the end surface on top of it. Nodes
     are numbered in the order of node(), which they match on the T10 mesh."""
     def mid(a, b):
         return tuple((x + y) // 2 for x, y in zip(a, b))
@@ -74,6 +75,9 @@ def write_mesh(tetgen_dir, scale=(1, 1, 1), linear=False, quadratic_end=False, c
         for axis in range(3):
             for at in (0, 2 * CELLS[axis]):
                 add_face(axis, at, SURFACE, quadratic=not linear)
+        if end:
+            # A surface file has one node count for all its faces, so the end takes the boundary's.
+            add_face(0, 2 * CELLS[0], END_SURFACE, quadratic=not linear)
     else:
         add_face(2, 2 * CELLS[2], SURFACE, quadratic=not linear)
         # Nodes are numbered with z slowest, so the free end spans every rank's node block, whereas

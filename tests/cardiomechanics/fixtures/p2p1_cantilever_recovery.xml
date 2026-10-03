@@ -1,0 +1,109 @@
+<settings>P2P1 cantilever recovered from its mesh under a pressure on its whole boundary, held at its free end by a Robin boundary</settings>
+
+<General>
+    <LogFile>./Results/cantilever.log</LogFile>
+</General>
+
+<Mesh>
+    <Type>T10P1</Type>
+    <Format>Tetgen</Format>
+    <Sorting>None</Sorting>
+
+    <Tetgen>
+        <Unit>1</Unit>
+        <Nodes>./tetgen/cantilever.node</Nodes>
+        <Elements>./tetgen/cantilever.ele</Elements>
+        <Surfaces>./tetgen/cantilever.sur</Surfaces>
+    </Tetgen>
+
+    <Surfaces>
+        <!-- The whole boundary, which the cavity of the recovery has to be. -->
+        <Surface_130><Type>T6</Type></Surface_130>
+        <!-- The free end, which is part of 130 as well. -->
+        <Surface_131><Type>CONTACT_ROBIN</Type></Surface_131>
+    </Surfaces>
+</Mesh>
+
+<Materials>
+    <Mat_30>
+        <Type>NeoHooke</Type>
+        <Density>1</Density>
+        <NeoHooke>
+            <a>1</a>
+            <k>100</k>
+        </NeoHooke>
+        <TensionMax>0</TensionMax>
+    </Mat_30>
+</Materials>
+
+<Export>
+    <Format>VTK</Format>
+    <Prefix>./Results/cantilever</Prefix>
+    <TimeStep>0.01</TimeStep>
+</Export>
+
+<Solver>
+    <NonZeros>2000</NonZeros>
+    <DomainDecomposition>false</DomainDecomposition>
+    <Precision>1e-10</Precision>
+    <!-- Coordinates are O(1) here, so the default finite-difference step of 1e-12 would sit
+         at round-off; 1e-7 is the square root of machine precision for unit-sized values. -->
+    <Epsilon>1e-7</Epsilon>
+
+    <Type>Static</Type>
+
+    <Formulation>TotalLagrangian</Formulation>
+
+    <StartTime>0</StartTime>
+    <!-- Room for the inflations the cycle cap allows; the recovery ends the run once it converges. -->
+    <StopTime>2</StopTime>
+    <TimeStep>0.01</TimeStep>
+
+    <Plugins>
+        <ReferenceRecovery>true</ReferenceRecovery>
+        <RobinBoundaryGeneral>true</RobinBoundaryGeneral>
+    </Plugins>
+</Solver>
+
+<Plugins>
+    <!-- A pressure on the whole boundary of the solid block expands it by about p / k in volume, so
+         the free end moves along the block by about 1.3e-2. -->
+    <ReferenceRecovery>
+        <ExportDir>./Results</ExportDir>
+        <Surfaces>130</Surfaces>
+        <Pressures>1</Pressures>
+        <CycleMax>15</CycleMax>
+        <Augmentation>true</Augmentation>
+        <!-- The node files are written in thousandths of the mesh unit at six significant digits,
+             so to 1e-5 here. -->
+        <Tolerance>1e-4</Tolerance>
+        <InflationDuration>0.1</InflationDuration>
+    </ReferenceRecovery>
+
+    <!-- The same load for a forward run from the recovered state, which enables this plugin instead of
+         the recovery. -->
+    <ApplyPressureFromFunction>
+        <Groups>
+            <All>
+                <Surfaces>130</Surfaces>
+                <Intervals>
+                    <Interval_1>
+                        <Type>Linear</Type>
+                        <Invert>false</Invert>
+                        <StartTime>0.0</StartTime>
+                        <StopTime>0.1</StopTime>
+                        <Offset>0</Offset>
+                        <Amplitude>1</Amplitude>
+                    </Interval_1>
+                </Intervals>
+            </All>
+        </Groups>
+    </ApplyPressureFromFunction>
+
+    <!-- Stiff enough to carry a good part of the load on the free end. -->
+    <RobinBoundaryGeneral>
+        <SurfaceIndex>131</SurfaceIndex>
+        <Alpha>5</Alpha>
+        <Beta>0</Beta>
+    </RobinBoundaryGeneral>
+</Plugins>

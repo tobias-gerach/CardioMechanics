@@ -56,6 +56,8 @@ public:
     virtual void Prepare(){status_ = CBStatus::DACCORD;}
     virtual double GetPreparationProgress(){return -1.0;}
     virtual void Reset(){}
+    /// The solver has made the current configuration the stress-free reference of the whole model.
+    virtual void ReferenceChanged(){}
     virtual void SetAdapter(CBElementAdapter* adapter){adapter_ = adapter; }
     virtual CBStatus GetStatus(){return status_;}
     void SetParameters(ParameterMap* parameters){parameters_ = parameters; }
