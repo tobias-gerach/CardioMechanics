@@ -80,6 +80,18 @@ void CBRobinBoundary::StepBack() {
     stepBack_ = true;
 }  // CBRobinBoundary::StepBack()
 
+/// The springs are relaxed in the reference configuration, and a relocation of the mesh into a new
+/// reference is no motion the dashpot may resist.
+void CBRobinBoundary::ReferenceChanged() {
+    for (int i = 0; i < contactSurfaceElements_.size(); i++) {
+        auto element = contactSurfaceElements_.at(i);
+        referenceNormals_.at(i) = element->GetNormalVector()*normalVectorSign_;
+        initialPos_.at(i)       = element->GetCentroid();
+        displacement_.at(i)     = Vector3<TFloat>(0, 0, 0);
+        prevDisplacement_.at(i) = Vector3<TFloat>(0, 0, 0);
+    }
+}  // CBRobinBoundary::ReferenceChanged
+
 void CBRobinBoundary::Apply(TFloat time) {
     /// check if Plugin is actually started
     if (!hasStarted_) {

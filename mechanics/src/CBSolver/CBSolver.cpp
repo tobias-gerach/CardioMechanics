@@ -2349,6 +2349,8 @@ void CBSolver::PrepareElements(std::vector<CBElementSolid *> elements) {
 
 void CBSolver::RelaxElementsAndBases() {
     RelaxElementsAndBases(solidElements_);
+    for (auto &it : plugins_)
+        it->ReferenceChanged();
 }
 
 /// reset elements to reflect deformation=I and fiber basis = current deformed fibers, in contrast to prepare elements, rotation matrix is resetted to the current state as well
