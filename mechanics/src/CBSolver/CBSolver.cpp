@@ -68,7 +68,7 @@ void CBSolver::InitFormulation() {
     auto formulationType = parameters_->Get<std::string>("Solver.Formulation", "TotalLagrangian");
     
     if (formulationType != "TotalLagrangian")
-        throw std::runtime_error("CBSolver::InitFormulation(): Type of formulation: " + formulationType + " is unkown.");
+        throw std::runtime_error("CBSolver::InitFormulation(): Type of formulation: " + formulationType + " is unknown.");
     
     formulation_ = new CBFormulationTotalLagrangian(this);
     isInitFormulationDone_ = true;
@@ -1430,7 +1430,7 @@ void CBSolver::InitLoadedState() {
     if (format == "Tetgen")
         modelLoader = new CBModelLoaderTetgen(parameters_); // deleted in deconstructor
     else
-        throw std::runtime_error("Mesh Format: " + format + " is unkown !");
+        throw std::runtime_error("Mesh Format: " + format + " is unknown !");
     LoadedModel_ = modelLoader->Load("MeshLoadedState");
     
     if (LoadedModel_->GetNodes().size() != model_->GetNodes().size())

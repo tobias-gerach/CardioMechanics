@@ -38,7 +38,7 @@ CBDataFromFunction::CBDataFromFunction(ParameterMap* parameters, std::string par
     else if(type == "SinusDriver")
         getImpl_ = new SinusDriver(parameters, parameterKey);
     else
-        throw std::runtime_error("CBAnalyticFunction: Type " + type + " is unkown");
+        throw std::runtime_error("CBAnalyticFunction: Type " + type + " is unknown");
 }
 
 

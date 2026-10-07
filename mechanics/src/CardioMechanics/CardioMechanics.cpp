@@ -143,7 +143,7 @@ void CardioMechanics::InitModelExporter()
             modelExporter_ = new CBModelExporterVTK(model_, parameters_);
         }
         else
-            throw std::runtime_error("CardioMechanics::InitModelExporter(): Output format " + modelExporterFormat + " unkown !!!");
+            throw std::runtime_error("CardioMechanics::InitModelExporter(): Output format " + modelExporterFormat + " unknown !!!");
     }
 }
 
@@ -155,7 +155,7 @@ void CardioMechanics::InitModel()
     if(format == "Tetgen")
         modelLoader = new CBModelLoaderTetgen(parameters_);
     else
-        throw std::runtime_error("Mesh Format: " + format + " is unkown !");
+        throw std::runtime_error("Mesh Format: " + format + " is unknown !");
     model_ = modelLoader->Load();
     
     std::string sorting = parameters_->Get<std::string>("Mesh.Sorting", "None");
@@ -167,7 +167,7 @@ void CardioMechanics::InitModel()
         if(sorting == "PCA")
             model_->ApplySpatialSortPCA();
         else
-            throw std::runtime_error("Sorting Method: " + sorting + " is unkown !");
+            throw std::runtime_error("Sorting Method: " + sorting + " is unknown !");
     }
     delete modelLoader;
 }
@@ -190,7 +190,7 @@ void CardioMechanics::InitSolver()
         solver_ = new CBSolverActiveStressEstimator();
     
     if(!solver_)
-        throw std::runtime_error("CardioMechanics::InitSolver(): Solver type: " + solverType + " is unkown ");
+        throw std::runtime_error("CardioMechanics::InitSolver(): Solver type: " + solverType + " is unknown ");
 }
 
 void CardioMechanics::DomainDecomposition()
