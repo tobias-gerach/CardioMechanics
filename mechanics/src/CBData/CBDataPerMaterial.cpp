@@ -30,7 +30,7 @@ CBDataPerMaterial::CBDataPerMaterial(ParameterMap* parameters)
             else if(type == "FromFile")
                 driver_ = std::make_shared<CBDataFromFile>(parameters, driverKey + ".FromFile");
             else
-                throw std::runtime_error("CBDataPerMaterial::CBDataPerMaterial: ActiveStress Type " + type + " is unkown.");
+                throw std::runtime_error("CBDataPerMaterial::CBDataPerMaterial: ActiveStress Type " + type + " is unknown.");
             
             std::string materialsString = parameters->Get<std::string>(driverKey + ".Materials", "All");
             if(materialsString == "All" || materialsString == "all")
@@ -57,7 +57,7 @@ CBDataPerMaterial::CBDataPerMaterial(ParameterMap* parameters)
         else if(type == "FromFile")
             driver_ = std::make_shared<CBDataFromFile>(parameters, "ActiveStress.FromFile");
         else
-            throw std::runtime_error("CBDataPerMaterial::CBDataPerMaterial: ActiveStress Type " + type + " is unkown.");
+            throw std::runtime_error("CBDataPerMaterial::CBDataPerMaterial: ActiveStress Type " + type + " is unknown.");
     }
 }
 

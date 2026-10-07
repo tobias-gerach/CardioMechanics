@@ -241,7 +241,7 @@ int RunCardioMechanics(int argc, char* argv[])
             if(DCCtrl::IsProcessZero())
             {
                 ShowImageYouAreStupid();
-                cerr << "\n\tRuntime error with unkown exception type: " << std::endl;
+                cerr << "\n\tRuntime error with unknown exception type: " << std::endl;
             }
             return 1;
         }

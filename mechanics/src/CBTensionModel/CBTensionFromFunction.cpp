@@ -52,7 +52,7 @@ CBTensionFromFunction::CBTensionFromFunction(ParameterMap* parameters, CBElement
     else if(type == "SinusDriver")
         getImpl_ = new SinusDriver(parameters, key+".FromFunction");
     else
-        throw std::runtime_error("CBTensionFromFunction: Type " + type + " is unkown");
+        throw std::runtime_error("CBTensionFromFunction: Type " + type + " is unknown");
 }
 
 
