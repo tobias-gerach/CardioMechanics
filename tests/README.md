@@ -24,8 +24,8 @@ Coverage:
   Rayleigh damping only, large enough to overdamp every mode, so the cavity
   volume has to relax with time constant `Beta`; checks that the
   `GeneralizedAlpha` Jacobian fits its preallocation under consistent and lumped
-  mass; and, serially and not slow, that a missing or out-of-range `RhoInf` is
-  refused.
+  mass; and, serially and not slow, that a missing or out-of-range `RhoInf` and
+  a damping `Type` other than `Rayleigh` are refused.
 - **CardioMechanics free vibration** — a cantilever ringing freely after a
   pressure pulse, T10 under `NewmarkBeta` and T10 and P2P1 under
   `GeneralizedAlpha` at five `RhoInf`: the period and logarithmic decrement of

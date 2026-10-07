@@ -306,7 +306,7 @@ void CBSolverGeneralizedAlpha::InitDampingMatrix() {
 }  // CBSolverGeneralizedAlpha::InitDampingMatrix
 
 void CBSolverGeneralizedAlpha::InitDampingParameter() {
-    std::string dampingType = Base::parameters_->Get<std::string>("Material.Global.Damping.Type", "Rayleigh");
+    std::string dampingType = Base::parameters_->Get<std::string>("Materials.Global.Damping.Type", "Rayleigh");
     
     if (dampingType == "Rayleigh") {
         globalRayleighAlpha_ = Base::parameters_->Get<double>("Materials.Global.Damping.Rayleigh.Alpha", 0);

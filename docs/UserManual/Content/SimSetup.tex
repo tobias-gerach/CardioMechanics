@@ -202,6 +202,7 @@ The anisotropic terms of Holzapfel act on the full deformation, so they still do
 
 The tag \verb|Materials| contains all parameters for the definition of material properties.
 Using the tag \verb|Global.Damping|, the user should define the parameters for Rayleigh damping of the form $\vec C = \alpha \vec M + \beta \vec K$.
+The dynamic solvers read \verb|Materials.Global.Damping.Type|, \verb|Materials.Global.Damping.Rayleigh.Alpha| and \verb|Materials.Global.Damping.Rayleigh.Beta|; \verb|Type| defaults to \verb|Rayleigh|, the only supported type, and any other value is an error.
 Furthermore, the user can set default material parameters using the tag \verb|Mat_Default|.
 The parameters defined under this scope are valid for all materials unless specific material definitions are available.
 You can define different constitutive models and tension models for each individual material if you wish to do so.
@@ -219,6 +220,7 @@ In the following sections, the configurations for all available constitutive law
 <Materials>
     <Global>
         <Damping>
+            <Type>Rayleigh</Type>
             <Rayleigh>
                 <Alpha> 500 </Alpha>
                 <Beta> 0.005 </Beta>

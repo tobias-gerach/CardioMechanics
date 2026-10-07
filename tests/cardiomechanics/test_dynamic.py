@@ -139,6 +139,24 @@ def test_generalized_alpha_rejects_bad_rhoinf(binary, cm_env, tmp_path, settings
         f"error message did not mention {expected!r}\n{(proc.stdout + proc.stderr)[-2000:]}")
 
 
+@pytest.mark.parametrize("settings", [SETTINGS, GENALPHA_SETTINGS], ids=["newmark", "genalpha"])
+def test_unknown_damping_type_is_rejected(binary, cm_env, tmp_path, settings):
+    """A damping type other than Rayleigh, the only one implemented, has to abort initialisation.
+
+    Run serially for the same reason as the RhoInf check.
+    """
+    wd = _stage(tmp_path, settings)
+    staged = wd / settings.name
+    xml = staged.read_text()
+    assert "<Type>Rayleigh</Type>" in xml
+    staged.write_text(xml.replace("<Type>Rayleigh</Type>", "<Type>Viscous</Type>"))
+    proc = _run(binary, cm_env, wd, staged, timeout=300, check=False)
+    assert proc.returncode != 0, f"expected a non-zero exit\n{proc.stdout[-2000:]}"
+    expected = "Global damping type Viscous"
+    assert expected in proc.stdout + proc.stderr, (
+        f"error message did not mention {expected!r}\n{(proc.stdout + proc.stderr)[-2000:]}")
+
+
 @pytest.mark.mpi
 @pytest.mark.slow
 @pytest.mark.parametrize("settings", [CREEP_SETTINGS, GENALPHA_CREEP_SETTINGS],
