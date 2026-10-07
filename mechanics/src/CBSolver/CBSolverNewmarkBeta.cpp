@@ -261,7 +261,7 @@ void CBSolverNewmarkBeta::InitDampingParameter() {
         globalRayleighBeta_  = Base::parameters_->Get<double>("Materials.Global.Damping.Rayleigh.Beta", 0);
     } else {
         throw std::runtime_error(
-                                 "CBSolverNewmarkBeta::InitGlobalDampingParameter(): Global damping type " + dampingType + " is unkown !!");
+                                 "CBSolverNewmarkBeta::InitGlobalDampingParameter(): Global damping type " + dampingType + " is unknown !!");
     }
     
     isInitDampingParametersDone_ = true;
