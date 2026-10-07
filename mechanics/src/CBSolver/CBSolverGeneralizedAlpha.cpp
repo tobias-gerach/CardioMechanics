@@ -314,7 +314,7 @@ void CBSolverGeneralizedAlpha::InitDampingParameter() {
     } else {
         throw std::runtime_error(
                                  "CBSolverGeneralizedAlpha::InitDampingParameter(): Global damping type " + dampingType +
-                                 " is unkown !!");
+                                 " is unknown !!");
     }
     
     isInitDampingParametersDone_ = true;
