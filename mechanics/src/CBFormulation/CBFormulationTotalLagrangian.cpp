@@ -17,7 +17,7 @@
 
 CBStatus CBFormulationTotalLagrangian::CalcNodalForces()
 {
-    CBStatus rc=CBStatus::NOTHING_DONE;
+    CBStatus rc=CBStatus::SUCCESS;
     for(auto& it : Base::solver_->GetSolidElementVector())
     {
         rc = it->CalcNodalForces();
@@ -29,7 +29,7 @@ CBStatus CBFormulationTotalLagrangian::CalcNodalForces()
 
 CBStatus CBFormulationTotalLagrangian::CalcNodalForcesJacobian()
 {
-    CBStatus rc=CBStatus::NOTHING_DONE;
+    CBStatus rc=CBStatus::SUCCESS;
     for(auto& it : Base::solver_->GetSolidElementVector())
     {
         rc = it->CalcNodalForcesJacobian();
@@ -41,7 +41,7 @@ CBStatus CBFormulationTotalLagrangian::CalcNodalForcesJacobian()
 
 CBStatus CBFormulationTotalLagrangian::CalcNodalForcesActiveStressJacobian()
 {
-    CBStatus rc=CBStatus::NOTHING_DONE;
+    CBStatus rc=CBStatus::SUCCESS;
     for(auto& it : Base::solver_->GetSolidElementVector())
     {
         rc = it->CalcNodalForcesActiveStressJacobian();
