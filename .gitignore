@@ -31,8 +31,9 @@ CLAUDE.md
 docs/agents/
 docs/adr/
 docs/implementation/
-CONTEXT.md
+GLOSSARY.md
 .scratch/
+.out-of-scope/
 .cursor/
 .cursorrules
 .aider*
