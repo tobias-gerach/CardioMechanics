@@ -80,6 +80,8 @@ Coupling \verb+T10+ or \verb+T10P1+ elements to \nameref{plugin:acCELLerate} req
 During the initialization process, you can choose the method of domain decomposition.
 This can either be done by node index (\verb+None+) or by principal component analysis (\verb+PCA+) of initial node coordinates.
 A third variant is available using the \verb|Solver.DomainDecomposition| tag, which uses information from the stiffness matrix to minimize communication cost (becomes more relevant in HPC applications).
+Use \verb+PCA+ or \verb|Solver.DomainDecomposition| with \verb+T10+ and \verb+T10P1+ meshes whose nodes are numbered vertices first, as gmsh writes them.
+With \verb+None+, the last processes then hold only mid-edge nodes and own few or no elements, so element assembly runs on fewer processes than the job has.
 
 Surfaces and surface types for boundary condition applications have to be defined using the \verb|Surface| tag.
 Only linear (\verb|T3|) and quadratic (\verb|T6|) triangular elements are supported.
