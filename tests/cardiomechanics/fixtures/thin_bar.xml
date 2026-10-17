@@ -1,0 +1,89 @@
+<settings>Bar of the Land benchmark, one element thick</settings>
+
+<General>
+    <LogFile>./Results/bar.log</LogFile>
+</General>
+
+<Mesh>
+    <Type>T10</Type>
+    <Format>Tetgen</Format>
+    <!-- Nodes are numbered vertices first, so contiguous node ranges leave the last ranks only
+         mid-edge nodes and no element. -->
+    <Sorting>None</Sorting>
+
+    <!-- No bases file: every element then carries the identity basis, whose fibre direction (1, 0, 0)
+         runs along the bar. -->
+    <Tetgen>
+        <Unit>1e-3</Unit>
+        <Nodes>./thin_bar/bar.node</Nodes>
+        <Elements>./thin_bar/bar.ele</Elements>
+        <Surfaces>./thin_bar/bar.sur</Surfaces>
+    </Tetgen>
+
+    <Surfaces>
+        <Surface_2><Type>T6</Type></Surface_2>
+    </Surfaces>
+</Mesh>
+
+<Materials>
+    <Mat_30>
+        <Type>Guccione</Type>
+        <Density>1082</Density>
+        <Guccione>
+            <C>2000.0</C>
+            <bf>8</bf>
+            <bt>2</bt>
+            <bfs>4</bfs>
+            <K>2000000.0</K>
+        </Guccione>
+        <TensionMax>0</TensionMax>
+    </Mat_30>
+</Materials>
+
+<Export>
+    <Format>VTK</Format>
+    <Prefix>./Results/bar</Prefix>
+    <TimeStep>1</TimeStep>
+</Export>
+
+<Solver>
+    <DomainDecomposition>false</DomainDecomposition>
+    <Precision>1e-8</Precision>
+    <Type>Static</Type>
+    <Formulation>TotalLagrangian</Formulation>
+
+    <StartTime>0</StartTime>
+    <StopTime>1</StopTime>
+    <TimeStep>0.25</TimeStep>
+
+    <LinearSolver>
+        <Preset>direct</Preset>
+    </LinearSolver>
+
+    <Plugins>
+        <ApplyPressureFromFunction>true</ApplyPressureFromFunction>
+    </Plugins>
+</Solver>
+
+<Plugins>
+    <ApplyPressureFromFunction>
+        <ExportFile>./Results/Pressure.dat</ExportFile>
+        <Groups>
+            <Bottom>
+                <Surfaces>2</Surfaces>
+                <Intervals>
+                    <Interval_1>
+                        <Type>Linear</Type>
+                        <Invert>false</Invert>
+                        <StartTime>0</StartTime>
+                        <StopTime>1</StopTime>
+                        <Offset>0</Offset>
+                        <!-- A positive pressure acts along the face normal, which points out of the
+                             bar, so a pressure pushing on the face is negative. -->
+                        <Amplitude>-4.0</Amplitude>
+                    </Interval_1>
+                </Intervals>
+            </Bottom>
+        </Groups>
+    </ApplyPressureFromFunction>
+</Plugins>
