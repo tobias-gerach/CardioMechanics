@@ -174,3 +174,57 @@ protected:
     TFloat onsetTime_;
     TFloat driverMax_;
 };
+
+
+/// the cavity pressure of ODE (7) in Aróstica et al. 2025, doi:10.1016/j.cma.2024.117485, with p(0) = 0;
+/// it is in Pa, so an ApplyPressureFromFunction interval using it sets Amplitude to 1
+class BestelPressure : public CBAnalyticFunction {
+public:
+    virtual ~BestelPressure() {}
+    
+    /// Integrates from 0 on every call instead of stepping from the previous one, so that the
+    /// shifted and repeated times of the generalized-alpha solver get the same value in any order.
+    TFloat operator()(TFloat time) override {
+        if (time <= 0)
+            return 0.0;
+        const TInt steps = static_cast<TInt>(std::ceil(time / maxSubStep_));
+        const TFloat dt = time / steps;
+        TFloat p = 0.0;
+        for (TInt i = 0; i < steps; i++)
+            p = CBTensionModel::RungeKutta4Step(p, i * dt, dt, [this](double t, double p) { return dpdt(t, p); });
+        return p;
+    }
+    
+    BestelPressure(ParameterMap *parameters, std::string parameterKey) : CBAnalyticFunction(parameters, parameterKey) {
+        const std::string key = parameterKey + ".BestelPressure.";
+        alphaMin_ = parameters->Get<TFloat>(key + "AlphaMin");
+        alphaMax_ = parameters->Get<TFloat>(key + "AlphaMax");
+        alphaPre_ = parameters->Get<TFloat>(key + "AlphaPre");
+        alphaMid_ = parameters->Get<TFloat>(key + "AlphaMid");
+        sigmaPre_ = parameters->Get<TFloat>(key + "SigmaPre");
+        sigmaMid_ = parameters->Get<TFloat>(key + "SigmaMid");
+        tSysPre_  = parameters->Get<TFloat>(key + "TSysPre");
+        tDiasPre_ = parameters->Get<TFloat>(key + "TDiasPre");
+        gamma_    = parameters->Get<TFloat>(key + "Gamma");
+    }
+    
+protected:
+    TFloat dpdt(TFloat t, TFloat p) const {
+        const TFloat gPre = 0.5 * (1.0 - std::tanh((t - tDiasPre_) / gamma_));
+        const TFloat fPre = 0.5 * (1.0 + std::tanh((t - tSysPre_) / gamma_)) * gPre;
+        const TFloat b = alphaMax_ * fPre + alphaMin_ * (1.0 - fPre) + alphaPre_ * gPre + alphaMid_;
+        return -std::abs(b) * p + sigmaMid_ * std::max(b, 0.0) + sigmaPre_ * std::max(gPre, 0.0);
+    }
+    
+    /// resolves the switches of width gamma, 5 ms in the benchmark, to the accuracy of a converged solve
+    static constexpr TFloat maxSubStep_ = 1e-4;
+    TFloat alphaMin_;
+    TFloat alphaMax_;
+    TFloat alphaPre_;
+    TFloat alphaMid_;
+    TFloat sigmaPre_;
+    TFloat sigmaMid_;
+    TFloat tSysPre_;
+    TFloat tDiasPre_;
+    TFloat gamma_;
+};

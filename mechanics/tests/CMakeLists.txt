@@ -3,6 +3,7 @@ include(GoogleTest)
 
 add_executable(MechanicsTests
     ApplyPressureTest.cpp
+    BestelPressureTest.cpp
     ConstitutiveModelTest.cpp
     DataFromFileTest.cpp
     ElementFactoryTest.cpp
