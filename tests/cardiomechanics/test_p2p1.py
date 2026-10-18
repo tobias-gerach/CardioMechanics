@@ -129,11 +129,15 @@ def test_solver_without_integrator_velocity_refuses_kelvin_voigt_viscosity(binar
 
 
 @pytest.mark.parametrize("element_type", ["T4", "T4MINI"])
-def test_element_without_viscous_stress_refuses_kelvin_voigt_viscosity(binary, cm_env, tmp_path, element_type):
-    """The linear elements do not evaluate the viscous stress yet, so a viscous material would be silently elastic."""
-    proc, _ = _run(binary, cm_env, tmp_path, element_type=element_type, replace=[GENERALIZED_ALPHA, KELVIN_VOIGT],
-                   check=False)
-    assert_refused(proc, element_type, "KelvinVoigt.Eta")
+def test_linear_element_evaluates_kelvin_voigt_viscosity(binary, cm_env, tmp_path, element_type):
+    """The viscous stress resists the loading, so the viscous cantilever bends less."""
+    pytest.importorskip("meshio")
+    peaks = {}
+    for name, replace in (("elastic", [GENERALIZED_ALPHA]), ("viscous", [GENERALIZED_ALPHA, KELVIN_VOIGT])):
+        (tmp_path / name).mkdir()
+        _, vtu_dir = _run(binary, cm_env, tmp_path / name, element_type=element_type, replace=replace)
+        peaks[name] = _peak_displacement(vtu_dir)
+    assert peaks["viscous"] < 0.99 * peaks["elastic"], peaks
 
 
 def test_negative_kelvin_voigt_viscosity_is_refused(binary, cm_env, tmp_path):

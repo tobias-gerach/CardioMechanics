@@ -29,7 +29,6 @@ public:
     CBElement* Clone();
     
     virtual std::string GetType(){return(std::string("T10"));}
-    bool SupportsKelvinVoigtViscosity() override {return true;}
     TInt GetDimension(){return(3);}
     void SetNodeIndex(unsigned int i, TInt j);
     TInt GetNodeIndex(unsigned int i);
