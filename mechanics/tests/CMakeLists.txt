@@ -9,6 +9,7 @@ add_executable(MechanicsTests
     ElementKernelTest.cpp
     LinearSolverOptionsTest.cpp
     SurfaceT6KernelTest.cpp
+    TensionModelBestelTest.cpp
     TensionModelLand17Test.cpp
 )
 target_link_libraries(MechanicsTests PRIVATE CardioMechanicsCore GTest::gtest_main)

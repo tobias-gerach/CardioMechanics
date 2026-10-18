@@ -70,6 +70,8 @@ protected:
     TFloat dTaudt(TFloat tau, TFloat a, TFloat contractility);
     TFloat a(TFloat f);
     TFloat f(TFloat Sp, TFloat Sm);
+    /// f at a time, wrapped into the cycle
+    TFloat Indicator(TFloat time);
     
 public:
     CBTensionModelBestel(CBElement *e, ParameterMap *params);

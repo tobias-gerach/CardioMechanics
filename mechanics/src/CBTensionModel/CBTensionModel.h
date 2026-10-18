@@ -95,6 +95,16 @@ public:
         
         return u + dt*(k1 + 2.*k2 + 2.*k3 + k4)/6.;
     }
+
+    /// helper function: performs one 4th order Runge-Kutta step of du/dt = f(t, u) from time t
+    static double RungeKutta4Step(double u, double t, double dt, std::function<double(double, double)> f) {
+        double k1 = f(t, u);
+        double k2 = f(t + dt/2., u + dt/2.*k1);
+        double k3 = f(t + dt/2., u + dt/2.*k2);
+        double k4 = f(t + dt, u + dt*k3);
+
+        return u + dt*(k1 + 2.*k2 + 2.*k3 + k4)/6.;
+    }
     
     /// Method to properly set the activation time attribute of the element
     void SetActivationTime(TFloat activationTime) {
