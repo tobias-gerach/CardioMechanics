@@ -37,6 +37,8 @@ CBDataFromFunction::CBDataFromFunction(ParameterMap* parameters, std::string par
         getImpl_ = new DoubleHill(parameters, parameterKey);
     else if(type == "SinusDriver")
         getImpl_ = new SinusDriver(parameters, parameterKey);
+    else if(type == "BestelPressure")
+        getImpl_ = new BestelPressure(parameters, parameterKey);
     else
         throw std::runtime_error("CBAnalyticFunction: Type " + type + " is unknown");
 }
