@@ -51,6 +51,7 @@ void CBElementSolidT10P1::GetNodesPressures(TFloat *pressures) {
 
 CBStatus CBElementSolidT10P1::CalcNodalForces() {
     TFloat unknowns[34]; // the nodal coordinates, then the vertex pressures
+    TFloat velocities[30];
     bool   boundaryConditions[30];
     TInt   nodesCoordsIndices[30];
     TInt   pressureIndices[4];
@@ -58,10 +59,11 @@ CBStatus CBElementSolidT10P1::CalcNodalForces() {
 
     GetNodesCoordsIndices(nodesCoordsIndices);
     Base::adapter_->GetNodesCoords(30, nodesCoordsIndices, unknowns);
+    Base::adapter_->GetVelocities(30, nodesCoordsIndices, velocities);
     Base::adapter_->GetNodesComponentsBoundaryConditions(30, nodesCoordsIndices, boundaryConditions);
     GetPressures(pressureIndices, unknowns + 30);
 
-    CBStatus rc = ReportCorruptElement(MakeKernel<Kernel>().Residual(unknowns, boundaryConditions, residual));
+    CBStatus rc = ReportCorruptElement(MakeKernel<Kernel>().Residual(unknowns, velocities, boundaryConditions, residual));
     if (rc != CBStatus::SUCCESS)
         return rc;
 
@@ -72,6 +74,7 @@ CBStatus CBElementSolidT10P1::CalcNodalForces() {
 
 CBStatus CBElementSolidT10P1::CalcNodalForcesJacobian() {
     TFloat unknowns[34]; // the nodal coordinates, then the vertex pressures
+    TFloat velocities[30];
     bool   boundaryConditions[30];
     TInt   nodesCoordsIndices[30];
     TInt   pressureIndices[4];
@@ -81,10 +84,11 @@ CBStatus CBElementSolidT10P1::CalcNodalForcesJacobian() {
 
     GetNodesCoordsIndices(nodesCoordsIndices);
     Base::adapter_->GetNodesCoords(30, nodesCoordsIndices, unknowns);
+    Base::adapter_->GetVelocities(30, nodesCoordsIndices, velocities);
     Base::adapter_->GetNodesComponentsBoundaryConditions(30, nodesCoordsIndices, boundaryConditions);
     GetPressures(pressureIndices, unknowns + 30);
 
-    CBStatus rc = ReportCorruptElement(MakeKernel<Kernel>().Tangent(unknowns, boundaryConditions,
+    CBStatus rc = ReportCorruptElement(MakeKernel<Kernel>().Tangent(unknowns, velocities, boundaryConditions,
                                                                     Base::adapter_->GetFiniteDifferencesEpsilon(), jacobian));
     if (rc != CBStatus::SUCCESS)
         return rc;

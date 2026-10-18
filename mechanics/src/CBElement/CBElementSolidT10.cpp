@@ -330,15 +330,17 @@ CBStatus CBElementSolidT10::SetNodalForcesJacobianToZeroIfElementIsDefect() {
 
 CBStatus CBElementSolidT10::CalcNodalForces() {
     TFloat nodesCoords[30];
+    TFloat velocities[30];
     bool   boundaryConditions[30];
     TInt   nodesCoordsIndices[30];
     TFloat forces[30];
 
     GetNodesCoordsIndices(nodesCoordsIndices);
     Base::adapter_->GetNodesCoords(30, nodesCoordsIndices, nodesCoords);
+    Base::adapter_->GetVelocities(30, nodesCoordsIndices, velocities);
     Base::adapter_->GetNodesComponentsBoundaryConditions(30, nodesCoordsIndices, boundaryConditions);
 
-    CBStatus rc = ReportCorruptElement(MakeKernel<Kernel>().Residual(nodesCoords, boundaryConditions, forces));
+    CBStatus rc = ReportCorruptElement(MakeKernel<Kernel>().Residual(nodesCoords, velocities, boundaryConditions, forces));
     if (rc != CBStatus::SUCCESS)
         return rc;
 
@@ -352,15 +354,17 @@ CBStatus CBElementSolidT10::CalcNodalForcesWithoutActiveStress() {
 
 CBStatus CBElementSolidT10::CalcNodalForcesJacobian() {
     TFloat nodesCoords[30];
+    TFloat velocities[30];
     bool   boundaryConditions[30];
     TInt   nodesCoordsIndices[30];
     TFloat forcesJacobian[30*30];
 
     GetNodesCoordsIndices(nodesCoordsIndices);
     Base::adapter_->GetNodesCoords(30, nodesCoordsIndices, nodesCoords);
+    Base::adapter_->GetVelocities(30, nodesCoordsIndices, velocities);
     Base::adapter_->GetNodesComponentsBoundaryConditions(30, nodesCoordsIndices, boundaryConditions);
 
-    CBStatus rc = ReportCorruptElement(MakeKernel<Kernel>().Tangent(nodesCoords, boundaryConditions,
+    CBStatus rc = ReportCorruptElement(MakeKernel<Kernel>().Tangent(nodesCoords, velocities, boundaryConditions,
                                                             Base::adapter_->GetFiniteDifferencesEpsilon(), forcesJacobian));
     if (rc != CBStatus::SUCCESS)
         return rc;
@@ -426,6 +430,10 @@ void CBElementSolidT10::CheckNodeSorting() {
 
 TFloat CBElementSolidT10::CurrentTime() {
     return Base::adapter_->GetSolver()->GetTiming().GetCurrentTime();
+}
+
+TFloat CBElementSolidT10::VelocityDerivative() {
+    return Base::adapter_->GetVelocityDerivative();
 }
 
 void CBElementSolidT10::CalcT4ShapeFunctionsDerivatives() {

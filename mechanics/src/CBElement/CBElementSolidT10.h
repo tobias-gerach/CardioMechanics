@@ -29,6 +29,7 @@ public:
     CBElement* Clone();
     
     virtual std::string GetType(){return(std::string("T10"));}
+    bool SupportsKelvinVoigtViscosity() override {return true;}
     TInt GetDimension(){return(3);}
     void SetNodeIndex(unsigned int i, TInt j);
     TInt GetNodeIndex(unsigned int i);
@@ -81,7 +82,8 @@ protected:
         Matrix3<TFloat> bases[maxQuadraturePoints];
         for (int q = 0; q < geometry_.rule->numPoints; q++)
             bases[q] = QuadraturePointBasis(q);
-        return K(geometry_, bases, *Base::material_->GetConstitutiveModel(), Base::tensionModels_.data(), CurrentTime());
+        return K(geometry_, bases, *Base::material_->GetConstitutiveModel(), Base::tensionModels_.data(), CurrentTime(),
+                 Base::material_->GetKelvinVoigtEta(), VelocityDerivative());
     }
 
     std::array<TInt, 10> nodesIndices_;
@@ -97,9 +99,11 @@ private:
     
     typedef CBElementKernel<CBQuadraticTetBasis, CBNoPressure> Kernel;
 
-    //! The solver's current time. Defined out of line so that this header, which MakeKernel puts the
-    //! kernel construction in, needs no solver header.
+    //! The solver's current time and the derivative of its velocity with respect to the nodal
+    //! coordinates. Defined out of line so that this header, which MakeKernel puts the kernel
+    //! construction in, needs no solver header.
     TFloat CurrentTime();
+    TFloat VelocityDerivative();
 
     //! Fibre basis at quadrature point q.
     Matrix3<TFloat>& QuadraturePointBasis(int q);

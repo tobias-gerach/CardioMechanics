@@ -218,6 +218,7 @@ TEST(RigidBodyModes, LieInNullSpaceOfT4Stiffness) {
     CBTensionModel *const tensions[] = {&tension};
     const std::array<Matrix3<TFloat>, CBQuadratureRule::maxPoints> bases{Matrix3<TFloat>::Identity()};
     const bool free[Kernel::numUnknowns] = {};
+    const TFloat rest[3 * Kernel::numNodes] = {};
 
     Mat K;
     ASSERT_EQ(MatCreateSeqAIJ(PETSC_COMM_SELF, 15, 15, 15, nullptr, &K), PETSC_SUCCESS);
@@ -231,7 +232,7 @@ TEST(RigidBodyModes, LieInNullSpaceOfT4Stiffness) {
             }
         const auto geometry = CalcReferenceGeometry<CBLinearTetBasis>(x.data(), quadratureRule1);
         std::array<TFloat, Kernel::numUnknowns * Kernel::numUnknowns> tangent;
-        ASSERT_EQ(Kernel(geometry, bases.data(), *law, tensions, 0.0).Tangent(x.data(), free, 1e-6, tangent.data()),
+        ASSERT_EQ(Kernel(geometry, bases.data(), *law, tensions, 0.0, 0.0, 0.0).Tangent(x.data(), rest, free, 1e-6, tangent.data()),
                   CBStatus::SUCCESS);
         ASSERT_EQ(MatSetValues(K, 12, rows.data(), 12, rows.data(), tangent.data(), ADD_VALUES), PETSC_SUCCESS);
     }
@@ -280,6 +281,7 @@ TEST(RigidBodyModes, LieInNullSpaceOfDisplacementBlockOfMixedStiffness) {
     std::array<Matrix3<TFloat>, CBQuadratureRule::maxPoints> bases;
     bases.fill(Matrix3<TFloat>::Identity());
     const bool free[Kernel::numUnknowns] = {};
+    const TFloat rest[3 * Kernel::numNodes] = {};
 
     // The unknowns of the solver are the displacements of every node followed by the pressures
     // (ADR-0001), which is the layout the index sets of the split are strides of.
@@ -299,7 +301,7 @@ TEST(RigidBodyModes, LieInNullSpaceOfDisplacementBlockOfMixedStiffness) {
         // The bubble's gradient vanishes at the centroid, so the single-point rule leaves its block singular.
         const auto geometry = CalcReferenceGeometry<CBMiniBasis>(x.data(), quadratureRule4);
         std::array<TFloat, Kernel::numUnknowns * Kernel::numUnknowns> tangent;
-        ASSERT_EQ(Kernel(geometry, bases.data(), *law, tensions.data(), 0.0).Tangent(x.data(), free, 1e-6, tangent.data()),
+        ASSERT_EQ(Kernel(geometry, bases.data(), *law, tensions.data(), 0.0, 0.0, 0.0).Tangent(x.data(), rest, free, 1e-6, tangent.data()),
                   CBStatus::SUCCESS);
         ASSERT_EQ(MatSetValues(K, Kernel::numUnknowns, rows.data(), Kernel::numUnknowns, rows.data(), tangent.data(),
                                ADD_VALUES), PETSC_SUCCESS);

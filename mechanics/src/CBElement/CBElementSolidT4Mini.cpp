@@ -46,7 +46,8 @@ CBElementSolidT4Mini::Kernel CBElementSolidT4Mini::MakeKernel() {
     Matrix3<TFloat> bases[CBQuadratureRule::maxPoints];
     std::fill_n(bases, miniGeometry_.rule->numPoints, *GetBasisAtQuadraturePoint(0));
     return Kernel(miniGeometry_, bases, *Base::material_->GetConstitutiveModel(), Base::tensionModels_.data(),
-                  Base::adapter_->GetSolver()->GetTiming().GetCurrentTime());
+                  Base::adapter_->GetSolver()->GetTiming().GetCurrentTime(), Base::material_->GetKelvinVoigtEta(),
+                  Base::adapter_->GetVelocityDerivative());
 }
 
 void CBElementSolidT4Mini::GetPressures(TInt *pressureIndices, TFloat *pressures) {
@@ -61,6 +62,7 @@ void CBElementSolidT4Mini::GetNodesPressures(TFloat *pressures) {
 
 CBStatus CBElementSolidT4Mini::CalcNodalForces() {
     TFloat unknowns[16]; // the nodal coordinates, then the vertex pressures
+    TFloat velocities[12];
     bool   boundaryConditions[12];
     TInt   nodesCoordsIndices[12];
     TInt   pressureIndices[4];
@@ -68,10 +70,11 @@ CBStatus CBElementSolidT4Mini::CalcNodalForces() {
 
     GetNodesCoordsIndices(nodesCoordsIndices);
     Base::adapter_->GetNodesCoords(12, nodesCoordsIndices, unknowns);
+    Base::adapter_->GetVelocities(12, nodesCoordsIndices, velocities);
     Base::adapter_->GetNodesComponentsBoundaryConditions(12, nodesCoordsIndices, boundaryConditions);
     GetPressures(pressureIndices, unknowns + 12);
 
-    CBStatus rc = ReportCorruptElement(MakeKernel().Residual(unknowns, boundaryConditions, residual));
+    CBStatus rc = ReportCorruptElement(MakeKernel().Residual(unknowns, velocities, boundaryConditions, residual));
     if (rc != CBStatus::SUCCESS)
         return rc;
 
@@ -82,6 +85,7 @@ CBStatus CBElementSolidT4Mini::CalcNodalForces() {
 
 CBStatus CBElementSolidT4Mini::CalcNodalForcesJacobian() {
     TFloat unknowns[16]; // the nodal coordinates, then the vertex pressures
+    TFloat velocities[12];
     bool   boundaryConditions[12];
     TInt   nodesCoordsIndices[12];
     TInt   pressureIndices[4];
@@ -91,10 +95,11 @@ CBStatus CBElementSolidT4Mini::CalcNodalForcesJacobian() {
 
     GetNodesCoordsIndices(nodesCoordsIndices);
     Base::adapter_->GetNodesCoords(12, nodesCoordsIndices, unknowns);
+    Base::adapter_->GetVelocities(12, nodesCoordsIndices, velocities);
     Base::adapter_->GetNodesComponentsBoundaryConditions(12, nodesCoordsIndices, boundaryConditions);
     GetPressures(pressureIndices, unknowns + 12);
 
-    CBStatus rc = ReportCorruptElement(MakeKernel().Tangent(unknowns, boundaryConditions,
+    CBStatus rc = ReportCorruptElement(MakeKernel().Tangent(unknowns, velocities, boundaryConditions,
                                                             Base::adapter_->GetFiniteDifferencesEpsilon(), jacobian));
     if (rc != CBStatus::SUCCESS)
         return rc;

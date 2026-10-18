@@ -16,6 +16,19 @@
 
 
 
+TFloat CBMaterial::ReadKelvinVoigtEta(ParameterMap* parameters, TInt materialIndex)
+{
+    TFloat eta;
+    if(parameters->IsAvailable("Materials.Mat_" + std::to_string(materialIndex) + ".KelvinVoigt.Eta") == false && parameters->IsAvailable("Materials.Mat_Default.KelvinVoigt.Eta") == true)
+        eta = parameters->Get<double>("Materials.Mat_Default.KelvinVoigt.Eta");
+    else
+        eta = parameters->Get<double>("Materials.Mat_" + std::to_string(materialIndex) + ".KelvinVoigt.Eta", 0);
+    // A negative viscosity would feed energy into the body instead of dissipating it.
+    if(eta < 0)
+        throw std::runtime_error("CBMaterial::ReadKelvinVoigtEta(): Error, KelvinVoigt.Eta of material " + std::to_string(materialIndex) + " is negative");
+    return eta;
+}
+
 void CBMaterial::Init(ParameterMap* parameters, TInt materialIndex)
 {
     materialIndex_ = materialIndex;
@@ -35,6 +48,8 @@ void CBMaterial::Init(ParameterMap* parameters, TInt materialIndex)
         properties_->rayleighBeta_ = parameters->Get<double>("Materials.Mat_Default.Rayleigh.Beta");
     else
         properties_->rayleighBeta_ = parameters->Get<double>("Materials.Mat_" + std::to_string(materialIndex_) + ".Rayleigh.Beta", 0);
+    
+    properties_->kelvinVoigtEta_ = ReadKelvinVoigtEta(parameters, materialIndex_);
     
     if(parameters->IsAvailable("Materials.Mat_" + std::to_string(materialIndex_) + ".TensionMax") == false && parameters->IsAvailable("Materials.Mat_Default.TensionMax") == true)
         properties_->tensionMax_ = parameters->Get<double>("Materials.Mat_Default.TensionMax");
