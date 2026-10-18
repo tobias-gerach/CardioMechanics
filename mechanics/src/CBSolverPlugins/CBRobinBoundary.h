@@ -25,7 +25,9 @@ using namespace math_pack;
 
 /// A spring and dashpot on the centroid of each surface triangle. RobinBoundary lets them act along
 /// the reference normal only, RobinBoundaryGeneral on the full displacement and velocity; the two
-/// keep their own XML keys and default stiffness so that existing input files load unchanged.
+/// keep their own XML keys and default stiffness so that existing input files load unchanged. The
+/// dashpot resists the velocity of the time integrator (ADR-0010), so that the boundary is integrated
+/// at the order of the interior.
 class CBRobinBoundary : public CBSolverPlugin {
 public:
     explicit CBRobinBoundary(bool projectOnNormal);
@@ -38,7 +40,6 @@ public:
     void Apply(PetscScalar time) override;
     void ApplyToNodalForces() override;
     void ApplyToNodalForcesJacobian() override;
-    void StepBack() override;
     void ReferenceChanged() override;
     void Export(TFloat time) override;
     void WriteToFile(TFloat time) override;
@@ -50,20 +51,15 @@ protected:
 private:
     const bool projectOnNormal_;
     const std::string key_;
-    TFloat dt_, prevDt_;
     typedef CBSolverPlugin Base;
     static constexpr int numNodes = CBElementSurfaceT3::numNodes;
     std::vector<CBElementSurfaceT3 *> contactSurfaceElements_;
     std::vector<Vector3<TFloat>> referenceNormals_;
     std::vector<Vector3<TFloat>> initialPos_;
     std::vector<Vector3<TFloat>> displacement_;
-    std::vector<Vector3<TFloat>> prevDisplacement_;
-    std::vector<Vector3<TFloat>> velocity_;
     
     CBStatus status_ = CBStatus::DACCORD;
     
-    bool isFirstStep_ = true;
-    bool stepBack_ = false;
     bool hasStarted_ = false;
     
     /// functions

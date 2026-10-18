@@ -88,6 +88,9 @@ private:
     void InitPETScSolver() override;
     void Export(PetscScalar time) override;
     
+    /// Links v_n+1, the velocity that belongs to the displacement increment d_n+1, as the trial velocity.
+    void LinkVelocity(Vec displacement);
+    
     typedef CBSolver   Base;
     
     SNES        snes_ = nullptr;

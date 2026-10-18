@@ -190,6 +190,11 @@ void CBSolverEquilibrium::ApplyIncrement(Vec unknowns, Vec displacedNodes) {
     VecCopy(Base::nodes_, displacedNodes);
     AddBlock(displacedNodes, unknowns, Base::adapter_->GetDisplacementDofs());
     LinkTrialPressures(unknowns);
+    // A quasi-static march has no velocity of its own. The backward difference of the configurations
+    // it steps through is the velocity of a rate-dependent load such as a dashpot.
+    VecZeroEntries(trialVelocity_);
+    AddBlock(trialVelocity_, unknowns, Base::adapter_->GetDisplacementDofs(), 1 / timing_.GetTimeStep());
+    LinkTrialVelocity(1 / timing_.GetTimeStep());
 }
 
 void CBSolverEquilibrium::InitPETScSolver() {

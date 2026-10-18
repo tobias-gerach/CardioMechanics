@@ -104,6 +104,10 @@ private:
     /// that the preparation phase never asks the load history for a time before it is defined.
     PetscScalar IntermediateTime(PetscScalar time);
     
+    /// Links v_n+1-alphaF, the velocity at the intermediate level that belongs to the displacement
+    /// increment d_n+1, as the trial velocity.
+    void LinkIntermediateVelocity(Vec displacement);
+    
     /// Adds K_uu, the displacement block of the stiffness in the linked state, to the damping
     /// matrix. Pressure has no time derivative, so it is neither damped nor damping.
     void AddDampingStiffness();

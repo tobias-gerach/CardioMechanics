@@ -230,6 +230,18 @@ PetscScalar CBSolverGeneralizedAlpha::IntermediateTime(PetscScalar time) {
     return std::max(time - alphaF_ * timing_.GetTimeStep(), timing_.GetStartTime());
 }
 
+void CBSolverGeneralizedAlpha::LinkIntermediateVelocity(Vec displacement) {
+    // v_n+1-alphaF = (1 - alphaF) * v_n+1 + alphaF * v_n with v_n+1 = v~_n+1 + gamma/(beta*dt) * (d_n+1 - d~_n+1)
+    PetscScalar c = gamma_ / (beta_ * timing_.GetTimeStep());
+    VecWAXPY(trialVelocity_, -1, tmpDisplacement_, displacement);
+    VecAYPX(trialVelocity_, c, tmpVelocity_);
+    VecAXPBY(trialVelocity_, alphaF_, 1 - alphaF_, velocity_);
+    // The residual depends on d_n+1 through the intermediate configuration, with factor (1 - alphaF),
+    // and the Jacobian is scaled by that factor, so the derivative is taken with respect to that
+    // configuration.
+    Base::LinkTrialVelocity(c);
+}
+
 void CBSolverGeneralizedAlpha::AddDampingStiffness() {
     MatZeroEntries(elementsJacobian_);
     Base::adapter_->LinkNodalForcesJacobian(elementsJacobian_);
@@ -375,7 +387,6 @@ CBStatus CBSolverGeneralizedAlpha::CalcNodalForces(Vec unknowns, Vec residual) {
     DCCtrl::debug << "SNES Step:" << snesStep_ << " - F-Norm: ";
     
     Vec localDisplacedNodesSeq = 0;
-    Vec velocity               = 0;
     Vec accelerationNew        = 0;
     Vec displacement           = 0;
     Vec forces                 = 0;
@@ -399,6 +410,8 @@ CBStatus CBSolverGeneralizedAlpha::CalcNodalForces(Vec unknowns, Vec residual) {
     
     // pressure is interpolated between the time levels exactly like the displacement
     LinkTrialPressures(unknowns, 1 - alphaF_);
+    
+    LinkIntermediateVelocity(displacement);
     
     // add internal nodal forces f_int (passive and active stress contribution of the tissue)
     VecZeroEntries(Base::nodalForces_);
@@ -431,14 +444,9 @@ CBStatus CBSolverGeneralizedAlpha::CalcNodalForces(Vec unknowns, Vec residual) {
     VecAXPY(tmpVector_, alphaM_, acceleration_);
     MatMult(massMatrix_, tmpVector_, forces);
     
-    // add damping forces C * v_n+1-alphaF with v_n+1 = v~_n+1 + gamma * dt * a_n+1
+    // add damping forces C * v_n+1-alphaF
     if ((globalRayleighAlpha_ != 0) || (globalRayleighBeta_ != 0)) {
-        VecDuplicate(tmpVelocity_, &velocity);
-        VecCopy(tmpVelocity_, velocity);
-        VecAXPY(velocity, gamma_ * timestep, accelerationNew);
-        VecScale(velocity, 1 - alphaF_);
-        VecAXPY(velocity, alphaF_, velocity_);
-        MatMult(dampingMatrix_, velocity, tmpVector_);
+        MatMult(dampingMatrix_, trialVelocity_, tmpVector_);
         VecAXPY(forces, 1, tmpVector_);
     }
     
@@ -448,7 +456,6 @@ CBStatus CBSolverGeneralizedAlpha::CalcNodalForces(Vec unknowns, Vec residual) {
     VecRestoreSubVector(unknowns, Base::adapter_->GetDisplacementDofs(), &displacement);
     SetBlock(residual, Base::adapter_->GetPressureDofs(), Base::pressureResiduals_);
     
-    VecDestroy(&velocity);
     VecDestroy(&accelerationNew);
     
     if (localDisplacedNodesSeq)
@@ -492,6 +499,10 @@ CBStatus CBSolverGeneralizedAlpha::CalcNodalForcesJacobian(Vec unknowns, Mat jac
     if (unknowns != 0) {
         AddBlock(tmpVector_, unknowns, Base::adapter_->GetDisplacementDofs(), 1 - alphaF_);
         LinkTrialPressures(unknowns, 1 - alphaF_);
+        Vec displacement;
+        VecGetSubVector(unknowns, Base::adapter_->GetDisplacementDofs(), &displacement);
+        LinkIntermediateVelocity(displacement);
+        VecRestoreSubVector(unknowns, Base::adapter_->GetDisplacementDofs(), &displacement);
     }
     
     if (DCCtrl::IsParallel()) {

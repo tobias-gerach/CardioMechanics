@@ -96,6 +96,23 @@ Vector3<TFloat> CBElementSurfaceT3::GetCentroid() {
                            1.0/3.0 * (nodesCoords[2] + nodesCoords[5] + nodesCoords[8]));
 }
 
+Vector3<TFloat> CBElementSurfaceT3::GetCentroidVelocity() {
+    TInt   nodesCoordsIndices[9];
+    TFloat velocities[9];
+    
+    for (unsigned int i = 0; i < 3; i++) {
+        nodesCoordsIndices[3 * i]     = 3 * nodesIndices_[i];
+        nodesCoordsIndices[3 * i + 1] = 3 * nodesIndices_[i] + 1;
+        nodesCoordsIndices[3 * i + 2] = 3 * nodesIndices_[i] + 2;
+    }
+    
+    Base::adapter_->GetVelocities(9, nodesCoordsIndices, velocities);
+    
+    return Vector3<TFloat>(1.0/3.0 * (velocities[0] + velocities[3] + velocities[6]),
+                           1.0/3.0 * (velocities[1] + velocities[4] + velocities[7]),
+                           1.0/3.0 * (velocities[2] + velocities[5] + velocities[8]));
+}
+
 Vector3<TFloat> CBElementSurfaceT3::GetNormalVector() {
     TInt    nodesCoordsIndices[9];
     TFloat  nodesCoords[9];

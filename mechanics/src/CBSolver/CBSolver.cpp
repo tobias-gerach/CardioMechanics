@@ -272,6 +272,10 @@ void CBSolver::Init(ParameterMap *parameters, CBModel *model) {
     "\xd\t\tInitializing: Vectors ...                                                                                           ";
     InitVectors();
     VecDuplicate(nodes_, &stepStartNodes_);
+    // The body starts at rest.
+    VecDuplicate(nodes_, &trialVelocity_);
+    VecZeroEntries(trialVelocity_);
+    LinkTrialVelocity(0);
     if (pressures_)
         VecDuplicate(pressures_, &stepStartPressures_);
     DCCtrl::print <<
@@ -572,6 +576,18 @@ void CBSolver::LinkTrialPressures(Vec unknowns, PetscScalar alpha) {
     VecCopy(pressures_, trialPressures_);
     AddBlock(trialPressures_, unknowns, adapter_->GetPressureDofs(), alpha);
     LinkPressures(trialPressures_);
+}
+
+void CBSolver::LinkTrialVelocity(PetscScalar derivative) {
+    if (DCCtrl::IsParallel()) {
+        VecGhostUpdateBegin(trialVelocity_, INSERT_VALUES, SCATTER_FORWARD);
+        VecGhostUpdateEnd(trialVelocity_, INSERT_VALUES, SCATTER_FORWARD);
+    }
+    // The local form shares the storage of the field and lives as long as the field does.
+    Vec localVelocity;
+    VecGhostGetLocalForm(trialVelocity_, &localVelocity);
+    adapter_->LinkVelocities(localVelocity, derivative);
+    VecGhostRestoreLocalForm(trialVelocity_, &localVelocity);
 }
 
 void CBSolver::AddBlock(Vec field, Vec unknowns, IS dofs, PetscScalar alpha) {
@@ -1303,6 +1319,7 @@ CBSolver::~CBSolver() {
     VecDestroy(&pressures_);
     VecDestroy(&trialPressures_);
     VecDestroy(&pressureResiduals_);
+    VecDestroy(&trialVelocity_);
     VecDestroy(&stepStartNodes_);
     VecDestroy(&stepStartPressures_);
     if (formulation_ != 0)

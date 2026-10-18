@@ -50,6 +50,7 @@ public:
     void GetNodesCoords(TFloat *nodesCoords);
     TFloat GetArea();
     Vector3<TFloat> GetCentroid();
+    Vector3<TFloat> GetCentroidVelocity();
     Vector3<TFloat> GetNormalVector();
     TFloat CalcContributionToVolume(const TFloat *referenceCoords) override;
     void CalcContributionToVolumeJacobian(TFloat *volumeJacobianEntries, TInt *volumeJacobianEntriesIndices) override;

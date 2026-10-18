@@ -317,12 +317,19 @@ void CBSolverNewmarkBeta::ExportSNESMatrix(TFloat time) {
     PetscViewerDestroy(&viewVector);
 }  // CBSolverNewmarkBeta::ExportSNESMatrix
 
+void CBSolverNewmarkBeta::LinkVelocity(Vec displacement) {
+    // v_n+1 = v~_n+1 + gamma/(beta*dt) * (d_n+1 - d~_n+1)
+    PetscScalar c = gamma_ / (beta_ * timing_.GetTimeStep());
+    VecWAXPY(trialVelocity_, -1, tmpDisplacement_, displacement);
+    VecAYPX(trialVelocity_, c, tmpVelocity_);
+    Base::LinkTrialVelocity(c);
+}
+
 CBStatus CBSolverNewmarkBeta::CalcNodalForces(Vec displacement, Vec forces) {
     snesStep_++;
     DCCtrl::debug << "SNES Step:" << snesStep_ << " - F-Norm: ";
     
     Vec localDisplacedNodesSeq = 0;
-    Vec velocity               = 0;
     
     // Set node coordinates to d~_n+1
     VecCopy(Base::nodes_, tmpVector_);
@@ -336,6 +343,8 @@ CBStatus CBSolverNewmarkBeta::CalcNodalForces(Vec displacement, Vec forces) {
     } else {
         Base::adapter_->LinkNodes(tmpVector_);
     }
+    
+    LinkVelocity(displacement);
     
     // add internal nodal forces f_int (passive and active stress contribution of the tissue)
     VecZeroEntries(Base::nodalForces_);
@@ -359,18 +368,13 @@ CBStatus CBSolverNewmarkBeta::CalcNodalForces(Vec displacement, Vec forces) {
     VecScale(tmpVector_, factor);
     MatMult(massMatrix_, tmpVector_, forces);
     
-    // add damping forces C * [c1 * (d_n+1 - d~_n+1) + v~_n+1] with c1 = gamma / (beta * dt)
+    // add damping forces C * v_n+1
     if ((globalRayleighAlpha_ != 0) || (globalRayleighBeta_ != 0)) {
-        VecDuplicate(tmpVelocity_, &velocity);
-        VecCopy(tmpVelocity_, velocity);
-        VecAXPY(velocity, gamma_ * timing_.GetTimeStep(), tmpVector_);
-        MatMult(dampingMatrix_, velocity, tmpVector_);
+        MatMult(dampingMatrix_, trialVelocity_, tmpVector_);
         VecAXPY(forces, 1, tmpVector_);
     }
     
     VecAXPY(forces, 1, Base::nodalForces_);
-    
-    VecDestroy(&velocity);
     
     if (localDisplacedNodesSeq)
         VecDestroy(&localDisplacedNodesSeq);
@@ -555,8 +559,10 @@ CBStatus CBSolverNewmarkBeta::CalcNodalForcesJacobian(Vec displacement, Mat jaco
     
     // Set nodes to d~_n+1
     VecCopy(Base::nodes_, tmpVector_);
-    if (displacement != 0)
+    if (displacement != 0) {
         VecAXPY(tmpVector_, 1, displacement);
+        LinkVelocity(displacement);
+    }
     
     if (DCCtrl::IsParallel()) {
         VecGhostUpdateBegin(tmpVector_, INSERT_VALUES, SCATTER_FORWARD);
