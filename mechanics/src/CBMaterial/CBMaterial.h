@@ -36,6 +36,7 @@ private:
         TFloat massDensity_=0;
         TFloat rayleighAlpha_=0;
         TFloat rayleighBeta_=0;
+        TFloat kelvinVoigtEta_=0;
         TFloat tensionMax_=0;
         std::string tensionName_ = "not defined yet";
         bool pk2ActiveTension_ = false;
@@ -46,6 +47,8 @@ private:
 public:
     ~CBMaterial(){delete properties_;}
     void Init(ParameterMap* parameters, TInt materialIndex);
+    /// Kelvin-Voigt viscosity of material materialIndex, readable before the material is created.
+    static TFloat ReadKelvinVoigtEta(ParameterMap* parameters, TInt materialIndex);
     TInt GetMaterialIndex(){return(materialIndex_); }
     TInt GetInitAsMaterial(){return properties_->initAsMaterial_;}
     void SetMaterialIndex(TInt materialIndex){materialIndex_ =  materialIndex; }
@@ -66,6 +69,7 @@ public:
     TFloat GetMassDensity(){return(properties_->massDensity_); }
     TFloat GetRayleighAlpha(){return(properties_->rayleighAlpha_); }
     TFloat GetRayleighBeta(){return(properties_->rayleighBeta_); }
+    TFloat GetKelvinVoigtEta(){return(properties_->kelvinVoigtEta_); }
     TFloat GetTensionMax(){return(properties_->tensionMax_); }
     bool GetPK2ActiveTension(){return(properties_->pk2ActiveTension_); }
     Matrix3<TFloat> GetConductivity(){return(properties_->conductivity_);}

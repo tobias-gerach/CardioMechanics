@@ -359,6 +359,9 @@ TFloat Stretch(const std::array<TFloat, 4> &l, const TFloat *X, const TFloat *x,
 //! The unknowns are the current nodal coordinates followed by the nodal pressures. With a pressure
 //! field the material law contributes only its isochoric response, and the pressure is tied to the
 //! deformation by the perturbed incompressibility constraint J - 1 - p/kappa = 0 (ADR-0002).
+//!
+//! Each evaluation also takes the nodal velocities, which the Kelvin-Voigt viscous stress
+//! eta Edot, Edot = sym(F^T Fdot), is evaluated from (ADR-0010).
 template <class DisplacementBasis, class PressureBasis>
 class CBElementKernel {
 public:
@@ -369,11 +372,14 @@ public:
 
     //! fibreBases and tensionModels hold one entry per quadrature point; the stresses of both models
     //! are taken in the basis. Each point has its own tension model, so that a stateful model
-    //! integrates the stretch history of its point alone.
+    //! integrates the stretch history of its point alone. eta is the Kelvin-Voigt viscosity, and
+    //! velocityDerivative the derivative of the time integrator's nodal velocities with respect to the
+    //! nodal coordinates, which the tangent of the viscous stress needs.
     CBElementKernel(const CBReferenceGeometry<DisplacementBasis> &geometry, const Matrix3<TFloat> *fibreBases,
-                    CBConstitutiveModel &constitutiveModel, CBTensionModel *const *tensionModels, TFloat time)
+                    CBConstitutiveModel &constitutiveModel, CBTensionModel *const *tensionModels, TFloat time,
+                    TFloat eta, TFloat velocityDerivative)
     : geometry_(geometry), constitutiveModel_(constitutiveModel), time_(time),
-      kappa_(numPressures ? constitutiveModel.GetBulkModulus() : 0) {
+      kappa_(numPressures ? constitutiveModel.GetBulkModulus() : 0), eta_(eta), velocityDerivative_(velocityDerivative) {
         for (int q = 0; q < geometry_.rule->numPoints; q++) {
             basisTranspose_[q]        = fibreBases[q].GetTranspose();
             basisInverseTranspose_[q] = fibreBases[q].GetInverse().GetTranspose();
@@ -381,13 +387,16 @@ public:
         }
     }
 
-    //! Residual at the unknowns x: the nodal forces, zero on the components with a boundary
-    //! condition, followed by the constraint residuals R_a = int N_a (J - 1 - p/kappa) dV of the
-    //! pressures. boundaryConditions flags the displacement components.
-    CBStatus Residual(const TFloat *x, const bool *boundaryConditions, TFloat *residual) const {
+    //! Residual at the unknowns x and the nodal velocities v: the nodal forces, zero on the components
+    //! with a boundary condition, followed by the constraint residuals R_a = int N_a (J - 1 - p/kappa) dV
+    //! of the pressures. boundaryConditions flags the displacement components.
+    CBStatus Residual(const TFloat *x, const TFloat *v, const bool *boundaryConditions, TFloat *residual) const {
         Matrix3<TFloat> F[maxPoints];
+        Matrix3<TFloat> Fdot[maxPoints];
         Matrix3<TFloat> S[maxPoints];
         DeformationGradients(x, F);
+        if (eta_ != 0)
+            DeformationGradients(v, Fdot);
         std::fill(residual + 3*numNodes, residual + numUnknowns, 0.0);
         for (int q = 0; q < geometry_.rule->numPoints; q++) {
             if constexpr (numPressures == 0) {
@@ -406,18 +415,25 @@ public:
             // Active stress is added raw, also with a pressure field. Whether a mixed formulation
             // should project it onto its deviatoric part is an open modelling question.
             S[q] += tensionModels_[q]->CalcActiveStress(F[q], time_);
+            if (eta_ != 0) {
+                const Matrix3<TFloat> FTFdot = F[q].GetTranspose() * Fdot[q];
+                S[q] += eta_ / 2 * (FTFdot + FTFdot.GetTranspose());
+            }
         }
         Forces(F, S, boundaryConditions, residual);
         return CBStatus::SUCCESS;
     }
 
-    //! Derivative of the residual with respect to the unknowns at x: row-major, rows are residuals and
-    //! columns unknowns. The block of the forces and the displacement is taken by central differences
-    //! of step epsilon; the residual is linear in the pressures, so the blocks involving them are
-    //! exact. The columns of the displacement components with a boundary condition are zero.
-    CBStatus Tangent(const TFloat *x, const bool *boundaryConditions, TFloat epsilon, TFloat *tangent) const {
+    //! Derivative of the residual with respect to the unknowns at x and v: row-major, rows are residuals
+    //! and columns unknowns. The velocities follow the coordinates at the rate velocityDerivative. The
+    //! block of the forces and the displacement is taken by central differences of step epsilon; the
+    //! residual is linear in the pressures, so the blocks involving them are exact. The columns of the
+    //! displacement components with a boundary condition are zero.
+    CBStatus Tangent(const TFloat *x, const TFloat *v, const bool *boundaryConditions, TFloat epsilon, TFloat *tangent) const {
         std::array<TFloat, numUnknowns> y;
+        std::array<TFloat, 3*numNodes> w;
         std::copy(x, x + numUnknowns, y.begin());
+        std::copy(v, v + 3*numNodes, w.begin());
         std::fill(tangent, tangent + numUnknowns*numUnknowns, 0.0);
         TFloat plus[numUnknowns];
         TFloat minus[numUnknowns];
@@ -425,14 +441,17 @@ public:
             if (boundaryConditions[j])
                 continue;
             y[j] = x[j] + epsilon;
-            CBStatus rc = Residual(y.data(), boundaryConditions, plus);
+            w[j] = v[j] + velocityDerivative_ * epsilon;
+            CBStatus rc = Residual(y.data(), w.data(), boundaryConditions, plus);
             if (rc == CBStatus::SUCCESS) {
                 y[j] = x[j] - epsilon;
-                rc = Residual(y.data(), boundaryConditions, minus);
+                w[j] = v[j] - velocityDerivative_ * epsilon;
+                rc = Residual(y.data(), w.data(), boundaryConditions, minus);
             }
             if (rc != CBStatus::SUCCESS)
                 return rc;
             y[j] = x[j];
+            w[j] = v[j];
             for (int i = 0; i < 3*numNodes; i++)
                 tangent[numUnknowns*i + j] = (plus[i] - minus[i]) / (2*epsilon);
         }
@@ -532,7 +551,8 @@ private:
         return p;
     }
 
-    //! Deformation gradient at each quadrature point, in the fibre basis there.
+    //! Deformation gradient at each quadrature point, in the fibre basis there. Given nodal velocities
+    //! in place of x, its rate Fdot.
     void DeformationGradients(const TFloat *x, Matrix3<TFloat> *F) const {
         for (int q = 0; q < geometry_.rule->numPoints; q++) {
             const TFloat *dNdX = &geometry_.dNdX[3*numNodes*q];
@@ -551,6 +571,8 @@ private:
     CBConstitutiveModel &constitutiveModel_;
     TFloat time_;
     TFloat kappa_;  // bulk modulus, used only with a pressure field
+    TFloat eta_;
+    TFloat velocityDerivative_;
     std::array<Matrix3<TFloat>, maxPoints> basisTranspose_;
     std::array<Matrix3<TFloat>, maxPoints> basisInverseTranspose_;
     std::array<CBTensionModel *, maxPoints> tensionModels_;
@@ -560,7 +582,7 @@ private:
 //! Inner kernel such as the MINI bubble, condensed statically (ADR-0005). It has the interface of
 //! Inner over the remaining unknowns. Every evaluation solves the internal rows of the inner residual
 //! from zero, so no state is kept between calls, and the internal unknowns carry no boundary
-//! condition.
+//! condition. Nor do they carry a velocity: without state they have no rate.
 template <class Inner, int numInternal>
 class CBCondensedKernel {
     static_assert(numInternal == 3, "the local solve inverts a Matrix3");
@@ -575,17 +597,18 @@ public:
     //! As the Inner kernel. Templated on the basis because Inner does not name its own.
     template <class Basis>
     CBCondensedKernel(const CBReferenceGeometry<Basis> &geometry, const Matrix3<TFloat> *fibreBases,
-                      CBConstitutiveModel &constitutiveModel, CBTensionModel *const *tensionModels, TFloat time)
-    : inner_(geometry, fibreBases, constitutiveModel, tensionModels, time),
+                      CBConstitutiveModel &constitutiveModel, CBTensionModel *const *tensionModels, TFloat time,
+                      TFloat eta, TFloat velocityDerivative)
+    : inner_(geometry, fibreBases, constitutiveModel, tensionModels, time, eta, velocityDerivative),
       length_(std::cbrt(std::accumulate(geometry.dV.begin(), geometry.dV.begin() + geometry.rule->numPoints, TFloat(0)))) {
         // A bubble's gradient vanishes at the centroid, so under the single-point rule its block is singular.
         assert(geometry.rule->numPoints > 1);
     }
 
     //! As Inner::Residual, at the internal unknowns that solve their rows.
-    CBStatus Residual(const TFloat *x, const bool *boundaryConditions, TFloat *residual) const {
+    CBStatus Residual(const TFloat *x, const TFloat *v, const bool *boundaryConditions, TFloat *residual) const {
         TFloat y[numInner], r[numInner];
-        CBStatus rc = SolveInternal(x, y, r);
+        CBStatus rc = SolveInternal(x, v, y, r);
         if (rc != CBStatus::SUCCESS)
             return rc;
         for (int i = 0; i < numUnknowns; i++)
@@ -598,15 +621,15 @@ public:
     //! ones. This is the exact derivative of the condensed residual. It differences the inner residual
     //! at fixed internal unknowns, so the tolerance of the local solve does not enter the difference
     //! quotients, as it would in differences of the condensed residual with the solvers' small step.
-    CBStatus Tangent(const TFloat *x, const bool *boundaryConditions, TFloat epsilon, TFloat *tangent) const {
+    CBStatus Tangent(const TFloat *x, const TFloat *v, const bool *boundaryConditions, TFloat epsilon, TFloat *tangent) const {
         TFloat y[numInner], r[numInner];
-        CBStatus rc = SolveInternal(x, y, r);
+        CBStatus rc = SolveInternal(x, v, y, r);
         if (rc != CBStatus::SUCCESS)
             return rc;
         bool innerBoundaryConditions[3*Inner::numNodes] = {};
         std::copy_n(boundaryConditions, firstInternal, innerBoundaryConditions);
         std::array<TFloat, numInner*numInner> K;
-        rc = inner_.Tangent(y, innerBoundaryConditions, epsilon, K.data());
+        rc = inner_.Tangent(y, InnerVelocities(v).data(), innerBoundaryConditions, epsilon, K.data());
         if (rc != CBStatus::SUCCESS)
             return rc;
 
@@ -623,24 +646,26 @@ public:
         return CBStatus::SUCCESS;
     }
 
-    //! As Inner::Energy, at the internal unknowns that solve their rows.
+    //! As Inner::Energy, at the internal unknowns that solve their rows at rest.
     CBStatus Energy(const TFloat *x, TFloat &energy) const {
         TFloat y[numInner], r[numInner];
-        CBStatus rc = SolveInternal(x, y, r);
+        const TFloat rest[firstInternal] = {};
+        CBStatus rc = SolveInternal(x, rest, y, r);
         if (rc != CBStatus::SUCCESS)
             return rc;
         return inner_.Energy(y, energy);
     }
 
-    //! The unknowns y of the Inner kernel at x, with the internal unknowns solving their rows by
-    //! Newton iteration from zero, and the inner residual r there, without boundary conditions. A solve
-    //! that does not converge is a corrupt element.
-    CBStatus SolveInternal(const TFloat *x, TFloat *y, TFloat *r) const {
+    //! The unknowns y of the Inner kernel at x and the velocities v, with the internal unknowns solving
+    //! their rows by Newton iteration from zero, and the inner residual r there, without boundary
+    //! conditions. A solve that does not converge is a corrupt element.
+    CBStatus SolveInternal(const TFloat *x, const TFloat *v, TFloat *y, TFloat *r) const {
         std::copy_n(x, firstInternal, y);
         std::fill_n(y + firstInternal, numInternal, 0.0);
         std::copy(x + firstInternal, x + numUnknowns, y + firstInternal + numInternal);
+        const std::array<TFloat, 3*Inner::numNodes> w = InnerVelocities(v);
         const bool noBoundaryConditions[3*Inner::numNodes] = {};
-        CBStatus rc = inner_.Residual(y, noBoundaryConditions, r);
+        CBStatus rc = inner_.Residual(y, w.data(), noBoundaryConditions, r);
         if (rc != CBStatus::SUCCESS)
             return rc;
 
@@ -650,13 +675,13 @@ public:
         std::fill_n(allButInternal, firstInternal, true);
         std::array<TFloat, numInner*numInner> K;
         for (int iteration = 0; iteration < maxIterations; iteration++) {
-            rc = inner_.Tangent(y, allButInternal, localStep * length_, K.data());
+            rc = inner_.Tangent(y, w.data(), allButInternal, localStep * length_, K.data());
             if (rc != CBStatus::SUCCESS)
                 return rc;
             const Vector3<TFloat> step = InternalBlock(K.data()).GetInverse() * Vector3<TFloat>(r + firstInternal);
             for (int k = 0; k < numInternal; k++)
                 y[firstInternal + k] -= step(k);
-            rc = inner_.Residual(y, noBoundaryConditions, r);
+            rc = inner_.Residual(y, w.data(), noBoundaryConditions, r);
             if (rc != CBStatus::SUCCESS)
                 return rc;
             // Written so that a step that is not a number does not converge.
@@ -683,6 +708,13 @@ private:
     static constexpr TFloat localStep = 1e-8;
     static constexpr TFloat stepTolerance = 1e-10;
     static constexpr int maxIterations = 20;
+
+    //! Velocities of the Inner kernel: those of the remaining nodes v, and zero on the internal unknowns.
+    static std::array<TFloat, 3*Inner::numNodes> InnerVelocities(const TFloat *v) {
+        std::array<TFloat, 3*Inner::numNodes> w{};
+        std::copy_n(v, firstInternal, w.begin());
+        return w;
+    }
 
     //! Index in the Inner unknowns of condensed unknown i.
     static int InnerIndex(int i) {return i < firstInternal ? i : i + numInternal;}

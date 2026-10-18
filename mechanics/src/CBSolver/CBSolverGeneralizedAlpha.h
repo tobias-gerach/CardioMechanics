@@ -41,6 +41,8 @@ public:
     
     bool SupportsPressureField() override {return true; }
     
+    bool SupportsKelvinVoigtViscosity() override {return true; }
+    
     void SetZeroVelocityAndAcceleration() override;
     void SetZeroDisplacement() override;
     friend PetscErrorCode CBSolverGeneralizedAlphaSNESHelperFunctionForces(SNES snes, Vec x, Vec f, void *solver);

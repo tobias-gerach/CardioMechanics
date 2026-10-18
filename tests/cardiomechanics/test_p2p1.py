@@ -117,6 +117,41 @@ def test_p2p1_refuses_preconditioner_other_than_lu_or_fieldsplit(binary, cm_env,
     assert_refused(proc, "jacobi", "lu", "fieldsplit")
 
 
+KELVIN_VOIGT = ("<TensionMax>0</TensionMax>", "<TensionMax>0</TensionMax><KelvinVoigt><Eta>0.1</Eta></KelvinVoigt>")
+GENERALIZED_ALPHA = ("<Type>Static</Type>", "<Type>GeneralizedAlpha</Type><GeneralizedAlpha><RhoInf>1</RhoInf></GeneralizedAlpha>")
+
+
+@pytest.mark.parametrize("solver, name", [("Static", "Static Solver"), ("NewmarkBeta", "Newmark Beta Solver")])
+def test_solver_without_integrator_velocity_refuses_kelvin_voigt_viscosity(binary, cm_env, tmp_path, solver, name):
+    """Only generalized-alpha evaluates the viscous stress from its own velocity (ADR-0010)."""
+    proc, _ = _run(binary, cm_env, tmp_path, element_type="T10", solver=solver, replace=[KELVIN_VOIGT], check=False)
+    assert_refused(proc, name, "KelvinVoigt.Eta")
+
+
+@pytest.mark.parametrize("element_type", ["T4", "T4MINI"])
+def test_element_without_viscous_stress_refuses_kelvin_voigt_viscosity(binary, cm_env, tmp_path, element_type):
+    """The linear elements do not evaluate the viscous stress yet, so a viscous material would be silently elastic."""
+    proc, _ = _run(binary, cm_env, tmp_path, element_type=element_type, replace=[GENERALIZED_ALPHA, KELVIN_VOIGT],
+                   check=False)
+    assert_refused(proc, element_type, "KelvinVoigt.Eta")
+
+
+def test_negative_kelvin_voigt_viscosity_is_refused(binary, cm_env, tmp_path):
+    """A negative viscosity would feed energy into the body."""
+    negative = (KELVIN_VOIGT[0], KELVIN_VOIGT[1].replace("0.1", "-0.1"))
+    proc, _ = _run(binary, cm_env, tmp_path, replace=[GENERALIZED_ALPHA, negative], check=False)
+    assert_refused(proc, "KelvinVoigt.Eta", "negative")
+
+
+def test_stiffness_proportional_damping_refuses_kelvin_voigt_viscosity(binary, cm_env, tmp_path):
+    """Rayleigh's stiffness-proportional damping is built from the element tangent, which holds the viscous
+    velocity term too, so that term would damp twice."""
+    damping = ("</Materials>", "<Global><Damping><Type>Rayleigh</Type><Rayleigh><Beta>0.01</Beta></Rayleigh></Damping>"
+                               "</Global></Materials>")
+    proc, _ = _run(binary, cm_env, tmp_path, replace=[GENERALIZED_ALPHA, KELVIN_VOIGT, damping], check=False)
+    assert_refused(proc, "Rayleigh.Beta", "KelvinVoigt.Eta")
+
+
 def _active_tension(measure):
     """Settings substitution for a fibre tension ramped to 0.3 over the run, with the top face unloaded."""
     return [("<TensionMax>0</TensionMax>",

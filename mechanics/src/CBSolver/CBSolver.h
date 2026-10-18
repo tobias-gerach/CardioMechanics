@@ -68,6 +68,9 @@ public:
 
     /// Whether the solver carries the pressure field of mixed displacement/pressure elements.
     virtual bool SupportsPressureField() {return false; }
+
+    /// Whether the solver links the velocity the Kelvin-Voigt viscous stress is evaluated from (ADR-0010).
+    virtual bool SupportsKelvinVoigtViscosity() {return false; }
     
     virtual void SetZeroVelocityAndAcceleration() {}
     
@@ -345,6 +348,7 @@ protected:
     Vec trialPressures_      = 0;
     Vec pressureResiduals_   = 0;
     Vec trialVelocity_       = 0; // laid out like nodes_
+    bool hasKelvinVoigtViscosity_ = false; // whether any material of the model has a non-zero KelvinVoigt.Eta
     Vec stepStartNodes_      = 0; // see SaveStepStart
     Vec stepStartPressures_  = 0;
     

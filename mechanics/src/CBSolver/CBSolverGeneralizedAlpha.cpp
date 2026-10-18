@@ -40,6 +40,11 @@ PetscErrorCode CBSolverGeneralizedAlphaSNESHelperFunctionForcesJacobian(SNES sne
 
 void CBSolverGeneralizedAlpha::Init(ParameterMap *_parameter, CBModel *_model) {
     Base::Init(_parameter, _model);
+    // The stiffness-proportional damping is built from the element tangent, which with a viscous
+    // stress holds the viscous velocity term too, so that term would damp twice.
+    if (globalRayleighBeta_ != 0 && hasKelvinVoigtViscosity_)
+        throw std::runtime_error("CBSolverGeneralizedAlpha::Init(): Materials.Global.Damping.Rayleigh.Beta cannot be "
+                                 "combined with KelvinVoigt.Eta");
     Base::status_ = CBStatus::WAITING;
 }
 

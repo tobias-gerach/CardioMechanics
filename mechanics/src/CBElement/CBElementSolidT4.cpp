@@ -99,20 +99,23 @@ void CBElementSolidT4::CalcDeformationTensorWithLocalBasis(const TFloat *nodesCo
 
 CBElementSolidT4::Kernel CBElementSolidT4::MakeKernel() {
     return Kernel(geometry_, &basisAtQuadraturePoint_, *Base::material_->GetConstitutiveModel(), Base::tensionModels_.data(),
-                  Base::adapter_->GetSolver()->GetTiming().GetCurrentTime());
+                  Base::adapter_->GetSolver()->GetTiming().GetCurrentTime(), Base::material_->GetKelvinVoigtEta(),
+                  Base::adapter_->GetVelocityDerivative());
 }
 
 CBStatus CBElementSolidT4::CalcNodalForces() {
     TFloat nodesCoords[12];
+    TFloat velocities[12];
     bool   boundaryConditions[12];
     TInt   nodesCoordsIndices[12];
     TFloat forces[12];
 
     GetNodesCoordsIndices(nodesCoordsIndices);
     Base::adapter_->GetNodesCoords(12, nodesCoordsIndices, nodesCoords);
+    Base::adapter_->GetVelocities(12, nodesCoordsIndices, velocities);
     Base::adapter_->GetNodesComponentsBoundaryConditions(12, nodesCoordsIndices, boundaryConditions);
 
-    CBStatus rc = ReportCorruptElement(MakeKernel().Residual(nodesCoords, boundaryConditions, forces));
+    CBStatus rc = ReportCorruptElement(MakeKernel().Residual(nodesCoords, velocities, boundaryConditions, forces));
     if (rc != CBStatus::SUCCESS)
         return rc;
 
@@ -189,15 +192,17 @@ CBStatus CBElementSolidT4::GetCauchyStress(Matrix3<TFloat> &cauchyStress) {
 
 CBStatus CBElementSolidT4::CalcNodalForcesJacobian() {
     TFloat nodesCoords[12];
+    TFloat velocities[12];
     bool   boundaryConditions[12];
     TInt   nodesCoordsIndices[12];
     TFloat forcesJacobian[12*12];
 
     GetNodesCoordsIndices(nodesCoordsIndices);
     Base::adapter_->GetNodesCoords(12, nodesCoordsIndices, nodesCoords);
+    Base::adapter_->GetVelocities(12, nodesCoordsIndices, velocities);
     Base::adapter_->GetNodesComponentsBoundaryConditions(12, nodesCoordsIndices, boundaryConditions);
 
-    CBStatus rc = ReportCorruptElement(MakeKernel().Tangent(nodesCoords, boundaryConditions,
+    CBStatus rc = ReportCorruptElement(MakeKernel().Tangent(nodesCoords, velocities, boundaryConditions,
                                                             Base::adapter_->GetFiniteDifferencesEpsilon(), forcesJacobian));
     if (rc != CBStatus::SUCCESS)
         return rc;
@@ -216,6 +221,7 @@ CBStatus CBElementSolidT4::CalcNodalForcesActiveStressJacobian() {
     // Active stress enters the nodal forces linearly through the tension model, so a central
     // finite difference in the active tension yields the exact derivative.
     TFloat nodesCoords[12];
+    TFloat velocities[12];
     bool   boundaryConditions[12];
     TInt   nodesCoordsIndices[12];
     TFloat f1[12];
@@ -224,6 +230,7 @@ CBStatus CBElementSolidT4::CalcNodalForcesActiveStressJacobian() {
 
     GetNodesCoordsIndices(nodesCoordsIndices);
     Base::adapter_->GetNodesCoords(12, nodesCoordsIndices, nodesCoords);
+    Base::adapter_->GetVelocities(12, nodesCoordsIndices, velocities);
     Base::adapter_->GetNodesComponentsBoundaryConditions(12, nodesCoordsIndices, boundaryConditions);
 
     // The kernel queries the tension model at each evaluation, so it sees the perturbed tension. It
@@ -234,10 +241,10 @@ CBStatus CBElementSolidT4::CalcNodalForcesActiveStressJacobian() {
     const TFloat tau     = GetTensionModel()->GetActiveTension();
 
     GetTensionModel()->SetActiveTensionAtQuadraturePoint(tau + epsilon);
-    CBStatus rc = kernel.Residual(nodesCoords, boundaryConditions, f1);
+    CBStatus rc = kernel.Residual(nodesCoords, velocities, boundaryConditions, f1);
     if (rc == CBStatus::SUCCESS) {
         GetTensionModel()->SetActiveTensionAtQuadraturePoint(tau - epsilon);
-        rc = kernel.Residual(nodesCoords, boundaryConditions, f2);
+        rc = kernel.Residual(nodesCoords, velocities, boundaryConditions, f2);
     }
     GetTensionModel()->SetActiveTensionAtQuadraturePoint(tau);
     if (ReportCorruptElement(rc) != CBStatus::SUCCESS)

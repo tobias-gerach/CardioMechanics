@@ -88,6 +88,7 @@ protected:
     static constexpr int numCoords = 3 * Kernel::numNodes;
     static constexpr int n         = Kernel::numUnknowns;
     using Unknowns                 = std::array<TFloat, n>;
+    using Velocities               = std::array<TFloat, numCoords>;
 
     void SetUp() override {
         law_      = MakeLaw(std::get<0>(GetParam()), parameters_);
@@ -102,7 +103,9 @@ protected:
         return points == 1 ? quadratureRule1 : points == 4 ? quadratureRule4 : quadratureRule14;
     }
 
-    Kernel MakeKernel(CBTensionModel &tension) { return Kernel(geometry_, bases_.data(), *law_, Everywhere(tension).data(), 0.0); }
+    Kernel MakeKernel(CBTensionModel &tension, TFloat eta = 0, TFloat velocityDerivative = 0) {
+        return Kernel(geometry_, bases_.data(), *law_, Everywhere(tension).data(), 0.0, eta, velocityDerivative);
+    }
 
     // The reference configuration, where the pressures vanish.
     Unknowns ReferenceUnknowns() const {
@@ -123,7 +126,7 @@ protected:
 
     void ResidualVanishesInReferenceConfiguration() {
         TFloat r[n];
-        ASSERT_EQ(MakeKernel(noTension_).Residual(ReferenceUnknowns().data(), free_, r), CBStatus::SUCCESS);
+        ASSERT_EQ(MakeKernel(noTension_).Residual(ReferenceUnknowns().data(), rest_.data(), free_, r), CBStatus::SUCCESS);
         for (int j = 0; j < n; j++)
             EXPECT_NEAR(r[j], 0, 1e-12) << "unknown " << j;
     }
@@ -134,7 +137,7 @@ protected:
         const Kernel kernel = MakeKernel(noTension_);
         Unknowns x          = CurrentUnknowns();
         TFloat r[n];
-        ASSERT_EQ(kernel.Residual(x.data(), free_, r), CBStatus::SUCCESS);
+        ASSERT_EQ(kernel.Residual(x.data(), rest_.data(), free_, r), CBStatus::SUCCESS);
 
         const TFloat h = 1e-6;
         for (int j = 0; j < n; j++) {
@@ -160,8 +163,8 @@ protected:
                 y[3 * a + i] = Q(i, 0) * x[3 * a] + Q(i, 1) * x[3 * a + 1] + Q(i, 2) * x[3 * a + 2];
 
         TFloat r[n], s[n], energy, rotatedEnergy;
-        ASSERT_EQ(kernel.Residual(x.data(), free_, r), CBStatus::SUCCESS);
-        ASSERT_EQ(kernel.Residual(y.data(), free_, s), CBStatus::SUCCESS);
+        ASSERT_EQ(kernel.Residual(x.data(), rest_.data(), free_, r), CBStatus::SUCCESS);
+        ASSERT_EQ(kernel.Residual(y.data(), rest_.data(), free_, s), CBStatus::SUCCESS);
         ASSERT_EQ(kernel.Energy(x.data(), energy), CBStatus::SUCCESS);
         ASSERT_EQ(kernel.Energy(y.data(), rotatedEnergy), CBStatus::SUCCESS);
 
@@ -181,7 +184,7 @@ protected:
         const Kernel kernel = MakeKernel(tension);
         Unknowns x          = CurrentUnknowns();
         std::array<TFloat, n * n> tangent;
-        ASSERT_EQ(kernel.Tangent(x.data(), free_, 1e-6, tangent.data()), CBStatus::SUCCESS);
+        ASSERT_EQ(kernel.Tangent(x.data(), rest_.data(), free_, 1e-6, tangent.data()), CBStatus::SUCCESS);
 
         TFloat asymmetry = 0;
         for (int i = 0; i < n; i++)
@@ -194,9 +197,9 @@ protected:
             const TFloat xj = x[j];
             TFloat plus[n], minus[n];
             x[j] = xj + h;
-            ASSERT_EQ(kernel.Residual(x.data(), free_, plus), CBStatus::SUCCESS);
+            ASSERT_EQ(kernel.Residual(x.data(), rest_.data(), free_, plus), CBStatus::SUCCESS);
             x[j] = xj - h;
-            ASSERT_EQ(kernel.Residual(x.data(), free_, minus), CBStatus::SUCCESS);
+            ASSERT_EQ(kernel.Residual(x.data(), rest_.data(), free_, minus), CBStatus::SUCCESS);
             x[j] = xj;
             for (int i = 0; i < n; i++)
                 EXPECT_NEAR(tangent[n * i + j], (plus[i] - minus[i]) / (2 * h), 1e-6) << "residual " << i << ", unknown " << j;
@@ -205,7 +208,7 @@ protected:
 
     void ElementMatrixIsSymmetricForHyperelasticLaw() {
         std::array<TFloat, n * n> tangent;
-        ASSERT_EQ(MakeKernel(noTension_).Tangent(CurrentUnknowns().data(), free_, 1e-6, tangent.data()), CBStatus::SUCCESS);
+        ASSERT_EQ(MakeKernel(noTension_).Tangent(CurrentUnknowns().data(), rest_.data(), free_, 1e-6, tangent.data()), CBStatus::SUCCESS);
         for (int i = 0; i < n; i++)
             for (int j = 0; j < i; j++)
                 EXPECT_NEAR(tangent[n * i + j], tangent[n * j + i], 1e-6) << "entry " << i << ", " << j;
@@ -222,8 +225,9 @@ protected:
         for (int q = 0; q < numPoints; q++)
             models[q] = &tensions[q];
         const bool noBoundaryConditions[3 * nodes] = {};
+        const TFloat rest[3 * nodes] = {};
         TFloat r[InnerKernel::numUnknowns];
-        ASSERT_EQ(InnerKernel(geometry_, bases_.data(), *law_, models.data(), 0.0).Residual(x, noBoundaryConditions, r),
+        ASSERT_EQ(InnerKernel(geometry_, bases_.data(), *law_, models.data(), 0.0, 0.0, 0.0).Residual(x, rest, noBoundaryConditions, r),
                   CBStatus::SUCCESS);
 
         for (int q = 0; q < numPoints; q++) {
@@ -244,8 +248,143 @@ protected:
         }
     }
 
+    // A velocity that stretches, shears and varies over the element, so that Edot does not vanish.
+    Velocities StrainingVelocities() const {
+        Velocities v;
+        for (int a = 0; a < Kernel::numNodes; a++) {
+            const TFloat X0 = X_[3 * a], X1 = X_[3 * a + 1], X2 = X_[3 * a + 2];
+            v[3 * a]     = 0.3 * X0 - 0.2 * X2 + 0.1 * X1 * X1 + 0.05;
+            v[3 * a + 1] = 0.1 * X0 + 0.4 * X2 - 0.2 * X0 * X2;
+            v[3 * a + 2] = -0.3 * X1 + 0.25 * X2 + 0.15 * X0 * X1;
+        }
+        return v;
+    }
+
+    // eta/2 int tr(Edot^2) dV with Edot = sym(F^T Fdot), from the shape-function derivatives. The
+    // fibre bases are rotations, which leave the trace unchanged.
+    TFloat Dissipation(const TFloat *x, const TFloat *v, TFloat eta) const {
+        TFloat dissipation = 0;
+        for (int q = 0; q < geometry_.rule->numPoints; q++) {
+            const TFloat *dNdX = &geometry_.dNdX[3 * Kernel::numNodes * q];
+            Matrix3<TFloat> F, Fdot;
+            for (int i = 0; i < 3; i++)
+                for (int j = 0; j < 3; j++) {
+                    F(i, j) = Fdot(i, j) = 0;
+                    for (int a = 0; a < Kernel::numNodes; a++) {
+                        F(i, j)    += dNdX[3 * a + j] * x[3 * a + i];
+                        Fdot(i, j) += dNdX[3 * a + j] * v[3 * a + i];
+                    }
+                }
+            const Matrix3<TFloat> Edot = 0.5 * (F.GetTranspose() * Fdot + Fdot.GetTranspose() * F);
+            dissipation += geometry_.dV[q] * eta / 2 * (Edot * Edot).Trace();
+        }
+        return dissipation;
+    }
+
+    // At rest the viscous stress vanishes at every configuration, so with a zero velocity derivative
+    // the tangent, a difference of residuals at rest, is unchanged as well.
+    void ZeroVelocityLeavesForcesAndTangentUnchanged() {
+        const Unknowns x = CurrentUnknowns();
+        TFloat r[n], viscous[n];
+        ASSERT_EQ(MakeKernel(noTension_).Residual(x.data(), rest_.data(), free_, r), CBStatus::SUCCESS);
+        ASSERT_EQ(MakeKernel(noTension_, 0.7, 3).Residual(x.data(), rest_.data(), free_, viscous), CBStatus::SUCCESS);
+        for (int j = 0; j < n; j++)
+            EXPECT_EQ(viscous[j], r[j]) << "unknown " << j;
+
+        std::array<TFloat, n * n> tangent, viscousTangent;
+        ASSERT_EQ(MakeKernel(noTension_).Tangent(x.data(), rest_.data(), free_, 1e-6, tangent.data()), CBStatus::SUCCESS);
+        ASSERT_EQ(MakeKernel(noTension_, 0.7, 0).Tangent(x.data(), rest_.data(), free_, 1e-6, viscousTangent.data()),
+                  CBStatus::SUCCESS);
+        for (int k = 0; k < n * n; k++)
+            EXPECT_EQ(viscousTangent[k], tangent[k]) << "entry " << k / n << ", " << k % n;
+    }
+
+    // The viscous forces, the residual less its value at rest, are the velocity gradient of the
+    // dissipation pseudo-potential. The constraint rows do not see them.
+    void ViscousForcesAreDissipationGradient() {
+        const TFloat eta  = 0.7;
+        const Kernel kernel = MakeKernel(noTension_, eta);
+        const Unknowns x  = CurrentUnknowns();
+        Velocities v      = StrainingVelocities();
+        TFloat r[n], elastic[n];
+        ASSERT_EQ(kernel.Residual(x.data(), v.data(), free_, r), CBStatus::SUCCESS);
+        ASSERT_EQ(kernel.Residual(x.data(), rest_.data(), free_, elastic), CBStatus::SUCCESS);
+
+        TFloat largest = 0;
+        const TFloat h = 1e-6;
+        for (int j = 0; j < numCoords; j++) {
+            const TFloat vj = v[j];
+            v[j]               = vj + h;
+            const TFloat plus  = Dissipation(x.data(), v.data(), eta);
+            v[j]               = vj - h;
+            const TFloat minus = Dissipation(x.data(), v.data(), eta);
+            v[j]               = vj;
+            largest            = std::max(largest, std::abs(r[j] - elastic[j]));
+            EXPECT_NEAR(r[j] - elastic[j], (plus - minus) / (2 * h), 1e-8) << "unknown " << j;
+        }
+        ASSERT_GT(largest, 1e-2) << "the velocity must strain the element for this test to detect anything";
+        for (int j = numCoords; j < n; j++)
+            EXPECT_EQ(r[j], elastic[j]) << "unknown " << j;
+    }
+
+    // v = w x (x - c) + b, a rotation about c plus a translation, leaves every length unchanged.
+    void RigidBodyVelocityGivesNoViscousForce() {
+        const Kernel kernel     = MakeKernel(noTension_, 0.7);
+        const Unknowns x        = CurrentUnknowns();
+        const Vector3<TFloat> w(0.4, -0.7, 0.3), c(0.2, 0.1, -0.3), b(0.5, 0.2, -0.1);
+        Velocities v;
+        for (int a = 0; a < Kernel::numNodes; a++) {
+            const Vector3<TFloat> va = CrossProduct(w, Vector3<TFloat>(&x[3 * a]) - c) + b;
+            for (int i = 0; i < 3; i++)
+                v[3 * a + i] = va(i);
+        }
+        TFloat r[n], elastic[n];
+        ASSERT_EQ(kernel.Residual(x.data(), v.data(), free_, r), CBStatus::SUCCESS);
+        ASSERT_EQ(kernel.Residual(x.data(), rest_.data(), free_, elastic), CBStatus::SUCCESS);
+        for (int j = 0; j < n; j++)
+            EXPECT_NEAR(r[j], elastic[j], 1e-12) << "unknown " << j;
+    }
+
+    // The velocity moves with the configuration at the rate velocityDerivative, as a time
+    // integrator's velocity does with the displacement increment, so each column differences the
+    // residual along a step of the unknown and of its velocity together.
+    void TangentColumnIncludesVelocityTerm() {
+        const TFloat velocityDerivative = 3;
+        const Kernel kernel = MakeKernel(noTension_, 0.7, velocityDerivative);
+        Unknowns x          = CurrentUnknowns();
+        Velocities v        = StrainingVelocities();
+        std::array<TFloat, n * n> tangent, elastic;
+        ASSERT_EQ(kernel.Tangent(x.data(), v.data(), free_, 1e-6, tangent.data()), CBStatus::SUCCESS);
+        ASSERT_EQ(MakeKernel(noTension_).Tangent(x.data(), v.data(), free_, 1e-6, elastic.data()), CBStatus::SUCCESS);
+
+        TFloat largest = 0;
+        const TFloat h = 1e-5;
+        for (int j = 0; j < n; j++) {
+            const TFloat xj = x[j];
+            const TFloat vj = j < numCoords ? v[j] : 0;
+            TFloat plus[n], minus[n];
+            x[j] = xj + h;
+            if (j < numCoords)
+                v[j] = vj + velocityDerivative * h;
+            ASSERT_EQ(kernel.Residual(x.data(), v.data(), free_, plus), CBStatus::SUCCESS);
+            x[j] = xj - h;
+            if (j < numCoords)
+                v[j] = vj - velocityDerivative * h;
+            ASSERT_EQ(kernel.Residual(x.data(), v.data(), free_, minus), CBStatus::SUCCESS);
+            x[j] = xj;
+            if (j < numCoords)
+                v[j] = vj;
+            for (int i = 0; i < n; i++) {
+                largest = std::max(largest, std::abs(tangent[n * i + j] - elastic[n * i + j]));
+                EXPECT_NEAR(tangent[n * i + j], (plus[i] - minus[i]) / (2 * h), 1e-6) << "residual " << i << ", unknown " << j;
+            }
+        }
+        ASSERT_GT(largest, 1e-1) << "the viscous term must change the tangent for this test to detect anything";
+    }
+
     const Coords X_ = ReferenceCoords();
     const bool free_[numCoords] = {};
+    const Velocities rest_{};
     CBNoTension noTension_;
     ParameterMap parameters_;
     std::unique_ptr<CBConstitutiveModel> law_;
@@ -283,6 +422,18 @@ TEST_P(ElementKernelMini, TangentColumnIsDerivativeOfForcesWrtUnknown) { Tangent
 TEST_P(ElementKernelP2P1, ElementMatrixIsSymmetricForHyperelasticLaw) { ElementMatrixIsSymmetricForHyperelasticLaw(); }
 TEST_P(ElementKernelMini, ElementMatrixIsSymmetricForHyperelasticLaw) { ElementMatrixIsSymmetricForHyperelasticLaw(); }
 
+TEST_P(ElementKernelT10, ZeroVelocityLeavesForcesAndTangentUnchanged) { ZeroVelocityLeavesForcesAndTangentUnchanged(); }
+TEST_P(ElementKernelP2P1, ZeroVelocityLeavesForcesAndTangentUnchanged) { ZeroVelocityLeavesForcesAndTangentUnchanged(); }
+
+TEST_P(ElementKernelT10, ViscousForcesAreDissipationGradient) { ViscousForcesAreDissipationGradient(); }
+TEST_P(ElementKernelP2P1, ViscousForcesAreDissipationGradient) { ViscousForcesAreDissipationGradient(); }
+
+TEST_P(ElementKernelT10, RigidBodyVelocityGivesNoViscousForce) { RigidBodyVelocityGivesNoViscousForce(); }
+TEST_P(ElementKernelP2P1, RigidBodyVelocityGivesNoViscousForce) { RigidBodyVelocityGivesNoViscousForce(); }
+
+TEST_P(ElementKernelT10, TangentColumnIncludesVelocityTerm) { TangentColumnIncludesVelocityTerm(); }
+TEST_P(ElementKernelP2P1, TangentColumnIncludesVelocityTerm) { TangentColumnIncludesVelocityTerm(); }
+
 TEST_P(ElementKernelT4, EachPointEvaluatesItsOwnTensionModel) { EachPointEvaluatesItsOwnTensionModel<Kernel>(CurrentUnknowns().data()); }
 TEST_P(ElementKernelT10, EachPointEvaluatesItsOwnTensionModel) { EachPointEvaluatesItsOwnTensionModel<Kernel>(CurrentUnknowns().data()); }
 TEST_P(ElementKernelP2P1, EachPointEvaluatesItsOwnTensionModel) { EachPointEvaluatesItsOwnTensionModel<Kernel>(CurrentUnknowns().data()); }
@@ -304,11 +455,12 @@ TEST_P(ElementKernelMini, EachPointEvaluatesItsOwnTensionModel) {
 TEST_P(ElementKernelMini, InnerBubbleRowsVanishAtCondensedState) {
     const int bubble = 3 * CBLinearTetBasis::numNodes;  // the first bubble unknown of the inner kernel
     std::array<TFloat, MiniKernel::numUnknowns> y, r;
-    ASSERT_EQ(MakeKernel(noTension_).SolveInternal(CurrentUnknowns().data(), y.data(), r.data()), CBStatus::SUCCESS);
+    ASSERT_EQ(MakeKernel(noTension_).SolveInternal(CurrentUnknowns().data(), rest_.data(), y.data(), r.data()), CBStatus::SUCCESS);
     ASSERT_GT(std::abs(y[bubble]) + std::abs(y[bubble + 1]) + std::abs(y[bubble + 2]), 1e-4);
 
     const bool noBoundaryConditions[3 * MiniKernel::numNodes] = {};
-    ASSERT_EQ(MiniKernel(geometry_, bases_.data(), *law_, Everywhere(noTension_).data(), 0.0).Residual(y.data(), noBoundaryConditions, r.data()),
+    const TFloat rest[3 * MiniKernel::numNodes] = {};
+    ASSERT_EQ(MiniKernel(geometry_, bases_.data(), *law_, Everywhere(noTension_).data(), 0.0, 0.0, 0.0).Residual(y.data(), rest, noBoundaryConditions, r.data()),
               CBStatus::SUCCESS);
     for (int k = 0; k < 3; k++)
         EXPECT_NEAR(r[bubble + k], 0, 1e-12) << "bubble component " << k;
@@ -320,8 +472,8 @@ TEST_P(ElementKernelMini, LocalSolveThatDoesNotConvergeIsCorruptElement) {
     const Unknowns x    = CurrentUnknowns();
     TFloat r[n], energy;
     std::array<TFloat, n * n> tangent;
-    EXPECT_EQ(kernel.Residual(x.data(), free_, r), CBStatus::CORRUPT_ELEMENT);
-    EXPECT_EQ(kernel.Tangent(x.data(), free_, 1e-6, tangent.data()), CBStatus::CORRUPT_ELEMENT);
+    EXPECT_EQ(kernel.Residual(x.data(), rest_.data(), free_, r), CBStatus::CORRUPT_ELEMENT);
+    EXPECT_EQ(kernel.Tangent(x.data(), rest_.data(), free_, 1e-6, tangent.data()), CBStatus::CORRUPT_ELEMENT);
     EXPECT_EQ(kernel.Energy(x.data(), energy), CBStatus::CORRUPT_ELEMENT);
 }
 
@@ -345,9 +497,10 @@ TEST_P(MiniKernelAtHardSwitch, LocalSolveConverges) {
     std::array<Matrix3<TFloat>, CBQuadratureRule::maxPoints> bases;
     bases.fill(Matrix3<TFloat>::Identity());
     CBNoTension noTension;
-    const CBCondensedKernel<MiniKernel, 3> kernel(geometry, bases.data(), law, Everywhere(noTension).data(), 0.0);
+    const CBCondensedKernel<MiniKernel, 3> kernel(geometry, bases.data(), law, Everywhere(noTension).data(), 0.0, 0.0, 0.0);
 
     const bool free[3 * CBLinearTetBasis::numNodes] = {};
+    const TFloat rest[3 * CBLinearTetBasis::numNodes] = {};
     for (TFloat stretch : {-1e-7, 0.0, 1e-7})
         for (TFloat scale : {1e-9, 1e-7, 1e-5, 1e-3, 1e-1, 1e1, 1e3}) {
             std::array<TFloat, decltype(kernel)::numUnknowns> x;
@@ -358,7 +511,7 @@ TEST_P(MiniKernelAtHardSwitch, LocalSolveConverges) {
                 x[3 * CBLinearTetBasis::numNodes + a] = scale * (0.5 - 0.3 * a);
             }
             TFloat r[decltype(kernel)::numUnknowns];
-            EXPECT_EQ(kernel.Residual(x.data(), free, r), CBStatus::SUCCESS) << "fibre stretch " << stretch << ", pressure scale " << scale;
+            EXPECT_EQ(kernel.Residual(x.data(), rest, free, r), CBStatus::SUCCESS) << "fibre stretch " << stretch << ", pressure scale " << scale;
         }
 }
 
@@ -377,7 +530,7 @@ TEST_P(ElementKernelP2P1, PressureBlockIsPressureMassMatrix) {
     const TFloat kappa  = law_->GetBulkModulus();
 
     std::array<TFloat, n * n> tangent;
-    ASSERT_EQ(MakeKernel(noTension_).Tangent(CurrentUnknowns().data(), free_, 1e-6, tangent.data()), CBStatus::SUCCESS);
+    ASSERT_EQ(MakeKernel(noTension_).Tangent(CurrentUnknowns().data(), rest_.data(), free_, 1e-6, tangent.data()), CBStatus::SUCCESS);
     for (int a = 0; a < 4; a++)
         for (int b = 0; b < 4; b++)
             EXPECT_NEAR(tangent[n * (numCoords + a) + numCoords + b], -volume * (1 + (a == b)) / (20 * kappa), 1e-15)

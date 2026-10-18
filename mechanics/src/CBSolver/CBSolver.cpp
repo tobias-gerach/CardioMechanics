@@ -258,6 +258,27 @@ void CBSolver::Init(ParameterMap *parameters, CBModel *model) {
         }
     }
     
+    // Checked over the elements of the whole model rather than those of this rank, so that every rank
+    // refuses alike, rank 0, which reports errors, among them.
+    std::map<TInt, TFloat> etas;
+    for (CBElement *e : model_->GetElements()) {
+        auto *solid = dynamic_cast<CBElementSolid *>(e);
+        if (!solid)
+            continue;
+        auto [eta, isNew] = etas.try_emplace(solid->GetMaterialIndex(), 0);
+        if (isNew)
+            eta->second = CBMaterial::ReadKelvinVoigtEta(parameters_, eta->first);
+        if (eta->second == 0)
+            continue;
+        hasKelvinVoigtViscosity_ = true;
+        if (!SupportsKelvinVoigtViscosity())
+            throw std::runtime_error("CBSolver::Init(): Solver [" + GetType() + "] does not support KelvinVoigt.Eta of material " +
+                                     std::to_string(eta->first));
+        if (!solid->SupportsKelvinVoigtViscosity())
+            throw std::runtime_error("CBSolver::Init(): " + solid->GetType() + " elements do not support KelvinVoigt.Eta of material " +
+                                     std::to_string(eta->first));
+    }
+    
     MPI_Barrier(DCPetsc::Comm());
     
     InitFormulation();

@@ -228,3 +228,35 @@ def test_robin_dashpot_converges_at_second_order(binary, cm_env, tmp_path, dashp
     A backward difference of the displacements is a first-order velocity, and lagged half a step under
     generalized-alpha, so the dashpot would drag the whole scheme down to first order."""
     _assert_second_order(binary, cm_env, tmp_path, "T10", rho_inf, dashpot_reference, DASHPOT)
+
+
+# Kelvin-Voigt viscosity alone. It changes the trace within the convergence window by more than 5 % of
+# its amplitude, well beyond the discretization error.
+KELVIN_VOIGT = (("<Density>0.01</Density>", "<Density>0.01</Density><KelvinVoigt><Eta>0.5</Eta></KelvinVoigt>"),)
+
+
+@pytest.fixture(scope="module")
+def kelvin_voigt_reference(binary, cm_env, tmp_path_factory):
+    """Returns a function of the element type giving the tip trace of the viscous cantilever, generalized-alpha at
+    RhoInf = 1 and step REFERENCE_DT, run once per element type."""
+    pytest.importorskip("meshio")
+    cache = {}
+
+    def get(element_type):
+        if element_type not in cache:
+            wd = tmp_path_factory.mktemp(f"{element_type}_kelvin_voigt_reference")
+            cache[element_type] = _tip_trace(binary, cm_env, wd, element_type, 1.0, REFERENCE_DT, KELVIN_VOIGT)
+        return cache[element_type]
+    return get
+
+
+@pytest.mark.parametrize("element_type, rho_inf", [("T10", 1.0), ("T10", 0.5), ("T10P1", 0.5)], ids=_id)
+def test_kelvin_voigt_viscosity_converges_at_second_order(binary, cm_env, tmp_path, reference, kelvin_voigt_reference,
+                                                          element_type, rho_inf):
+    """The viscous stress is evaluated from the velocity of the time integrator at the level the residual is
+    evaluated at, so the viscous scheme keeps its order."""
+    trace = kelvin_voigt_reference(element_type)
+    undamped, _ = reference(element_type)
+    change = np.abs(trace - undamped)[:CONVERGENCE_SAMPLES].max() / np.abs(undamped).max()
+    assert change > 0.05, f"the viscosity changes the trace by {change:.2e} only"
+    _assert_second_order(binary, cm_env, tmp_path, element_type, rho_inf, trace, KELVIN_VOIGT)
