@@ -35,6 +35,15 @@ TFloat CBTensionModelBestel::f(TFloat S_p, TFloat S_m) {
     return S_p * S_m;
 }
 
+TFloat CBTensionModelBestel::Indicator(TFloat time) {
+    while (time > cycleLength_) {
+        time -=  cycleLength_;
+    }
+    TFloat S_p = 0.5 * (1 + tanh((time - onsetSystole_)/steepness_) );
+    TFloat S_m = 0.5 * (1 - tanh((time - onsetDiastole_)/steepness_) );
+    return f(S_p, S_m);
+}
+
 /// Read a value from xml with fallback. Priorities: key+tail > keyFallback+tail > defaultValue
 static TFloat InitKey(ParameterMap *params, std::string key, std::string keyFallback, std::string tail,
                       TFloat defaultValue) {
@@ -90,17 +99,14 @@ double CBTensionModelBestel::CalcActiveTension(const math_pack::Matrix3<double> 
     S_.t = time;
     TFloat dt = S_.t - S_prev_.t;
     
-    TFloat t = S_.t;
-    while (t > cycleLength_) {
-        t -=  cycleLength_;
-    }
-    
     // compute / integrate variables
-    TFloat S_p = 0.5 * (1 + tanh((t - onsetSystole_)/steepness_) );
-    TFloat S_m = 0.5 * (1 - tanh((t - onsetDiastole_)/steepness_) );
-    S_.f       = f(S_p, S_m);
+    S_.f       = Indicator(S_.t);
     S_.a       = a(S_.f);
-    S_.stress  = RungeKutta4Step(S_prev_.stress, dt, [this](double u) {return dTaudt(u, S_.a, contractility_);});
+    // a(t) switches over about two Steepness, a handful of time steps, so freezing it over a step
+    // would cost the step its fourth order
+    S_.stress  = RungeKutta4Step(S_prev_.stress, S_prev_.t, dt, [this](double t, double u) {
+        return dTaudt(u, a(Indicator(t)), contractility_);
+    });
     
     S_curr_ = S_;
     
