@@ -43,7 +43,8 @@ protected:
     using CBSolver::CalcNodalForces;
     CBStatus CalcNodalForces(Vec displacement, Vec forces);
     CBStatus CalcNodalForcesJacobian(Vec displacement, Mat jacobian);
-    /// displacedNodes = nodes + displacement increment; links pressures + pressure increment.
+    /// displacedNodes = nodes + displacement increment; links pressures + pressure increment, and the
+    /// increment over the time step as the velocity.
     void ApplyIncrement(Vec unknowns, Vec displacedNodes);
     typedef CBSolver   Base;
     

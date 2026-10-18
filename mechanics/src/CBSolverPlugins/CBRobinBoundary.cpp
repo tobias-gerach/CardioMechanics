@@ -42,9 +42,6 @@ void CBRobinBoundary::Init() {
     alpha_              = parameters_->Get<TFloat>("Plugins." + key_ + ".Alpha", projectOnNormal_ ? 1e8 : 1e5);
     beta_               = parameters_->Get<TFloat>("Plugins." + key_ + ".Beta", 5e3);
     
-    /// solver timestep
-    dt_ = Base::adapter_->GetSolver()->GetTiming().GetTimeStep();
-    
     InitContactSurfaces();
 }  // CBRobinBoundary::Init
 
@@ -65,30 +62,18 @@ void CBRobinBoundary::InitContactSurfaces() {
             ContactForces_.push_back(Vector3<TFloat>(0, 0, 0));
             initialPos_.push_back(element->GetCentroid());
             displacement_.push_back(Vector3<TFloat>(0, 0, 0));
-            prevDisplacement_.push_back(Vector3<TFloat>(0, 0, 0));
-            velocity_.push_back(Vector3<TFloat>(0, 0, 0));
         }
     }
     DCCtrl::print << "\t\tContact surfaces initialized!" << std::endl;
 }  // CBRobinBoundary::InitContactSurfaces
 
-void CBRobinBoundary::StepBack() {
-    for (int i = 0; i < contactSurfaceElements_.size(); i++) {
-        displacement_.at(i) = prevDisplacement_.at(i);
-    }
-    
-    stepBack_ = true;
-}  // CBRobinBoundary::StepBack()
-
-/// The springs are relaxed in the reference configuration, and a relocation of the mesh into a new
-/// reference is no motion the dashpot may resist.
+/// The springs are relaxed in the reference configuration.
 void CBRobinBoundary::ReferenceChanged() {
     for (int i = 0; i < contactSurfaceElements_.size(); i++) {
         auto element = contactSurfaceElements_.at(i);
         referenceNormals_.at(i) = element->GetNormalVector()*normalVectorSign_;
         initialPos_.at(i)       = element->GetCentroid();
         displacement_.at(i)     = Vector3<TFloat>(0, 0, 0);
-        prevDisplacement_.at(i) = Vector3<TFloat>(0, 0, 0);
     }
 }  // CBRobinBoundary::ReferenceChanged
 
@@ -101,16 +86,6 @@ void CBRobinBoundary::Apply(TFloat time) {
             return;
         }
     }
-    
-    for (int i = 0; i < contactSurfaceElements_.size(); i++) {
-        prevDisplacement_.at(i) = displacement_.at(i);
-    }
-    
-    /// update variables
-    prevDt_      = dt_;
-    dt_          = Base::adapter_->GetSolver()->GetTiming().GetTimeStep();
-    isFirstStep_ = false;
-    stepBack_    = false;
 }  // CBRobinBoundary::Apply
 
 void CBRobinBoundary::ApplyToNodalForces() {
@@ -124,18 +99,17 @@ void CBRobinBoundary::ApplyToNodalForces() {
         bool   bc[3*numNodes] = {};
         
         ContactForces_.at(i) = Vector3<TFloat>(0, 0, 0);
-        displacement_.at(i)  = Vector3<TFloat>(0, 0, 0);
-        velocity_.at(i)      = Vector3<TFloat>(0, 0, 0);
         
         /// add nodal forces to global vector
         TInt nodes[numNodes];
         for (int k = 0; k < numNodes; k++)
             nodes[k] = adapter_->GlobalNodeIndex(element->GetNodeIndex(k));
         
+        /// u is the reference centroid minus the current one, so v is minus the centroid velocity
         displacement_.at(i) = initialPos_.at(i) - element->GetCentroid();
-        velocity_.at(i)     = (displacement_.at(i) - prevDisplacement_.at(i)) / dt_;
+        Vector3<TFloat> v   = element->GetCentroidVelocity() * -1;
         
-        CalcForceContributionOfElement(displacement_.at(i), velocity_.at(i), element, referenceNormals_.at(i), nodalForces);
+        CalcForceContributionOfElement(displacement_.at(i), v, element, referenceNormals_.at(i), nodalForces);
         
         /// respect dirichlet boundary conditions
         Base::GetAdapter()->GetNodesComponentsBoundaryConditionsForGlobalNodes(numNodes, nodes, bc);
@@ -171,17 +145,17 @@ void CBRobinBoundary::ApplyToNodalForcesJacobian() {
         Base::GetAdapter()->GetNodesComponentsBoundaryConditionsForGlobalNodes(numNodes, nodes, bc);
         
         /// every node I carries f_I = -A/3 * w with the traction w of CalcForceContributionOfElement.
-        /// u and v depend on the nodes through the centroid, which moves by 1/3 of any node, so
-        /// dw/dx_J = -stiffness * P with P = N N^T, or P = I unprojected. The current area A depends on
-        /// the nodes as well.
+        /// u and v depend on the nodes through the centroid, which moves by 1/3 of any node, v with the
+        /// integrator's velocity derivative D, so dw/dx_J = -stiffness * P with P = N N^T, or P = I
+        /// unprojected. The current area A depends on the nodes as well.
         Triangle<TFloat> triangle = element->GetTriangle();
         TFloat area = triangle.GetArea();
         TFloat scaling = element->GetSurfaceTractionScaling();
         Vector3<TFloat> N = referenceNormals_.at(i);
         Vector3<TFloat> u = initialPos_.at(i) - triangle.GetCentroid();
-        Vector3<TFloat> v = (u - prevDisplacement_.at(i)) / dt_;
+        Vector3<TFloat> v = element->GetCentroidVelocity() * -1;
         Vector3<TFloat> w = Project(u * alpha_ + v * beta_, N) * scaling;
-        TFloat stiffness = scaling * (alpha_ + beta_ / dt_) / 3;
+        TFloat stiffness = scaling * (alpha_ + beta_ * adapter_->GetVelocityDerivative()) / 3;
         
         TFloat nodalForcesJacobian[3*numNodes*3*numNodes];
         for (int J = 0; J < numNodes; J++) {

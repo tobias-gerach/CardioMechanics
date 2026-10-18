@@ -169,6 +169,11 @@ public:
     
     
     void LinkNodes(Vec nodes){nodes_ = nodes;}
+    //! Velocity of the linked nodes as the time integrator defines it, indexed like their coordinates,
+    //! and its derivative with respect to them, which a viscous term's tangent needs (ADR-0010).
+    void LinkVelocities(Vec velocities, PetscScalar velocityDerivative){velocities_ = velocities; velocityDerivative_ = velocityDerivative; }
+    void GetVelocities(PetscInt numNodesCoords, const PetscInt* nodesCoordsIndices, PetscScalar* velocities){VecGetValues(velocities_, numNodesCoords, nodesCoordsIndices, velocities); }
+    PetscScalar GetVelocityDerivative(){return velocityDerivative_; }
     void LinkGlobalNodes(Vec nodes){globalNodes_ = nodes;}
     void LinkRefNodes(Vec refNodes){refNodes_ = refNodes;}
     void LinkNodesComponentsBoundaryConditionsGlobal(bool* nodesComponentsBoundaryConditionsGlobal); // Sets nodesComponentsBoundaryConditionsLocal automatically
@@ -200,6 +205,8 @@ private:
     Vec                    nodes_;
     Vec                    globalNodes_;
     Vec                    refNodes_;
+    Vec                    velocities_ = 0;
+    PetscScalar            velocityDerivative_ = 0;
     
     Vec                    nodalForces_;
     Mat                    nodalForcesJacobian_;

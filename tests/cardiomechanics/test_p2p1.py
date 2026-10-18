@@ -427,6 +427,10 @@ ROBIN_NORMAL = (("<RobinBoundaryGeneral>true</RobinBoundaryGeneral>", "<RobinBou
                 ("<RobinBoundaryGeneral>\n", "<RobinBoundary>\n"),
                 ("</RobinBoundaryGeneral>\n", "</RobinBoundary>\n"))
 ROBIN_NORMAL_WITH_DASHPOT = ROBIN_NORMAL + (("<Beta>0</Beta>", "<Beta>0.5</Beta>"),)
+# Under generalized-alpha the dashpot's velocity derivative is gamma / (beta dt) rather than the
+# 1 / dt of the static backward difference.
+ROBIN_DASHPOT_GENERALIZED_ALPHA = ROBIN_NORMAL_WITH_DASHPOT + (
+    ("<Type>Static</Type>", "<Type>GeneralizedAlpha</Type><GeneralizedAlpha><RhoInf>0.5</RhoInf></GeneralizedAlpha>"),)
 
 
 # A cavity declared CAVITY on six-node faces keeps them whole, as the T6 declaration does, rather
@@ -438,10 +442,12 @@ CAVITY_DECLARED = (("<Surface_130><Type>T6</Type></Surface_130>", "<Surface_130>
                          [(FIXTURE, (), False, "T10P1"), (DYNAMIC_FIXTURE, (), False, "T10P1"),
                           (ROBIN_FIXTURE, (), False, "T10P1"),
                           (ROBIN_FIXTURE, ROBIN_NORMAL_WITH_DASHPOT, False, "T10P1"),
+                          (ROBIN_FIXTURE, ROBIN_DASHPOT_GENERALIZED_ALPHA, False, "T10P1"),
                           (CIRCULATION_FIXTURE, (), True, "T10P1"),
                           (CIRCULATION_FIXTURE, CAVITY_DECLARED, True, "T10P1"),
                           (FIXTURE, (), False, "T4"), (CIRCULATION_FIXTURE, (), True, "T4")],
-                         ids=["static", "generalized_alpha", "robin", "robin_normal_dashpot", "circulation",
+                         ids=["static", "generalized_alpha", "robin", "robin_normal_dashpot",
+                              "robin_normal_dashpot_generalized_alpha", "circulation",
                               "circulation_cavity", "static_t3", "circulation_t3"])
 def test_p2p1_jacobian_matches_finite_differences(binary, cm_env, tmp_path, fixture, replace, closed, element_type):
     """Every Jacobian block, coupling and constraint included, against PETSc's finite differences.

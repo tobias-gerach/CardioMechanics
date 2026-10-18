@@ -69,7 +69,7 @@ DECREMENT_TOL = 5e-5
 # the step instead of at the intermediate level gives 0.94.
 RATE_TOL = 0.2
 
-# About 3.5 min serially, half of it the two reference runs.
+# About 5 min serially, half of it the three reference runs.
 pytestmark = pytest.mark.slow
 
 
@@ -79,8 +79,9 @@ def _id(value):
     return f"rho{value}" if isinstance(value, float) else value
 
 
-def _tip_trace(binary, cm_env, wd, element_type, rho_inf, dt=DT):
-    """Run the fixture in wd, return the vertical tip displacement at every multiple of DT up to STOP_TIME."""
+def _tip_trace(binary, cm_env, wd, element_type, rho_inf, dt=DT, replace=()):
+    """Run the fixture in wd with the (old, new) substitutions replace, return the vertical tip displacement at
+    every multiple of DT up to STOP_TIME."""
     (wd / "tetgen").mkdir(parents=True)
     write_mesh(wd / "tetgen", SCALE)
     (wd / "Results").mkdir()
@@ -91,7 +92,7 @@ def _tip_trace(binary, cm_env, wd, element_type, rho_inf, dt=DT):
     else:
         substitutions.append(("<RhoInf>1.0</RhoInf>", f"<RhoInf>{rho_inf}</RhoInf>"))
     text = FIXTURE.read_text()
-    for old, new in substitutions:
+    for old, new in substitutions + list(replace):
         assert text.count(old) == 1, f"{FIXTURE.name}: cannot substitute {old}"
         text = text.replace(old, new)
     (wd / FIXTURE.name).write_text(text)
@@ -185,12 +186,45 @@ def test_period_and_decrement_match_closed_form(binary, cm_env, tmp_path, refere
         f"logarithmic decrement {decrement:.6e}, closed form {expected_decrement:.6e} at omega dt = {omega * DT:.4f}")
 
 
-@pytest.mark.parametrize("element_type, rho_inf", [("T10", None), ("T10", 0.5), ("T10P1", 0.5)], ids=_id)
-def test_displacement_converges_at_second_order(binary, cm_env, tmp_path, reference, element_type, rho_inf):
-    trace, _ = reference(element_type)
+def _assert_second_order(binary, cm_env, wd, element_type, rho_inf, trace, replace=()):
+    """The tip trace at DT, DT / 2 and DT / 4 converges to the reference trace at second order."""
     errors = []
     for n in (1, 2, 4):
-        u = _tip_trace(binary, cm_env, tmp_path / str(n), element_type, rho_inf, DT / n)
+        u = _tip_trace(binary, cm_env, wd / str(n), element_type, rho_inf, DT / n, replace)
         errors.append(np.abs(u - trace)[:CONVERGENCE_SAMPLES].max() / np.abs(trace).max())
     rates = np.log2(np.array(errors[:-1]) / errors[1:])
     assert rates[-1] >= 2 - RATE_TOL, f"errors {errors} at dt = {DT}, {DT / 2}, {DT / 4}, rates {rates}"
+
+
+@pytest.mark.parametrize("element_type, rho_inf", [("T10", None), ("T10", 0.5), ("T10P1", 0.5)], ids=_id)
+def test_displacement_converges_at_second_order(binary, cm_env, tmp_path, reference, element_type, rho_inf):
+    _assert_second_order(binary, cm_env, tmp_path, element_type, rho_inf, reference(element_type)[0])
+
+
+# A dashpot alone on the free end, acting in every direction. Over the end's area of 0.5 it gives
+# the first bending mode a damping ratio of about 0.08, so it changes the trace well beyond the
+# discretization error within the convergence window.
+DASHPOT = (("<Surface_131><Type>T3</Type></Surface_131> <!-- free end, unloaded -->",
+            "<Surface_131><Type>CONTACT_ROBIN</Type></Surface_131>"),
+           ("<ApplyPressureFromFunction>true</ApplyPressureFromFunction>",
+            "<ApplyPressureFromFunction>true</ApplyPressureFromFunction>"
+            "<RobinBoundaryGeneral>true</RobinBoundaryGeneral>"),
+           ("<Plugins>\n    <ApplyPressureFromFunction>\n",
+            "<Plugins>\n    <RobinBoundaryGeneral><SurfaceIndex>131</SurfaceIndex><Alpha>0</Alpha>"
+            "<Beta>1e-3</Beta></RobinBoundaryGeneral>\n    <ApplyPressureFromFunction>\n"))
+
+
+@pytest.fixture(scope="module")
+def dashpot_reference(binary, cm_env, tmp_path_factory):
+    """Tip trace of the damped cantilever, generalized-alpha at RhoInf = 1 and step REFERENCE_DT."""
+    pytest.importorskip("meshio")
+    return _tip_trace(binary, cm_env, tmp_path_factory.mktemp("dashpot_reference"), "T10", 1.0, REFERENCE_DT,
+                      DASHPOT)
+
+
+@pytest.mark.parametrize("rho_inf", [None, 1.0, 0.5], ids=_id)
+def test_robin_dashpot_converges_at_second_order(binary, cm_env, tmp_path, dashpot_reference, rho_inf):
+    """The dashpot resists the velocity of the time integrator at the level the residual is evaluated at.
+    A backward difference of the displacements is a first-order velocity, and lagged half a step under
+    generalized-alpha, so the dashpot would drag the whole scheme down to first order."""
+    _assert_second_order(binary, cm_env, tmp_path, "T10", rho_inf, dashpot_reference, DASHPOT)

@@ -201,6 +201,10 @@ protected:
     void         LinkPressures(Vec pressures);
     /// Links pressures_ plus alpha times the pressure increment held in unknowns, as trialPressures_.
     void         LinkTrialPressures(Vec unknowns, PetscScalar alpha = 1);
+    /// Links trialVelocity_, the velocity of the trial configuration the residual is evaluated at, and
+    /// its derivative with respect to that configuration (ADR-0010). Each solver fills trialVelocity_ as
+    /// its time integrator defines the velocity, before it evaluates the residual or the Jacobian.
+    void         LinkTrialVelocity(PetscScalar derivative);
     // The unknown vector holds both fields (ADR-0001); these move one field into or out of it.
     static void  AddBlock(Vec field, Vec unknowns, IS dofs, PetscScalar alpha = 1);
     static void  SetBlock(Vec unknowns, IS dofs, Vec field);
@@ -340,6 +344,7 @@ protected:
     Vec pressures_           = 0; // converged pressure field, the counterpart of nodes_
     Vec trialPressures_      = 0;
     Vec pressureResiduals_   = 0;
+    Vec trialVelocity_       = 0; // laid out like nodes_
     Vec stepStartNodes_      = 0; // see SaveStepStart
     Vec stepStartPressures_  = 0;
     
