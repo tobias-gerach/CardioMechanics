@@ -425,11 +425,13 @@ public:
     }
 
     //! Derivative of the residual with respect to the unknowns at x and v: row-major, rows are residuals
-    //! and columns unknowns. The velocities follow the coordinates at the rate velocityDerivative. The
-    //! block of the forces and the displacement is taken by central differences of step epsilon; the
-    //! residual is linear in the pressures, so the blocks involving them are exact. The columns of the
-    //! displacement components with a boundary condition are zero.
-    CBStatus Tangent(const TFloat *x, const TFloat *v, const bool *boundaryConditions, TFloat epsilon, TFloat *tangent) const {
+    //! and columns unknowns. The velocities of the first numRated displacement components follow the
+    //! coordinates at the rate velocityDerivative; the others have no rate. The block of the forces and
+    //! the displacement is taken by central differences of step epsilon; the residual is linear in the
+    //! pressures, so the blocks involving them are exact. The columns of the displacement components
+    //! with a boundary condition are zero.
+    CBStatus Tangent(const TFloat *x, const TFloat *v, const bool *boundaryConditions, TFloat epsilon, TFloat *tangent,
+                     int numRated = 3*numNodes) const {
         std::array<TFloat, numUnknowns> y;
         std::array<TFloat, 3*numNodes> w;
         std::copy(x, x + numUnknowns, y.begin());
@@ -440,12 +442,13 @@ public:
         for (int j = 0; j < 3*numNodes; j++) {
             if (boundaryConditions[j])
                 continue;
+            const TFloat rate = j < numRated ? velocityDerivative_ : 0;
             y[j] = x[j] + epsilon;
-            w[j] = v[j] + velocityDerivative_ * epsilon;
+            w[j] = v[j] + rate * epsilon;
             CBStatus rc = Residual(y.data(), w.data(), boundaryConditions, plus);
             if (rc == CBStatus::SUCCESS) {
                 y[j] = x[j] - epsilon;
-                w[j] = v[j] - velocityDerivative_ * epsilon;
+                w[j] = v[j] - rate * epsilon;
                 rc = Residual(y.data(), w.data(), boundaryConditions, minus);
             }
             if (rc != CBStatus::SUCCESS)
@@ -629,7 +632,7 @@ public:
         bool innerBoundaryConditions[3*Inner::numNodes] = {};
         std::copy_n(boundaryConditions, firstInternal, innerBoundaryConditions);
         std::array<TFloat, numInner*numInner> K;
-        rc = inner_.Tangent(y, InnerVelocities(v).data(), innerBoundaryConditions, epsilon, K.data());
+        rc = inner_.Tangent(y, InnerVelocities(v).data(), innerBoundaryConditions, epsilon, K.data(), firstInternal);
         if (rc != CBStatus::SUCCESS)
             return rc;
 
@@ -675,7 +678,7 @@ public:
         std::fill_n(allButInternal, firstInternal, true);
         std::array<TFloat, numInner*numInner> K;
         for (int iteration = 0; iteration < maxIterations; iteration++) {
-            rc = inner_.Tangent(y, w.data(), allButInternal, localStep * length_, K.data());
+            rc = inner_.Tangent(y, w.data(), allButInternal, localStep * length_, K.data(), firstInternal);
             if (rc != CBStatus::SUCCESS)
                 return rc;
             const Vector3<TFloat> step = InternalBlock(K.data()).GetInverse() * Vector3<TFloat>(r + firstInternal);

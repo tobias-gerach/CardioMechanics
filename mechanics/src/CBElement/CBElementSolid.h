@@ -73,9 +73,6 @@ public:
     /// Number of leading element nodes that carry a pressure degree of freedom; zero for
     /// displacement-only elements.
     virtual unsigned int GetNumberOfPressureNodesIndices() {return 0;}
-
-    /// Whether the element adds the Kelvin-Voigt viscous stress of its material.
-    virtual bool SupportsKelvinVoigtViscosity() {return false;}
     
     /// Pressure field at every element node, including nodes without a pressure degree of freedom.
     virtual void GetNodesPressures(TFloat *pressures) {

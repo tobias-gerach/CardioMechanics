@@ -274,9 +274,6 @@ void CBSolver::Init(ParameterMap *parameters, CBModel *model) {
         if (!SupportsKelvinVoigtViscosity())
             throw std::runtime_error("CBSolver::Init(): Solver [" + GetType() + "] does not support KelvinVoigt.Eta of material " +
                                      std::to_string(eta->first));
-        if (!solid->SupportsKelvinVoigtViscosity())
-            throw std::runtime_error("CBSolver::Init(): " + solid->GetType() + " elements do not support KelvinVoigt.Eta of material " +
-                                     std::to_string(eta->first));
     }
     
     MPI_Barrier(DCPetsc::Comm());
