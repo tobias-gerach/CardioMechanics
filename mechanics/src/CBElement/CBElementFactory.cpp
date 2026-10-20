@@ -31,8 +31,8 @@ CBElementFactory::FactoryFunction Shape(CBElement *(*make)()) {
 }
 
 /// A role whose plugins integrate six-node faces is carried by a triangle of the face's node count.
-/// The others are carried by three-node triangles, and the loader refines a six-node face declared
-/// with one of them into four.
+/// Contact is carried by three-node triangles, and the loader refines a six-node face declared
+/// with one of its roles into four.
 CBElementFactory::FactoryFunction SurfaceWithRole(SurfaceRole role, bool sixNodeFaces) {
     return [role, sixNodeFaces](unsigned int numNodes) {
         CBElementSurface *surface = nullptr;
@@ -55,7 +55,7 @@ CBElementFactory::CBElementFactory() {
     producers_["T3"]      = Shape(CBElementSurfaceT3::New);
     producers_["T6"]      = Shape(CBElementSurfaceT6::New);
     producers_["CAVITY"]          = SurfaceWithRole(SurfaceRole::Cavity, true);
-    producers_["CONTACT_ROBIN"]   = SurfaceWithRole(SurfaceRole::Robin, false);
+    producers_["CONTACT_ROBIN"]   = SurfaceWithRole(SurfaceRole::Robin, true);
     producers_["CONTACT_MASTER"]  = SurfaceWithRole(SurfaceRole::ContactMaster, false);
     producers_["CONTACT_SLAVE"]   = SurfaceWithRole(SurfaceRole::ContactSlave, false);
 }
@@ -73,7 +73,7 @@ CBElement *CBElementFactory::New(std::string elementType, unsigned int numNodes)
                                  + "\t T10P1\t:10-node Iso-P2 tetrahedral element with a linear pressure field on its 4 vertices (P2P1 Taylor-Hood),\n"
                                  + "\t CONTACT_MASTER\t:3-node triangle surface element for contact problems\n"
                                  + "\t CONTACT_SLAVE\t:3-node triangle surface element for contact problems\n"
-                                 + "\t CONTACT_ROBIN\t:3-node triangle surface element for Robin boundary condition\n"
+                                 + "\t CONTACT_ROBIN\t:3- or 6-node triangle surface element for Robin boundary condition\n"
                                  + "\t CAVITY\t:3- or 6-node triangle surface element for circulatory system plugin\n"
                                  + "\t T3\t: 3-node triangle surface element\n"
                                  + "\t T6\t: 6-node triangle surface element\n");

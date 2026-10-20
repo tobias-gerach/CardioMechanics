@@ -64,7 +64,7 @@ def test_recovered_state_inflates_onto_the_target_with_the_same_robin_boundary(b
 
 
 def test_dashpot_does_not_read_the_relocation_to_a_new_guess_as_a_velocity(binary, cm_env, tmp_path):
-    """A dashpot alone, so the Robin traction is beta times the velocity of each triangle. Every
+    """A dashpot alone, so the Robin traction is beta times the velocity of each face. Every
     inflation starts from rest in a relocated reference, so no step of a later one pushes back harder
     than the steepest step of the first; a jump to the next guess read as a velocity spans a whole
     inflation in one step, several times the steepest of the ten ramp steps."""

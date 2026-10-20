@@ -15,18 +15,22 @@
 #ifndef CB_ROBIN_BOUNDARY
 #define CB_ROBIN_BOUNDARY
 
+#include <array>
 #include <map>
 #include <memory>
 
 #include "CBSolverPlugin.h"
 #include "CBElementSurfaceT3.h"
+#include "CBElementSurfaceT6Kernel.h"
 
 using namespace math_pack;
 
-/// A spring and dashpot on the centroid of each surface triangle, integrated over its reference area
-/// (ADR-0011). RobinBoundary lets them act along the reference normal only, RobinBoundaryGeneral on
-/// the full displacement and velocity; the two keep their own XML keys and default stiffness so that
-/// existing input files load unchanged. The dashpot resists the velocity of the time integrator
+/// Springs and dashpots on a surface, integrated over its reference area (ADR-0011): at the centroid
+/// of a three-node triangle, and at the quadrature points of a six-node face with its quadratic shape
+/// functions, so that a face loads its nodes consistently with the solid it bounds. RobinBoundary
+/// lets them act along the reference normal only, RobinBoundaryGeneral on the full displacement and
+/// velocity; the two keep their own XML keys and default stiffness so that existing input files load
+/// unchanged. The dashpot resists the velocity of the time integrator
 /// (ADR-0010), so that the boundary is integrated at the order of the interior.
 class CBRobinBoundary : public CBSolverPlugin {
 public:
@@ -52,10 +56,14 @@ private:
     const bool projectOnNormal_;
     const std::string key_;
     typedef CBSolverPlugin Base;
-    static constexpr int numNodes = CBElementSurfaceT3::numNodes;
-    std::vector<CBElementSurfaceT3 *> contactSurfaceElements_;
+    static constexpr int maxNodes = CBElementSurfaceT6Kernel::numNodes;
+    std::vector<CBElementSurface *> contactSurfaceElements_;
+    /// The reference nodal coordinates of six-node faces, unused on three-node ones.
+    std::vector<std::array<TFloat, 3*maxNodes>> referenceCoords_;
+    /// The reference normal at the centroid of each face.
     std::vector<Vector3<TFloat>> referenceNormals_;
     std::vector<TFloat> referenceAreas_;
+    /// The reference centroid of three-node triangles, unused on six-node faces.
     std::vector<Vector3<TFloat>> initialPos_;
     std::vector<Vector3<TFloat>> displacement_;
     
@@ -69,6 +77,7 @@ private:
     void CalcForceContributionOfElement(Vector3<TFloat> u, Vector3<TFloat> v, CBElementSurfaceT3 *triangle,
                                         const Vector3<TFloat> &refNormalVector, TFloat refArea,
                                         TFloat *nodalForces);
+    void CalcForceContributionOfSixNodeFace(int i, TFloat *nodalForces);
     
     /// xml parameters
     /// general options

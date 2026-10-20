@@ -899,7 +899,7 @@ void CBContactHandling::DetermineSlaveElementsAtVertices() {
 }  // CBContactHandling::DetermineSlaveElementsAtVertices
 
 void CBContactHandling::LoadMasterElements() {
-    for (auto *element : GetSurfaceElements(SurfaceRole::ContactMaster)) {
+    for (auto *element : GetSurfaceElements<CBElementSurfaceT3>(SurfaceRole::ContactMaster)) {
         int *indices = new int[3*element->GetNumberOfNodesIndices()];
         bool *bc     = new bool[3*element->GetNumberOfNodesIndices()];
         
@@ -935,7 +935,7 @@ void CBContactHandling::LoadMasterElements() {
 }  // CBContactHandling::LoadMasterElements
 
 void CBContactHandling::LoadSlaveElements() {
-    slaveElements_ = GetSurfaceElements(SurfaceRole::ContactSlave);
+    slaveElements_ = GetSurfaceElements<CBElementSurfaceT3>(SurfaceRole::ContactSlave);
 }
 
 void CBContactHandling::UpdateDistancesMasterSlave() {

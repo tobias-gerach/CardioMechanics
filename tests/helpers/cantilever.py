@@ -1,7 +1,7 @@
 """Small cantilever meshes: a 4 x 1 x 1 block of 8 x 2 x 2 cubes, each split into six tetrahedra.
 
 The block is clamped at x = 0. Its top face z = 1 is a loaded T6 surface, T3 on the T4 mesh, and its
-free end x = 4 a second, T3 surface, for boundary conditions other than the clamp.
+free end x = 4 a second surface of the same node count, for boundary conditions other than the clamp.
 
 A Kuhn split of identically oriented cubes is conforming, and all edge midpoints of its
 tetrahedra fall on the half-spacing grid, so every half-grid point is a node of the T10 mesh. The
@@ -25,13 +25,12 @@ def node(p):
     return 1 + i + SHAPE[0] * (j + SHAPE[1] * k)
 
 
-def write_mesh(tetgen_dir, scale=(1, 1, 1), linear=False, quadratic_end=False, closed=False, end=False):
-    """Write the cantilever as tetgen .node/.ele/.sur files, T10 elements with T6 top faces, or T4
-    elements with T3 top faces if linear, and T3 end faces, T6 if quadratic_end, with the block
-    stretched by scale along each axis. If closed, the loaded surface is the whole boundary instead and
-    there is no end surface, for plugins that refuse a cavity that does not enclose a volume; end adds
-    the free end as the end surface on top of it. Nodes
-    are numbered in the order of node(), which they match on the T10 mesh."""
+def write_mesh(tetgen_dir, scale=(1, 1, 1), linear=False, closed=False, end=False):
+    """Write the cantilever as tetgen .node/.ele/.sur files, T10 elements with T6 top and end faces, or
+    T4 elements with T3 faces if linear, with the block stretched by scale along each axis. If closed,
+    the loaded surface is the whole boundary instead and there is no end surface, for plugins that
+    refuse a cavity that does not enclose a volume; end adds the free end as the end surface on top of
+    it. Nodes are numbered in the order of node(), which they match on the T10 mesh."""
     def mid(a, b):
         return tuple((x + y) // 2 for x, y in zip(a, b))
 
@@ -81,10 +80,8 @@ def write_mesh(tetgen_dir, scale=(1, 1, 1), linear=False, quadratic_end=False, c
     else:
         add_face(2, 2 * CELLS[2], SURFACE, quadratic=not linear)
         # Nodes are numbered with z slowest, so the free end spans every rank's node block, whereas
-        # the bottom face would lie on the first rank alone. It is linear unless asked otherwise, since
-        # the Robin boundary elements are three-node triangles and the loader has to refine six-node
-        # faces into four of them.
-        add_face(0, 2 * CELLS[0], END_SURFACE, quadratic=quadratic_end and not linear)
+        # the bottom face would lie on the first rank alone.
+        add_face(0, 2 * CELLS[0], END_SURFACE, quadratic=not linear)
 
     # A point in no element would be a node without stiffness.
     points = sorted({p for e in elements for p in e}, key=node)

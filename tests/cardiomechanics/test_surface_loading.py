@@ -6,7 +6,7 @@ second from the first, and the two have to load to the same mesh: the loader's r
 one the surface file would have been written with.
 
 The cantilever of test_p2p1 carries the pressure on its T6 top surface and, in the Robin fixture,
-a Robin boundary on its free end. Both are run here with that surface declared T3.
+a Robin boundary on its free end. Both are run here with the top surface declared T3.
 """
 from pathlib import Path
 
@@ -48,12 +48,12 @@ def _refine(surfaces, index):
                                   + [" ".join([str(n)] + row) for n, row in enumerate(refined, 1)]) + "\n")
 
 
-def _run(binary, cm_env, wd, fixture, refine=False, quadratic_end=False):
+def _run(binary, cm_env, wd, fixture, refine=False):
     """Stage the cantilever and `fixture` into wd with the pressure surface declared T3, refining
     that surface into three-node faces first if asked, and return the exported VTU directory."""
     (wd / "tetgen").mkdir(parents=True)
     (wd / "Results").mkdir()
-    write_mesh(wd / "tetgen", quadratic_end=quadratic_end)
+    write_mesh(wd / "tetgen")
     if refine:
         _refine(wd / "tetgen" / "cantilever.sur", SURFACE)
     text = fixture.read_text()
@@ -84,6 +84,6 @@ def test_six_node_faces_declared_t3_match_the_triangles_they_refine_into(binary,
 @pytest.mark.parametrize("fixture", [FIXTURE, ROBIN_FIXTURE], ids=["pressure", "robin"])
 def test_surfaces_of_six_node_faces_keep_their_element_indices(binary, cm_env, tmp_path, fixture):
     """Every refined triangle is an element of its own, so the indices the elements carry stay in
-    step with the container CBModel::CheckElementsIndexes() walks. The Robin fixture declares the
-    free end CONTACT_ROBIN, which is a three-node element, and gets it as six-node faces here."""
-    _run(binary, cm_env, tmp_path, fixture, quadratic_end=True)
+    step with the container CBModel::CheckElementsIndexes() walks, also next to the six-node faces
+    the Robin fixture keeps whole on its CONTACT_ROBIN free end."""
+    _run(binary, cm_env, tmp_path, fixture)
