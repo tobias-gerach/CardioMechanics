@@ -20,13 +20,16 @@
 
 using namespace math_pack;
 
-//! Follower pressure and enclosed volume of an isoparametric six-node triangle, as functions of
-//! its 18 nodal coordinates alone. Local nodes 4, 5 and 6 sit on the edges (1,2), (2,3) and (3,1).
+//! Follower pressure, enclosed volume and Robin springs and dashpots of an isoparametric six-node
+//! triangle, as functions of its 18 nodal coordinates alone. Local nodes 4, 5 and 6 sit on the
+//! edges (1,2), (2,3) and (3,1).
 //!
 //! With xi = l2 and eta = l3, a = x_,xi and b = x_,eta, the face carries the area vector
-//! n dA = (a x b) dxi deta, which is quadratic like x. Every integrand below is of degree 4 in
-//! (xi, eta), so the degree 4 rule of Dunavant (1985) integrates it exactly, on curved faces as
-//! well as flat ones, and no coarser or finer rule has anything to offer.
+//! n dA = (a x b) dxi deta, which is quadratic like x. The pressure and volume integrands are of
+//! degree 4 in (xi, eta), so the degree 4 rule of Dunavant (1985) integrates them exactly, on curved
+//! faces as well as flat ones, and no coarser or finer rule has anything to offer. The Robin
+//! integrands carry the area element |a x b| instead, which is constant on a flat face, where they
+//! are of degree 4 and exact too; on a curved face the rule approximates them.
 namespace CBElementSurfaceT6Kernel {
 
 constexpr int numNodes = 6;
@@ -39,6 +42,27 @@ struct Point {
     TFloat weight;
 };
 
+//! The point with area coordinates l, given the weight of the quadrature rule.
+inline Point AtPoint(const TFloat *nodesCoords, const TFloat *l, TFloat weight) {
+    Point p = {{l[0]*(2*l[0] - 1), l[1]*(2*l[1] - 1), l[2]*(2*l[2] - 1), 4*l[0]*l[1], 4*l[1]*l[2], 4*l[2]*l[0]},
+               {1 - 4*l[0], 4*l[1] - 1, 0, 4*(l[0] - l[1]), 4*l[2], -4*l[2]},
+               {1 - 4*l[0], 0, 4*l[2] - 1, -4*l[1], 4*l[1], 4*(l[0] - l[2])},
+               {}, {}, {}, 0.5 * weight};
+    for (int i = 0; i < numNodes; i++) {
+        const Vector3<TFloat> xi(&nodesCoords[3 * i]);
+        p.x += p.N[i] * xi;
+        p.a += p.dNdxi[i] * xi;
+        p.b += p.dNdeta[i] * xi;
+    }
+    return p;
+}
+
+//! The centroid, where every area coordinate is 1/3.
+inline Point AtCentroid(const TFloat *nodesCoords) {
+    const TFloat l[3] = {1.0/3.0, 1.0/3.0, 1.0/3.0};
+    return AtPoint(nodesCoords, l, 0);
+}
+
 template <class F>
 inline void ForEachPoint(const TFloat *nodesCoords, F f) {
     const TFloat pa = 0.44594849091596489, pb = 0.091576213509770743;
@@ -47,20 +71,61 @@ inline void ForEachPoint(const TFloat *nodesCoords, F f) {
                                  {1-2*pb, pb, pb}, {pb, 1-2*pb, pb}, {pb, pb, 1-2*pb}};
     const TFloat weights[6] = {wa, wa, wa, wb, wb, wb};
 
-    for (int q = 0; q < 6; q++) {
-        const TFloat *l = points[q];
-        Point p = {{l[0]*(2*l[0] - 1), l[1]*(2*l[1] - 1), l[2]*(2*l[2] - 1), 4*l[0]*l[1], 4*l[1]*l[2], 4*l[2]*l[0]},
-                   {1 - 4*l[0], 4*l[1] - 1, 0, 4*(l[0] - l[1]), 4*l[2], -4*l[2]},
-                   {1 - 4*l[0], 0, 4*l[2] - 1, -4*l[1], 4*l[1], 4*(l[0] - l[2])},
-                   {}, {}, {}, 0.5 * weights[q]};
-        for (int i = 0; i < numNodes; i++) {
-            const Vector3<TFloat> xi(&nodesCoords[3 * i]);
-            p.x += p.N[i] * xi;
-            p.a += p.dNdxi[i] * xi;
-            p.b += p.dNdeta[i] * xi;
-        }
-        f(p);
-    }
+    for (int q = 0; q < 6; q++)
+        f(AtPoint(nodesCoords, points[q], weights[q]));
+}
+
+//! The area int dA. |a x b| is not polynomial on a curved face, so there the rule approximates it.
+inline TFloat CalcArea(const TFloat *nodesCoords) {
+    TFloat area = 0;
+    ForEachPoint(nodesCoords, [&](const Point &p) {
+        area += p.weight * CrossProduct(p.a, p.b).Norm();
+    });
+    return area;
+}
+
+//! Nodal forces f_I = -int N_I w dA0 of springs and dashpots relaxed in the reference configuration X,
+//! integrated over its area element dA0 (ADR-0011). w = P (alpha u + beta v) with u and v interpolated
+//! from their nodal values, and P = N0 N0^T for the unit reference normal N0 at the point if
+//! projectOnNormal, P = I otherwise.
+inline void CalcRobinForces(const TFloat *referenceCoords, const TFloat *u, const TFloat *v, TFloat alpha,
+                            TFloat beta, bool projectOnNormal, TFloat *forces) {
+    for (int i = 0; i < 3 * numNodes; i++)
+        forces[i] = 0;
+    ForEachPoint(referenceCoords, [&](const Point &p) {
+        Vector3<TFloat> normal = CrossProduct(p.a, p.b);
+        const TFloat dA0 = p.weight * normal.Norm();
+        normal.Normalize();
+        Vector3<TFloat> w;
+        for (int i = 0; i < numNodes; i++)
+            w += p.N[i] * (alpha * Vector3<TFloat>(&u[3 * i]) + beta * Vector3<TFloat>(&v[3 * i]));
+        if (projectOnNormal)
+            w = (w * normal) * normal;
+        for (int i = 0; i < numNodes; i++)
+            for (int k = 0; k < 3; k++)
+                forces[3 * i + k] -= dA0 * p.N[i] * w.Get(k);
+    });
+}
+
+//! d f_I / d x_J, row-major 18x18, for u = X - x and v depending on the nodes with the derivative D
+//! of the time integrator: int N_I N_J stiffness P dA0 with stiffness = alpha + beta D. X is fixed,
+//! so the tangent is constant and symmetric.
+inline void CalcRobinTangent(const TFloat *referenceCoords, TFloat stiffness, bool projectOnNormal, TFloat *tangent) {
+    constexpr int n = 3 * numNodes;
+    for (int i = 0; i < n * n; i++)
+        tangent[i] = 0;
+    ForEachPoint(referenceCoords, [&](const Point &p) {
+        Vector3<TFloat> normal = CrossProduct(p.a, p.b);
+        const TFloat dA0 = p.weight * normal.Norm();
+        normal.Normalize();
+        for (int I = 0; I < numNodes; I++)
+            for (int J = 0; J < numNodes; J++)
+                for (int k = 0; k < 3; k++)
+                    for (int l = 0; l < 3; l++) {
+                        const TFloat P = projectOnNormal ? normal.Get(k) * normal.Get(l) : (k == l);
+                        tangent[n * (3 * I + k) + 3 * J + l] += dA0 * stiffness * p.N[I] * p.N[J] * P;
+                    }
+    });
 }
 
 //! Nodal forces f_I = -p int N_I n dA of a uniform follower pressure.

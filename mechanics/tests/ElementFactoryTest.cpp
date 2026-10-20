@@ -24,8 +24,7 @@ struct RoleCase {
 class SurfaceRoleTest : public ::testing::TestWithParam<RoleCase> {};
 
 // A role is what the settings declare a surface for, and it survives the cloning the solver does
-// on its copy of the model. Roles other than a cavity are carried by three-node triangles until
-// their plugins support six-node faces, which the loader refines into four triangles meanwhile.
+// on its copy of the model.
 TEST_P(SurfaceRoleTest, TypeNameDeclaresTheRoleOfATriangle) {
     auto surface = NewSurface(GetParam().type, 3);
     ASSERT_NE(surface, nullptr);
@@ -51,17 +50,27 @@ TEST(SurfaceRole, ShapeNamesCarryNoRole) {
     EXPECT_EQ(t6->GetNumberOfNodesIndices(), 6u);
 }
 
-// A cavity keeps a six-node face whole, so its load and volume follow the curved face. The other
-// roles are still carried by the triangles the loader refines the face into.
-TEST(SurfaceRole, CavityOnSixNodeFaceIsSixNodeElement) {
-    auto cavity = NewSurface("CAVITY", 6);
-    ASSERT_NE(cavity, nullptr);
-    EXPECT_EQ(cavity->GetRole(), SurfaceRole::Cavity);
-    EXPECT_EQ(cavity->GetNumberOfNodesIndices(), 6u);
-    std::unique_ptr<CBElement> clone(cavity->Clone());
-    EXPECT_EQ(dynamic_cast<CBElementSurface &>(*clone).GetRole(), SurfaceRole::Cavity);
-    
-    EXPECT_EQ(NewSurface("CONTACT_ROBIN", 6)->GetNumberOfNodesIndices(), 3u);
+class SixNodeRoleTest : public ::testing::TestWithParam<RoleCase> {};
+
+// A cavity and a Robin boundary keep a six-node face whole, so their loads follow the curved face
+// with the quadratic shape functions.
+TEST_P(SixNodeRoleTest, SixNodeFaceIsSixNodeElement) {
+    auto surface = NewSurface(GetParam().type, 6);
+    ASSERT_NE(surface, nullptr);
+    EXPECT_EQ(surface->GetRole(), GetParam().role);
+    EXPECT_EQ(surface->GetNumberOfNodesIndices(), 6u);
+    std::unique_ptr<CBElement> clone(surface->Clone());
+    EXPECT_EQ(dynamic_cast<CBElementSurface &>(*clone).GetRole(), GetParam().role);
+}
+
+INSTANTIATE_TEST_SUITE_P(Roles, SixNodeRoleTest, ::testing::Values(
+    RoleCase{"CAVITY", SurfaceRole::Cavity},
+    RoleCase{"CONTACT_ROBIN", SurfaceRole::Robin}));
+
+// Contact is carried by three-node triangles, into which the loader refines a six-node face.
+TEST(SurfaceRole, ContactOnSixNodeFaceIsThreeNodeElement) {
+    EXPECT_EQ(NewSurface("CONTACT_MASTER", 6)->GetNumberOfNodesIndices(), 3u);
+    EXPECT_EQ(NewSurface("CONTACT_SLAVE", 6)->GetNumberOfNodesIndices(), 3u);
 }
 
 }  // namespace

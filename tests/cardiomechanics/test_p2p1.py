@@ -526,26 +526,34 @@ ROBIN_SURFACE = 131     # and its SurfaceIndex
 VTU_RTOL, VTU_ATOL = 1e-4, 1e-6
 # Ten times the fixture's pressure; the fixture's own stretches the free end by only about 5e-4.
 STRETCHING_LOAD = ("<Amplitude>0.003</Amplitude>", "<Amplitude>0.03</Amplitude>")
-MIN_ROBIN_STRETCH = 10 * VTU_RTOL     # lower bound on the largest relative area change of a Robin triangle
+MIN_ROBIN_STRETCH = 10 * VTU_RTOL     # lower bound on the largest relative area change of a Robin face
 
 
 @pytest.mark.parametrize("replace, projected", [((), False), (ROBIN_NORMAL, True)],
                          ids=["general", "normal"])
 def test_robin_boundary_exports_its_traction(binary, cm_env, tmp_path, replace, projected):
-    """ContactPressure is the magnitude of the spring traction alpha * u on each Robin triangle,
-    u its centroid displacement, projected onto the reference normal N by RobinBoundary.
-    ContactForce is that traction times the triangle's reference area (ADR-0011), so the
-    pressure is the element's total force over its reference area. The bending stretches the
-    free end, so a ContactForce taken over the current area would differ. ContactDistance is
-    u . N in both, up to the sign of u. Without a dashpot a static step has no velocity term."""
+    """Each Robin face is a flat six-node face, its mid-edge nodes at the edge midpoints, whose
+    total force is F = -int w dA0 over its reference area A0 (ADR-0011), w = alpha * u the spring
+    traction, u projected onto the reference normal N by RobinBoundary. The corner shape functions
+    integrate to 0 over such a face and the mid-edge ones to A0 / 3, so F = -A0 * alpha * u_m with u_m
+    the mean displacement of the mid-edge nodes. ContactForce is F and ContactPressure |F| / A0. The
+    bending stretches the free end, so a force taken over the current area would differ.
+    ContactDistance is u . N at the face centroid, up to the sign of u. Without a dashpot a static
+    step has no velocity term."""
     meshio = pytest.importorskip("meshio")
     replace += (("<Beta>0</Beta>", "<Beta>0</Beta><Export>true</Export>"), STRETCHING_LOAD)
     _, vtu_dir = _run(binary, cm_env, tmp_path, fixture=ROBIN_FIXTURE, replace=replace)
     ref, cur = meshio.read(str(vtu_dir / "cantilever.0.vtu")), meshio.read(str(_last_vtu(vtu_dir)))
-    block = next(i for i, m in enumerate(cur.cell_data["Material"]) if (m == ROBIN_SURFACE).all())
+    # The Robin faces share their cell block with the six-node faces of the loaded top.
+    block = next(i for i, c in enumerate(cur.cells) if c.type == "triangle6")
+    robin = cur.cell_data["Material"][block] == ROBIN_SURFACE
+    assert robin.any(), "no six-node Robin faces"
+    faces = cur.cells[block].data[robin]
+    data = {name: cur.cell_data[name][block][robin]
+            for name in ("ContactDistance", "ContactPressure", "ContactForce")}
 
     def area_vectors(points):
-        corners = points[cur.cells[block].data]
+        corners = points[faces[:, :3]]
         return np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0]) / 2
 
     normals = area_vectors(ref.points)
@@ -554,14 +562,17 @@ def test_robin_boundary_exports_its_traction(binary, cm_env, tmp_path, replace, 
     stretch = np.linalg.norm(area_vectors(cur.points), axis=1) / area - 1
     assert np.abs(stretch).max() > MIN_ROBIN_STRETCH, \
         f"Robin face barely stretches, by at most {np.abs(stretch).max():.1e}"
-    u = (cur.points - ref.points)[cur.cells[block].data].mean(axis=1)
-    distance = np.einsum("ij,ij->i", u, normals)
-    traction = ROBIN_ALPHA * (distance[:, None] * normals if projected else u)
-    assert np.allclose(np.abs(cur.cell_data["ContactDistance"][block]), np.abs(distance),
+    u = (cur.points - ref.points)[faces]
+    # The shape functions at the centroid are -1/9 at the corners and 4/9 at the mid-edge nodes.
+    centroid = (4 * u[:, 3:].sum(axis=1) - u[:, :3].sum(axis=1)) / 9
+    mean = u[:, 3:].mean(axis=1)
+    distance = np.einsum("ij,ij->i", centroid, normals)
+    traction = ROBIN_ALPHA * (np.einsum("ij,ij->i", mean, normals)[:, None] * normals if projected else mean)
+    assert np.allclose(np.abs(data["ContactDistance"]), np.abs(distance),
                        rtol=VTU_RTOL, atol=VTU_ATOL)
-    assert np.allclose(cur.cell_data["ContactPressure"][block], np.linalg.norm(traction, axis=1),
+    assert np.allclose(data["ContactPressure"], np.linalg.norm(traction, axis=1),
                        rtol=VTU_RTOL, atol=ROBIN_ALPHA * VTU_ATOL)
-    assert np.allclose(cur.cell_data["ContactForce"][block], -area[:, None] * traction,
+    assert np.allclose(data["ContactForce"], -area[:, None] * traction,
                        rtol=VTU_RTOL, atol=ROBIN_ALPHA * VTU_ATOL * area.max())
 
 

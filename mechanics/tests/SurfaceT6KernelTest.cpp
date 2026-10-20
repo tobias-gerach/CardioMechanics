@@ -63,6 +63,71 @@ TEST(SurfaceT6Kernel, VolumeGradientIsDerivativeOfVolume) {
     }
 }
 
+// A flat face with its mid-edge nodes at the edge midpoints, displaced uniformly by u. The corner
+// shape functions integrate to 0 over such a face and the mid-edge ones to A / 3, so the springs
+// load the mid-edge nodes alone. RobinBoundary keeps the part of u along the normal.
+TEST(SurfaceT6Kernel, UniformRobinDisplacementLoadsMidEdgeNodesOnly) {
+    const TFloat alpha = 3, v[3][3] = {{0.1, 0, 0.2}, {1.2, 0.2, -0.1}, {0.3, 0.9, 0.4}};
+    Coords x;
+    for (int a = 0; a < 3; a++)
+        for (int i = 0; i < 3; i++) {
+            x[3 * a + i] = v[a][i];
+            x[3 * (3 + a) + i] = (v[a][i] + v[(a + 1) % 3][i]) / 2;
+        }
+    const Vector3<TFloat> e1(v[1][0] - v[0][0], v[1][1] - v[0][1], v[1][2] - v[0][2]);
+    const Vector3<TFloat> e2(v[2][0] - v[0][0], v[2][1] - v[0][1], v[2][2] - v[0][2]);
+    Vector3<TFloat> normal = CrossProduct(e1, e2);
+    const TFloat area = normal.Norm() / 2;
+    normal.Normalize();
+    const Vector3<TFloat> u = 0.7 * normal + 0.4 * e1;
+    Coords displacements, velocities{};
+    for (int i = 0; i < n; i++)
+        displacements[i] = u.Get(i % 3);
+    for (bool projectOnNormal : {false, true}) {
+        const Vector3<TFloat> w = alpha * (projectOnNormal ? (u * normal) * normal : u);
+        Coords f;
+        CBElementSurfaceT6Kernel::CalcRobinForces(x.data(), displacements.data(), velocities.data(), alpha, 0,
+                                                  projectOnNormal, f.data());
+        for (int i = 0; i < n; i++)
+            EXPECT_NEAR(f[i], i < 9 ? 0 : -area * w.Get(i % 3) / 3, 1e-14) << "component " << i;
+    }
+}
+
+// The springs pull on u = X - x and the dashpots on v, minus the velocity, both linear in the
+// nodes, so the tangent is minus the derivative of the forces with respect to u at alpha and with
+// respect to v at beta.
+TEST(SurfaceT6Kernel, RobinTangentIsDerivativeOfForces) {
+    const Coords reference = CurvedFace();
+    Coords u, v;
+    for (int i = 0; i < n; i++) {
+        u[i] = 0.01 * std::cos(i + 1);
+        v[i] = 0.02 * std::sin(2 * i + 1);
+    }
+    const TFloat alpha = 3, beta = 0.5;
+    for (bool projectOnNormal : {false, true})
+        for (bool spring : {true, false}) {
+            std::array<TFloat, n * n> tangent;
+            CBElementSurfaceT6Kernel::CalcRobinTangent(reference.data(), spring ? alpha : beta, projectOnNormal,
+                                                       tangent.data());
+            Coords &perturbed = spring ? u : v;
+            for (int j = 0; j < n; j++) {
+                Coords fPlus, fMinus;
+                const TFloat pj = perturbed[j];
+                perturbed[j] = pj + h;
+                CBElementSurfaceT6Kernel::CalcRobinForces(reference.data(), u.data(), v.data(), alpha, beta,
+                                                          projectOnNormal, fPlus.data());
+                perturbed[j] = pj - h;
+                CBElementSurfaceT6Kernel::CalcRobinForces(reference.data(), u.data(), v.data(), alpha, beta,
+                                                          projectOnNormal, fMinus.data());
+                perturbed[j] = pj;
+                for (int i = 0; i < n; i++)
+                    EXPECT_NEAR(tangent[n * i + j], -(fPlus[i] - fMinus[i]) / (2 * h), 1e-8)
+                        << (projectOnNormal ? "normal" : "general") << (spring ? " spring" : " dashpot")
+                        << " row " << i << " column " << j;
+            }
+        }
+}
+
 // The six-node faces of the unit sphere's octant x, y, z >= 0, from `level` x `level` subdivisions
 // of the spherical triangle between the axes, every node on the sphere. The plane faces of the
 // octant pass through the origin, so with the origin as reference point the faces alone give the
