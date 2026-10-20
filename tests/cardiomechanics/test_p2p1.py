@@ -484,18 +484,19 @@ CAVITY_DECLARED = (("<Surface_130><Type>T6</Type></Surface_130>", "<Surface_130>
                           (ROBIN_FIXTURE, ROBIN_DASHPOT_GENERALIZED_ALPHA, False, "T10P1"),
                           (CIRCULATION_FIXTURE, (), True, "T10P1"),
                           (CIRCULATION_FIXTURE, CAVITY_DECLARED, True, "T10P1"),
-                          (FIXTURE, (), False, "T4"), (CIRCULATION_FIXTURE, (), True, "T4")],
+                          (FIXTURE, (), False, "T4"), (ROBIN_FIXTURE, (), False, "T4"),
+                          (CIRCULATION_FIXTURE, (), True, "T4")],
                          ids=["static", "generalized_alpha", "robin", "robin_normal_dashpot",
                               "robin_normal_dashpot_generalized_alpha", "circulation",
-                              "circulation_cavity", "static_t3", "circulation_t3"])
+                              "circulation_cavity", "static_t3", "robin_t3", "circulation_t3"])
 def test_p2p1_jacobian_matches_finite_differences(binary, cm_env, tmp_path, fixture, replace, closed, element_type):
     """Every Jacobian block, coupling and constraint included, against PETSc's finite differences.
     Under generalized-alpha that includes the mass and damping terms and the (1 - alphaF) factor
     of both fields at the intermediate configuration. The Robin cases add the tangents of both
     Robin boundary plugins, the circulation case the cavity pressure tangent of the Circulation
     plugin, which refuses a cavity that is not closed, once declared T6 and once CAVITY. The T3
-    cases put the same pressure loads on the linear mesh, whose surface elements are T3 rather
-    than T6.
+    cases put the same pressure loads and Robin boundary on the linear mesh, whose surface elements
+    are T3 rather than T6.
 
     kappa = 1 keeps the -1/kappa constraint block well above the threshold. Clamped rows and
     columns are checked apart, because finite differences perturb clamped nodes like any other.
@@ -523,30 +524,45 @@ ROBIN_SURFACE = 131     # and its SurfaceIndex
 # The VTU stores single precision, so a displacement taken from its O(1) coordinates is good to
 # about 1e-6 however small it is.
 VTU_RTOL, VTU_ATOL = 1e-4, 1e-6
+# Ten times the fixture's pressure; the fixture's own stretches the free end by only about 5e-4.
+STRETCHING_LOAD = ("<Amplitude>0.003</Amplitude>", "<Amplitude>0.03</Amplitude>")
+MIN_ROBIN_STRETCH = 10 * VTU_RTOL     # lower bound on the largest relative area change of a Robin triangle
 
 
 @pytest.mark.parametrize("replace, projected", [((), False), (ROBIN_NORMAL, True)],
                          ids=["general", "normal"])
 def test_robin_boundary_exports_its_traction(binary, cm_env, tmp_path, replace, projected):
     """ContactPressure is the magnitude of the spring traction alpha * u on each Robin triangle,
-    u its centroid displacement, projected onto the reference normal N by RobinBoundary: the
-    element's total force over its area. ContactDistance is
+    u its centroid displacement, projected onto the reference normal N by RobinBoundary.
+    ContactForce is that traction times the triangle's reference area (ADR-0011), so the
+    pressure is the element's total force over its reference area. The bending stretches the
+    free end, so a ContactForce taken over the current area would differ. ContactDistance is
     u . N in both, up to the sign of u. Without a dashpot a static step has no velocity term."""
     meshio = pytest.importorskip("meshio")
-    replace += (("<Beta>0</Beta>", "<Beta>0</Beta><Export>true</Export>"),)
+    replace += (("<Beta>0</Beta>", "<Beta>0</Beta><Export>true</Export>"), STRETCHING_LOAD)
     _, vtu_dir = _run(binary, cm_env, tmp_path, fixture=ROBIN_FIXTURE, replace=replace)
     ref, cur = meshio.read(str(vtu_dir / "cantilever.0.vtu")), meshio.read(str(_last_vtu(vtu_dir)))
     block = next(i for i, m in enumerate(cur.cell_data["Material"]) if (m == ROBIN_SURFACE).all())
-    corners = ref.points[cur.cells[block].data]
-    normals = np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0])
-    normals /= np.linalg.norm(normals, axis=1)[:, None]
+
+    def area_vectors(points):
+        corners = points[cur.cells[block].data]
+        return np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0]) / 2
+
+    normals = area_vectors(ref.points)
+    area = np.linalg.norm(normals, axis=1)
+    normals /= area[:, None]
+    stretch = np.linalg.norm(area_vectors(cur.points), axis=1) / area - 1
+    assert np.abs(stretch).max() > MIN_ROBIN_STRETCH, \
+        f"Robin face barely stretches, by at most {np.abs(stretch).max():.1e}"
     u = (cur.points - ref.points)[cur.cells[block].data].mean(axis=1)
     distance = np.einsum("ij,ij->i", u, normals)
-    traction = ROBIN_ALPHA * (np.abs(distance) if projected else np.linalg.norm(u, axis=1))
+    traction = ROBIN_ALPHA * (distance[:, None] * normals if projected else u)
     assert np.allclose(np.abs(cur.cell_data["ContactDistance"][block]), np.abs(distance),
                        rtol=VTU_RTOL, atol=VTU_ATOL)
-    assert np.allclose(cur.cell_data["ContactPressure"][block], traction,
+    assert np.allclose(cur.cell_data["ContactPressure"][block], np.linalg.norm(traction, axis=1),
                        rtol=VTU_RTOL, atol=ROBIN_ALPHA * VTU_ATOL)
+    assert np.allclose(cur.cell_data["ContactForce"][block], -area[:, None] * traction,
+                       rtol=VTU_RTOL, atol=ROBIN_ALPHA * VTU_ATOL * area.max())
 
 
 def test_cavity_on_six_node_faces_is_loaded_whole(binary, cm_env, tmp_path):
