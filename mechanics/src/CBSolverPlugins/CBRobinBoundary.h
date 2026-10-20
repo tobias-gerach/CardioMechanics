@@ -23,11 +23,11 @@
 
 using namespace math_pack;
 
-/// A spring and dashpot on the centroid of each surface triangle. RobinBoundary lets them act along
-/// the reference normal only, RobinBoundaryGeneral on the full displacement and velocity; the two
-/// keep their own XML keys and default stiffness so that existing input files load unchanged. The
-/// dashpot resists the velocity of the time integrator (ADR-0010), so that the boundary is integrated
-/// at the order of the interior.
+/// A spring and dashpot on the centroid of each surface triangle, integrated over its reference area
+/// (ADR-0011). RobinBoundary lets them act along the reference normal only, RobinBoundaryGeneral on
+/// the full displacement and velocity; the two keep their own XML keys and default stiffness so that
+/// existing input files load unchanged. The dashpot resists the velocity of the time integrator
+/// (ADR-0010), so that the boundary is integrated at the order of the interior.
 class CBRobinBoundary : public CBSolverPlugin {
 public:
     explicit CBRobinBoundary(bool projectOnNormal);
@@ -55,6 +55,7 @@ private:
     static constexpr int numNodes = CBElementSurfaceT3::numNodes;
     std::vector<CBElementSurfaceT3 *> contactSurfaceElements_;
     std::vector<Vector3<TFloat>> referenceNormals_;
+    std::vector<TFloat> referenceAreas_;
     std::vector<Vector3<TFloat>> initialPos_;
     std::vector<Vector3<TFloat>> displacement_;
     
@@ -66,7 +67,7 @@ private:
     void InitContactSurfaces();
     Vector3<TFloat> Project(const Vector3<TFloat> &x, const Vector3<TFloat> &N) const;
     void CalcForceContributionOfElement(Vector3<TFloat> u, Vector3<TFloat> v, CBElementSurfaceT3 *triangle,
-                                        const Vector3<TFloat> &refNormalVector,
+                                        const Vector3<TFloat> &refNormalVector, TFloat refArea,
                                         TFloat *nodalForces);
     
     /// xml parameters
