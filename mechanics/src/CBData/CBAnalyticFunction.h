@@ -16,7 +16,7 @@
 
 #include "DCType.h"
 #include "ParameterMap.h"
-#include "CBTensionModel.h"
+#include "RungeKutta4.h"
 
 #include <stdint.h>
 #include <iostream>
@@ -191,7 +191,7 @@ public:
         const TFloat dt = time / steps;
         TFloat p = 0.0;
         for (TInt i = 0; i < steps; i++)
-            p = CBTensionModel::RungeKutta4Step(p, i * dt, dt, [this](double t, double p) { return dpdt(t, p); });
+            p = math_pack::RungeKutta4Step(p, i * dt, dt, [this](double t, double p) { return dpdt(t, p); });
         return p;
     }
     

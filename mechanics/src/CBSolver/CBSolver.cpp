@@ -265,15 +265,15 @@ void CBSolver::Init(ParameterMap *parameters, CBModel *model) {
         auto *solid = dynamic_cast<CBElementSolid *>(e);
         if (!solid)
             continue;
-        auto [eta, isNew] = etas.try_emplace(solid->GetMaterialIndex(), 0);
+        auto [entry, isNew] = etas.try_emplace(solid->GetMaterialIndex(), 0);
         if (isNew)
-            eta->second = CBMaterial::ReadKelvinVoigtEta(parameters_, eta->first);
-        if (eta->second == 0)
+            entry->second = CBMaterial::ReadKelvinVoigtEta(parameters_, entry->first);
+        if (entry->second == 0)
             continue;
         hasKelvinVoigtViscosity_ = true;
         if (!SupportsKelvinVoigtViscosity())
             throw std::runtime_error("CBSolver::Init(): Solver [" + GetType() + "] does not support KelvinVoigt.Eta of material " +
-                                     std::to_string(eta->first));
+                                     std::to_string(entry->first));
     }
     
     MPI_Barrier(DCPetsc::Comm());
