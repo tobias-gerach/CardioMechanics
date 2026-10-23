@@ -15,6 +15,7 @@
 // Reference: Bestel et al., 2001: https://link.springer.com/chapter/10.1007/3-540-45468-3_143
 
 #include "CBTensionModelBestel.h"
+#include "RungeKutta4.h"
 #include <algorithm>
 #include <cassert>
 
@@ -104,7 +105,7 @@ double CBTensionModelBestel::CalcActiveTension(const math_pack::Matrix3<double> 
     S_.a       = a(S_.f);
     // a(t) switches over about two Steepness, a handful of time steps, so freezing it over a step
     // would cost the step its fourth order
-    S_.stress  = RungeKutta4Step(S_prev_.stress, S_prev_.t, dt, [this](double t, double u) {
+    S_.stress  = math_pack::RungeKutta4Step(S_prev_.stress, S_prev_.t, dt, [this](double t, double u) {
         return dTaudt(u, a(Indicator(t)), contractility_);
     });
     

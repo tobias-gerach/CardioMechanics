@@ -425,13 +425,13 @@ public:
     }
 
     //! Derivative of the residual with respect to the unknowns at x and v: row-major, rows are residuals
-    //! and columns unknowns. The velocities of the first numRated displacement components follow the
+    //! and columns unknowns. The velocities of the first numVelocityDofs displacement components follow the
     //! coordinates at the rate velocityDerivative; the others have no rate. The block of the forces and
     //! the displacement is taken by central differences of step epsilon; the residual is linear in the
     //! pressures, so the blocks involving them are exact. The columns of the displacement components
     //! with a boundary condition are zero.
     CBStatus Tangent(const TFloat *x, const TFloat *v, const bool *boundaryConditions, TFloat epsilon, TFloat *tangent,
-                     int numRated = 3*numNodes) const {
+                     int numVelocityDofs = 3*numNodes) const {
         std::array<TFloat, numUnknowns> y;
         std::array<TFloat, 3*numNodes> w;
         std::copy(x, x + numUnknowns, y.begin());
@@ -442,7 +442,7 @@ public:
         for (int j = 0; j < 3*numNodes; j++) {
             if (boundaryConditions[j])
                 continue;
-            const TFloat rate = j < numRated ? velocityDerivative_ : 0;
+            const TFloat rate = j < numVelocityDofs ? velocityDerivative_ : 0;
             y[j] = x[j] + epsilon;
             w[j] = v[j] + rate * epsilon;
             CBStatus rc = Residual(y.data(), w.data(), boundaryConditions, plus);
