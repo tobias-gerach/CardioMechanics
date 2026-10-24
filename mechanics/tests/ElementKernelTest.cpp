@@ -260,19 +260,17 @@ protected:
         return v;
     }
 
-    // eta/2 int tr(Edot^2) dV with Edot = sym(F^T Fdot), from the shape-function derivatives, with x
-    // and v over every node of the displacement basis. The fibre bases are rotations, which leave the
-    // trace unchanged.
+    // eta/2 int tr(Edot^2) dV with Edot = sym(F^T Fdot), from the shape-function derivatives. The
+    // fibre bases are rotations, which leave the trace unchanged.
     TFloat Dissipation(const TFloat *x, const TFloat *v, TFloat eta) const {
-        constexpr int nodes = DisplacementBasis::numNodes;
         TFloat dissipation = 0;
         for (int q = 0; q < geometry_.rule->numPoints; q++) {
-            const TFloat *dNdX = &geometry_.dNdX[3 * nodes * q];
+            const TFloat *dNdX = &geometry_.dNdX[3 * DisplacementBasis::numNodes * q];
             Matrix3<TFloat> F, Fdot;
             for (int i = 0; i < 3; i++)
                 for (int j = 0; j < 3; j++) {
                     F(i, j) = Fdot(i, j) = 0;
-                    for (int a = 0; a < nodes; a++) {
+                    for (int a = 0; a < Kernel::numNodes; a++) {
                         F(i, j)    += dNdX[3 * a + j] * x[3 * a + i];
                         Fdot(i, j) += dNdX[3 * a + j] * v[3 * a + i];
                     }
@@ -301,63 +299,49 @@ protected:
             EXPECT_EQ(viscousTangent[k], tangent[k]) << "entry " << k / n << ", " << k % n;
     }
 
-    // The viscous forces of the uncondensed kernel at the unknowns x, the residual less its value at
-    // rest, are the gradient of the dissipation pseudo-potential in the velocities of the kernel's
-    // nodes. The constraint rows do not see them. Internal unknowns have no rate.
-    template <class InnerKernel>
-    void ViscousForcesAreDissipationGradient(const TFloat *x) {
-        constexpr int innerCoords = 3 * InnerKernel::numNodes, innerN = InnerKernel::numUnknowns;
-        const TFloat eta = 0.7;
-        const InnerKernel kernel(geometry_, bases_.data(), *law_, Everywhere(noTension_).data(), 0.0, eta, 0.0);
-        const bool noBoundaryConditions[innerCoords] = {};
-        const TFloat rest[innerCoords] = {};
-        TFloat v[innerCoords] = {};
-        const Velocities straining = StrainingVelocities();
-        std::copy(straining.begin(), straining.end(), v);
-        TFloat r[innerN], elastic[innerN];
-        ASSERT_EQ(kernel.Residual(x, v, noBoundaryConditions, r), CBStatus::SUCCESS);
-        ASSERT_EQ(kernel.Residual(x, rest, noBoundaryConditions, elastic), CBStatus::SUCCESS);
+    // The viscous forces, the residual less its value at rest, are the gradient of the dissipation
+    // pseudo-potential in the nodal velocities. The constraint rows do not see them.
+    void ViscousForcesAreDissipationGradient() {
+        const TFloat eta    = 0.7;
+        const Kernel kernel = MakeKernel(noTension_, eta);
+        const Unknowns x    = CurrentUnknowns();
+        Velocities v        = StrainingVelocities();
+        TFloat r[n], elastic[n];
+        ASSERT_EQ(kernel.Residual(x.data(), v.data(), free_, r), CBStatus::SUCCESS);
+        ASSERT_EQ(kernel.Residual(x.data(), rest_.data(), free_, elastic), CBStatus::SUCCESS);
 
         TFloat largest = 0;
         const TFloat h = 1e-6;
-        for (int j = 0; j < innerCoords; j++) {
+        for (int j = 0; j < numCoords; j++) {
             const TFloat vj = v[j];
             v[j]               = vj + h;
-            const TFloat plus  = Dissipation(x, v, eta);
+            const TFloat plus  = Dissipation(x.data(), v.data(), eta);
             v[j]               = vj - h;
-            const TFloat minus = Dissipation(x, v, eta);
+            const TFloat minus = Dissipation(x.data(), v.data(), eta);
             v[j]               = vj;
             largest            = std::max(largest, std::abs(r[j] - elastic[j]));
             EXPECT_NEAR(r[j] - elastic[j], (plus - minus) / (2 * h), 1e-8) << "unknown " << j;
         }
         ASSERT_GT(largest, 1e-2) << "the velocity must strain the element for this test to detect anything";
-        for (int j = innerCoords; j < innerN; j++)
+        for (int j = numCoords; j < n; j++)
             EXPECT_EQ(r[j], elastic[j]) << "unknown " << j;
     }
 
-    // v = w x (x - c) + b, a rotation about c plus a translation, leaves every length unchanged. It
-    // rotates internal unknowns, displacement amplitudes such as the MINI bubble, without translating
-    // them, so the uncondensed kernel at the unknowns x is tested. The condensed MINI kernel gives the
-    // bubble no rate, so a rigid velocity of the vertices alone leaves it a viscous force of the order
-    // of the bubble.
-    template <class InnerKernel>
-    void RigidBodyVelocityGivesNoViscousForce(const TFloat *x) {
-        constexpr int innerCoords = 3 * InnerKernel::numNodes, innerN = InnerKernel::numUnknowns;
-        const InnerKernel kernel(geometry_, bases_.data(), *law_, Everywhere(noTension_).data(), 0.0, 0.7, 0.0);
-        const bool noBoundaryConditions[innerCoords] = {};
-        const TFloat rest[innerCoords] = {};
+    // v = w x (x - c) + b, a rotation about c plus a translation, leaves every length unchanged.
+    void RigidBodyVelocityGivesNoViscousForce() {
+        const Kernel kernel = MakeKernel(noTension_, 0.7);
+        const Unknowns x    = CurrentUnknowns();
         const Vector3<TFloat> w(0.4, -0.7, 0.3), c(0.2, 0.1, -0.3), b(0.5, 0.2, -0.1);
-        TFloat v[innerCoords];
-        for (int a = 0; a < InnerKernel::numNodes; a++) {
-            const Vector3<TFloat> xa = a < Kernel::numNodes ? Vector3<TFloat>(&x[3 * a]) - c : Vector3<TFloat>(&x[3 * a]);
-            const Vector3<TFloat> va = CrossProduct(w, xa) + (a < Kernel::numNodes ? b : Vector3<TFloat>());
+        Velocities v;
+        for (int a = 0; a < Kernel::numNodes; a++) {
+            const Vector3<TFloat> va = CrossProduct(w, Vector3<TFloat>(&x[3 * a]) - c) + b;
             for (int i = 0; i < 3; i++)
                 v[3 * a + i] = va(i);
         }
-        TFloat r[innerN], elastic[innerN];
-        ASSERT_EQ(kernel.Residual(x, v, noBoundaryConditions, r), CBStatus::SUCCESS);
-        ASSERT_EQ(kernel.Residual(x, rest, noBoundaryConditions, elastic), CBStatus::SUCCESS);
-        for (int j = 0; j < innerN; j++)
+        TFloat r[n], elastic[n];
+        ASSERT_EQ(kernel.Residual(x.data(), v.data(), free_, r), CBStatus::SUCCESS);
+        ASSERT_EQ(kernel.Residual(x.data(), rest_.data(), free_, elastic), CBStatus::SUCCESS);
+        for (int j = 0; j < n; j++)
             EXPECT_NEAR(r[j], elastic[j], 1e-12) << "unknown " << j;
     }
 
@@ -443,13 +427,14 @@ TEST_P(ElementKernelT10, ZeroVelocityLeavesForcesAndTangentUnchanged) { ZeroVelo
 TEST_P(ElementKernelP2P1, ZeroVelocityLeavesForcesAndTangentUnchanged) { ZeroVelocityLeavesForcesAndTangentUnchanged(); }
 TEST_P(ElementKernelMini, ZeroVelocityLeavesForcesAndTangentUnchanged) { ZeroVelocityLeavesForcesAndTangentUnchanged(); }
 
-TEST_P(ElementKernelT4, ViscousForcesAreDissipationGradient) { ViscousForcesAreDissipationGradient<Kernel>(CurrentUnknowns().data()); }
-TEST_P(ElementKernelT10, ViscousForcesAreDissipationGradient) { ViscousForcesAreDissipationGradient<Kernel>(CurrentUnknowns().data()); }
-TEST_P(ElementKernelP2P1, ViscousForcesAreDissipationGradient) { ViscousForcesAreDissipationGradient<Kernel>(CurrentUnknowns().data()); }
+TEST_P(ElementKernelT4, ViscousForcesAreDissipationGradient) { ViscousForcesAreDissipationGradient(); }
+TEST_P(ElementKernelT10, ViscousForcesAreDissipationGradient) { ViscousForcesAreDissipationGradient(); }
+TEST_P(ElementKernelP2P1, ViscousForcesAreDissipationGradient) { ViscousForcesAreDissipationGradient(); }
 
-TEST_P(ElementKernelT4, RigidBodyVelocityGivesNoViscousForce) { RigidBodyVelocityGivesNoViscousForce<Kernel>(CurrentUnknowns().data()); }
-TEST_P(ElementKernelT10, RigidBodyVelocityGivesNoViscousForce) { RigidBodyVelocityGivesNoViscousForce<Kernel>(CurrentUnknowns().data()); }
-TEST_P(ElementKernelP2P1, RigidBodyVelocityGivesNoViscousForce) { RigidBodyVelocityGivesNoViscousForce<Kernel>(CurrentUnknowns().data()); }
+TEST_P(ElementKernelT4, RigidBodyVelocityGivesNoViscousForce) { RigidBodyVelocityGivesNoViscousForce(); }
+TEST_P(ElementKernelT10, RigidBodyVelocityGivesNoViscousForce) { RigidBodyVelocityGivesNoViscousForce(); }
+TEST_P(ElementKernelP2P1, RigidBodyVelocityGivesNoViscousForce) { RigidBodyVelocityGivesNoViscousForce(); }
+TEST_P(ElementKernelMini, RigidBodyVelocityGivesNoViscousForce) { RigidBodyVelocityGivesNoViscousForce(); }
 
 TEST_P(ElementKernelT4, TangentColumnIncludesVelocityTerm) { TangentColumnIncludesVelocityTerm(); }
 TEST_P(ElementKernelT10, TangentColumnIncludesVelocityTerm) { TangentColumnIncludesVelocityTerm(); }
@@ -472,17 +457,28 @@ TEST_P(ElementKernelMini, EachPointEvaluatesItsOwnTensionModel) {
     EachPointEvaluatesItsOwnTensionModel<MiniKernel>(y.data());
 }
 
-// The uncondensed kernel at the state the condensed kernel solves for, where the bubble does not vanish.
-TEST_P(ElementKernelMini, ViscousForcesAreDissipationGradient) {
-    std::array<TFloat, MiniKernel::numUnknowns> y, r;
-    ASSERT_EQ(MakeKernel(noTension_).SolveInternal(CurrentUnknowns().data(), rest_.data(), y.data(), r.data()), CBStatus::SUCCESS);
-    ViscousForcesAreDissipationGradient<MiniKernel>(y.data());
-}
+// MINI takes its viscous stress from the vertex field alone, so its viscous forces are T4's on the
+// same vertices, and the bubble, which they do not reach, solves as at rest.
+TEST_P(ElementKernelMini, ViscousForcesAreT4s) {
+    const auto t4Geometry = CalcReferenceGeometry<CBLinearTetBasis>(X_.data(), quadratureRule1);
+    const CBElementKernel<CBLinearTetBasis, CBNoPressure> t4(t4Geometry, bases_.data(), *law_, Everywhere(noTension_).data(), 0.0, 0.7, 0.0);
+    const Kernel kernel = MakeKernel(noTension_, 0.7);
+    const Unknowns x    = CurrentUnknowns();
+    const Velocities v  = StrainingVelocities();
+    TFloat r[n], elastic[n], t4Viscous[numCoords], t4Elastic[numCoords];
+    ASSERT_EQ(kernel.Residual(x.data(), v.data(), free_, r), CBStatus::SUCCESS);
+    ASSERT_EQ(kernel.Residual(x.data(), rest_.data(), free_, elastic), CBStatus::SUCCESS);
+    ASSERT_EQ(t4.Residual(x.data(), v.data(), free_, t4Viscous), CBStatus::SUCCESS);
+    ASSERT_EQ(t4.Residual(x.data(), rest_.data(), free_, t4Elastic), CBStatus::SUCCESS);
 
-TEST_P(ElementKernelMini, RigidBodyVelocityGivesNoViscousForce) {
-    std::array<TFloat, MiniKernel::numUnknowns> y, r;
-    ASSERT_EQ(MakeKernel(noTension_).SolveInternal(CurrentUnknowns().data(), rest_.data(), y.data(), r.data()), CBStatus::SUCCESS);
-    RigidBodyVelocityGivesNoViscousForce<MiniKernel>(y.data());
+    TFloat largest = 0;
+    for (int j = 0; j < numCoords; j++) {
+        largest = std::max(largest, std::abs(r[j] - elastic[j]));
+        EXPECT_NEAR(r[j] - elastic[j], t4Viscous[j] - t4Elastic[j], 1e-12) << "unknown " << j;
+    }
+    ASSERT_GT(largest, 1e-2) << "the velocity must strain the element for this test to detect anything";
+    for (int j = numCoords; j < n; j++)
+        EXPECT_EQ(r[j], elastic[j]) << "unknown " << j;
 }
 
 // The energy is stationary in the bubble at the state the condensed kernel solves for. The pressures
@@ -551,6 +547,54 @@ TEST_P(MiniKernelAtHardSwitch, LocalSolveConverges) {
 }
 
 INSTANTIATE_TEST_SUITE_P(Rules, MiniKernelAtHardSwitch, testing::Values(4, 14));
+
+// Status of the condensed MINI residual for Holzapfel's law with the parameters of the Arostica
+// benchmark, on a 1.5 mm element under the vertex positions F X and velocities L F X, with the vertex
+// pressures p. The switch is hard (k = 0): the benchmark's smooth switch makes the energy non-convex
+// in mild compression, where the local solve can meet a fold.
+CBStatus ArosticaMiniResidual(TFloat eta, const Matrix3<TFloat> &F, const Matrix3<TFloat> &L,
+                              const std::array<TFloat, 4> &p) {
+    ParameterMap parameters;
+    for (const auto &[key, value] : {std::pair<std::string, double>{"a", 59}, {"b", 8.023}, {"af", 18472},
+                                     {"bf", 16.026}, {"as", 2481}, {"bs", 11.12}, {"afs", 216},
+                                     {"bfs", 11.436}, {"k", 0}, {"kappa", 1e6}})
+        parameters.Set("Materials.Mat_1.Holzapfel." + key, value);
+    CBConstitutiveModelHolzapfel law;
+    law.Init(&parameters, 1);
+
+    const Coords unit = ReferenceCoords();
+    std::array<TFloat, 3 * CBLinearTetBasis::numNodes> X;
+    for (int k = 0; k < 3 * CBLinearTetBasis::numNodes; k++)
+        X[k] = 1.5e-3 * unit[k];
+    const auto geometry = CalcReferenceGeometry<CBMiniBasis>(X.data(), quadratureRule14);
+    std::array<Matrix3<TFloat>, CBQuadratureRule::maxPoints> bases;
+    bases.fill(Matrix3<TFloat>::Identity());
+    CBNoTension noTension;
+    const CBCondensedKernel<MiniKernel, 3> kernel(geometry, bases.data(), law, Everywhere(noTension).data(), 0.0, eta, 0.0);
+
+    std::array<TFloat, decltype(kernel)::numUnknowns> x;
+    TFloat v[3 * CBLinearTetBasis::numNodes];
+    for (int a = 0; a < 4; a++) {
+        const Vector3<TFloat> xa = F * Vector3<TFloat>(&X[3 * a]), va = L * xa;
+        for (int i = 0; i < 3; i++) {
+            x[3 * a + i] = xa(i);
+            v[3 * a + i] = va(i);
+        }
+        x[3 * CBLinearTetBasis::numNodes + a] = p[a];
+    }
+    const bool free[3 * CBLinearTetBasis::numNodes] = {};
+    TFloat r[decltype(kernel)::numUnknowns];
+    return kernel.Residual(x.data(), v, free, r);
+}
+
+// eta |L| is about 600 Pa, far above the isotropic stiffness a = 59 Pa, the only one acting on the
+// bubble near rest.
+TEST(MiniLocalSolve, ConvergesWithViscosity) {
+    const Matrix3<TFloat> F(0.9972, 0.0031, 0.0180, 0.0181, 0.9899, -0.0106, 0.0018, 0.0036, 0.9806);
+    const Matrix3<TFloat> L(-0.922, -2.241, -1.118, -1.690, 2.183, 1.891, -1.852, -2.711, -2.702);
+    const std::array<TFloat, 4> p = {-401.53, -398.63, -399.44, -404.76};
+    EXPECT_EQ(ArosticaMiniResidual(100, F, L, p), CBStatus::SUCCESS);
+}
 
 // On a straight-edged element the pressure mass matrix int N_a N_b dV is V (1 + delta_ab) / 20, and
 // both rules integrate it exactly.
