@@ -72,6 +72,8 @@ inline const CBQuadratureRule quadratureRule14 = [] {
 //! the edges (1,2), (2,3), (1,3), (1,4), (2,4), (3,4).
 struct CBQuadraticTetBasis {
     static constexpr int numNodes = 10;
+    //! Number of leading nodes whose field the viscous stress is taken from.
+    static constexpr int numViscousNodes = numNodes;
     static constexpr int maxQuadraturePoints = CBQuadratureRule::maxPoints;
 
     //! Derivatives dN_a/dX_j, stored at dNdX[3a+j], at barycentric coordinates l of the element with
@@ -236,6 +238,7 @@ struct CBQuadraticTetBasis {
 //! large T4 meshes small.
 struct CBLinearTetBasis {
     static constexpr int numNodes = 4;
+    static constexpr int numViscousNodes = numNodes;
     static constexpr int maxQuadraturePoints = 1;
 
     //! As CBQuadraticTetBasis::Derivatives; the derivatives do not depend on l.
@@ -285,6 +288,9 @@ struct CBLinearTetBasis {
 //! is the affine map of the vertices alone.
 struct CBMiniBasis {
     static constexpr int numNodes = 5;
+    //! The viscous stress is taken from the vertex field alone, so that it exerts no force on the
+    //! bubble, which has no rate (ADR-0010).
+    static constexpr int numViscousNodes = 4;
     static constexpr int maxQuadraturePoints = CBQuadratureRule::maxPoints;
 
     //! As CBQuadraticTetBasis::Derivatives; only the vertices of X are read.
@@ -361,7 +367,8 @@ TFloat Stretch(const std::array<TFloat, 4> &l, const TFloat *X, const TFloat *x,
 //! deformation by the perturbed incompressibility constraint J - 1 - p/kappa = 0 (ADR-0002).
 //!
 //! Each evaluation also takes the nodal velocities, which the Kelvin-Voigt viscous stress
-//! eta Edot, Edot = sym(F^T Fdot), is evaluated from (ADR-0010).
+//! eta Edot, Edot = sym(F^T Fdot), is evaluated from (ADR-0010). F, Fdot and the first Piola stress
+//! F eta Edot are those of the basis's leading numViscousNodes nodes.
 template <class DisplacementBasis, class PressureBasis>
 class CBElementKernel {
 public:
@@ -369,6 +376,7 @@ public:
     static constexpr int numPressures = PressureBasis::numNodes;
     static constexpr int numUnknowns  = 3*numNodes + numPressures;
     static constexpr int maxPoints    = DisplacementBasis::maxQuadraturePoints;
+    static constexpr int numViscousNodes = DisplacementBasis::numViscousNodes;
 
     //! fibreBases and tensionModels hold one entry per quadrature point; the stresses of both models
     //! are taken in the basis. Each point has its own tension model, so that a stateful model
@@ -396,7 +404,7 @@ public:
         Matrix3<TFloat> S[maxPoints];
         DeformationGradients(x, F);
         if (eta_ != 0)
-            DeformationGradients(v, Fdot);
+            DeformationGradients<numViscousNodes>(v, Fdot);
         std::fill(residual + 3*numNodes, residual + numUnknowns, 0.0);
         for (int q = 0; q < geometry_.rule->numPoints; q++) {
             if constexpr (numPressures == 0) {
@@ -415,12 +423,25 @@ public:
             // Active stress is added raw, also with a pressure field. Whether a mixed formulation
             // should project it onto its deviatoric part is an open modelling question.
             S[q] += tensionModels_[q]->CalcActiveStress(F[q], time_);
-            if (eta_ != 0) {
-                const Matrix3<TFloat> FTFdot = F[q].GetTranspose() * Fdot[q];
-                S[q] += eta_ / 2 * (FTFdot + FTFdot.GetTranspose());
-            }
+            // Added to S where the viscous field is the whole field, which saves a second pass
+            // over the forces.
+            if constexpr (numViscousNodes == numNodes)
+                if (eta_ != 0)
+                    S[q] += ViscousStress(F[q], Fdot[q]);
         }
         Forces(F, S, boundaryConditions, residual);
+        if constexpr (numViscousNodes < numNodes)
+            if (eta_ != 0) {
+                Matrix3<TFloat> Fv[maxPoints];
+                Matrix3<TFloat> Sv[maxPoints];
+                DeformationGradients<numViscousNodes>(x, Fv);
+                for (int q = 0; q < geometry_.rule->numPoints; q++)
+                    Sv[q] = ViscousStress(Fv[q], Fdot[q]);
+                TFloat viscous[3*numViscousNodes];
+                Forces<numViscousNodes>(Fv, Sv, boundaryConditions, viscous);
+                for (int k = 0; k < 3*numViscousNodes; k++)
+                    residual[k] += viscous[k];
+            }
         return CBStatus::SUCCESS;
     }
 
@@ -490,15 +511,16 @@ public:
     }
 
 private:
-    //! Nodal forces f_ai = sum_q dV_q P_q^T dN_a/dX(q) of the PK2 stresses S, given in the fibre
-    //! bases, zero on the components with a boundary condition.
+    //! Nodal forces f_ai = sum_q dV_q P_q^T dN_a/dX(q) of the leading nodes of the PK2 stresses S,
+    //! given in the fibre bases, zero on the components with a boundary condition.
+    template <int nodes = numNodes>
     void Forces(const Matrix3<TFloat> *F, const Matrix3<TFloat> *S, const bool *boundaryConditions, TFloat *forces) const {
         Matrix3<TFloat> P[maxPoints];
         for (int q = 0; q < geometry_.rule->numPoints; q++)
             // First Piola-Kirchhoff stress, transposed and taken back from the fibre basis
             P[q] = basisInverseTranspose_[q] * (F[q] * S[q]).GetTranspose() * basisTranspose_[q];
 
-        for (int a = 0; a < numNodes; a++)
+        for (int a = 0; a < nodes; a++)
             for (int i = 0; i < 3; i++) {
                 TFloat f = 0;
                 for (int q = 0; q < geometry_.rule->numPoints; q++) {
@@ -554,15 +576,22 @@ private:
         return p;
     }
 
-    //! Deformation gradient at each quadrature point, in the fibre basis there. Given nodal velocities
-    //! in place of x, its rate Fdot.
+    //! Kelvin-Voigt viscous stress eta sym(F^T Fdot).
+    Matrix3<TFloat> ViscousStress(const Matrix3<TFloat> &F, const Matrix3<TFloat> &Fdot) const {
+        const Matrix3<TFloat> FTFdot = F.GetTranspose() * Fdot;
+        return eta_ / 2 * (FTFdot + FTFdot.GetTranspose());
+    }
+
+    //! Deformation gradient of the field of the leading nodes at each quadrature point, in the fibre
+    //! basis there. Given nodal velocities in place of x, its rate Fdot.
+    template <int nodes = numNodes>
     void DeformationGradients(const TFloat *x, Matrix3<TFloat> *F) const {
         for (int q = 0; q < geometry_.rule->numPoints; q++) {
             const TFloat *dNdX = &geometry_.dNdX[3*numNodes*q];
             for (int i = 0; i < 3; i++)
                 for (int j = 0; j < 3; j++) {
                     TFloat e = 0;
-                    for (int a = 0; a < numNodes; a++)
+                    for (int a = 0; a < nodes; a++)
                         e += dNdX[3*a + j] * x[3*a + i];
                     F[q](i, j) = e;
                 }
