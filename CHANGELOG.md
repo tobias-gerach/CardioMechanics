@@ -41,6 +41,7 @@
 - A cavity on 6-node faces is integrated over the curved face: its enclosed volume is the volume under the isoparametric surface instead of under a fan of flat triangles through its nodes, consistent with the pressure load, and converges at fourth instead of second order. The pressure tangent is analytic instead of finite differences. Volumes and results of `T6` cavities change.
 - `CAVITY` on the 6-node faces of a quadratic mesh keeps each face a 6-node element instead of refining it into four 3-node triangles. The other surface roles still refine.
 - The manual's `ApplyPressure` section states that `KeepMaxPressure` only decides whether the peak is held after `StopTime`; it never replaced the ramp.
+- `ContactHandling` gathers the slave surface coordinates without a vector assembly, removing one global synchronisation per residual and Jacobian evaluation, and its slave search tests the gap distance before the more expensive point-in-triangle test. Results are unchanged: a serial whole-heart `M_Valves_DH` run gives bit-identical output over 10 ms. Over 40 ms on 4 ranks the contact forces take 12 % less time, the slave search 33 % less, and the run as a whole about 1 % less.
 
 ### Deleted
 - `Solver.LU`, `Solver.NewmarkBeta.Type` and `Solver.GeneralizedAlpha.Type`. They raise an error naming `Solver.LinearSolver.Preset`; `Type` `superlu` becomes the preset `direct-superlu`.

@@ -714,23 +714,18 @@ void CBContactHandling::WriteToFile(TFloat time) {
 // ----------- Private ------------
 
 void CBContactHandling::DetermineSlaveNodes() {
-    for (auto e : slaveElements_) {
-        TInt pos[3*numNodes];
-        TFloat nodesCoords[3*numNodes];
-        
-        for (int i = 0; i < 3*numNodes; i++)
-            pos[i] = 3*numNodes* e->GetLocalIndex()+i;
-        
-        e->GetNodesCoords(nodesCoords);
-        
-        if (DCCtrl::IsParallel())
-            VecSetValues(slaveElementsNodes_, 3*numNodes, pos, nodesCoords, INSERT_VALUES);
-        else
-            VecSetValues(slaveElementsNodesSeq_, 3*numNodes, pos, nodesCoords, INSERT_VALUES);
-    }
+    // Each process owns the entries of its own slave elements, whose indices Init numbered from the start
+    // of its ownership range, so they are written in place rather than through an assembly.
+    Vec target = DCCtrl::IsParallel() ? slaveElementsNodes_ : slaveElementsNodesSeq_;
+    PetscInt from = 0;
+    VecGetOwnershipRange(target, &from, PETSC_NULLPTR);
+    TFloat *coords;
+    VecGetArray(target, &coords);
+    for (auto e : slaveElements_)
+        e->GetNodesCoords(&coords[3*numNodes*e->GetLocalIndex() - from]);
+    VecRestoreArray(target, &coords);
+    
     if (DCCtrl::IsParallel()) {
-        VecAssemblyBegin(slaveElementsNodes_);
-        VecAssemblyEnd(slaveElementsNodes_);
         VecScatterBegin(scatter_, slaveElementsNodes_, slaveElementsNodesSeq_, INSERT_VALUES, SCATTER_FORWARD);
         VecScatterEnd(scatter_, slaveElementsNodes_, slaveElementsNodesSeq_, INSERT_VALUES, SCATTER_FORWARD);
     }
@@ -741,16 +736,17 @@ bool CBContactHandling::CheckIfSlave(TFloat *slaveNodes, int slaveInd, Vector3<T
     Triangle<TFloat> slaveTriangle(&slaveNodes[3*numNodes*slaveInd]);
     Vector3<TFloat>  ip = slaveTriangle.CalcIntersectionPoint(*p, *nv);
     
-    if (slaveTriangle.IsPointWithinTriangle(ip)) {
-        // ip lies on the ray p + t*nv, so (ip-p)*nv recovers the signed distance t. Keeping the sign
-        // (rather than the magnitude) makes nv*dist equal the true gap vector ip-p, which the inverse
-        // problem needs to know on which side of the master surface the target lies.
-        dist = (ip - *p) * (*nv);
-        if (std::abs(dist) <= maxDistanceToSlave_) {
-            Vector3<TFloat> snv = slaveTriangle.GetNormalVector();
-            if (*nv * snv * normalVectorSign_ > 0)
-                return true;
-        }
+    // ip lies on the ray p + t*nv, so (ip-p)*nv recovers the signed distance t. Keeping the sign
+    // (rather than the magnitude) makes nv*dist equal the true gap vector ip-p, which the inverse
+    // problem needs to know on which side of the master surface the target lies.
+    // The distance is tested first: it rejects most slave elements of a search far more cheaply than
+    // the test whether ip lies within the triangle, and both have to hold.
+    TFloat d = (ip - *p) * (*nv);
+    if ((std::abs(d) <= maxDistanceToSlave_) && slaveTriangle.IsPointWithinTriangle(ip)) {
+        dist = d;
+        Vector3<TFloat> snv = slaveTriangle.GetNormalVector();
+        if (*nv * snv * normalVectorSign_ > 0)
+            return true;
     }
     return false;
 }
