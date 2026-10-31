@@ -432,8 +432,9 @@ void CBModel::ApplyDomainDecomposition(std::vector<std::pair<TInt, TInt>> &mappi
             reorderdNodes.at(mapping.at(i).first) = nodes_.at(i);
             reorderdNodesComponentsBoundaryConditions.at(mapping.at(i).first) = nodesComponentsBoundaryConditions_.at(i);
             
-            forwardMapping_.at(tmpMapping.at(mapping.at(i).first)) = i; // using tmpMapping to map from current indices to original to update forwardMapping
-            backwardMapping_.at(i) = tmpMapping.at(mapping.at(i).first); // and vice versa
+            // mapping maps the current index i to the new one; tmpMapping maps current indices to the original ones
+            forwardMapping_.at(tmpMapping.at(i)) = mapping.at(i).first;
+            backwardMapping_.at(mapping.at(i).first) = tmpMapping.at(i);
             
             nodesScalarData.SetData("DomainDecomposition", mapping.at(i).first, mapping.at(i).second);
             if (mapping.at(i).second > numDomains)
