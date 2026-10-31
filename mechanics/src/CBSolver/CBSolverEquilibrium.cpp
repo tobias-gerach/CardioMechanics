@@ -160,6 +160,8 @@ CBStatus CBSolverEquilibrium::CalcNodalForcesJacobian(Vec displacement, Mat jaco
     VecDestroy(&displacedNodes);
     VecDestroy(&localDisplacedNodesSeq);
     
+    Base::ReserveBoundaryConditionsDiagonal(jacobian);
+    
     t1 = MPI_Wtime();
     DCCtrl::debug << "\t Assembling ...";
     
@@ -168,7 +170,7 @@ CBStatus CBSolverEquilibrium::CalcNodalForcesJacobian(Vec displacement, Mat jaco
     
     DCCtrl::debug << " done [" << MPI_Wtime() - t1 << " s]\n";
     
-    MatAXPY(jacobian, 1, boundaryConditionsNodalForcesJacobianDiagonalComponents_, DIFFERENT_NONZERO_PATTERN);
+    MatAXPY(jacobian, 1, boundaryConditionsNodalForcesJacobianDiagonalComponents_, SUBSET_NONZERO_PATTERN);
     
     DCCtrl::debug << "Total time [" << MPI_Wtime() - t << " s]\n\n";
     
@@ -296,8 +298,7 @@ CBStatus CBSolverEquilibrium::SolverStep(PetscScalar time, bool forceJacobianAnd
     for (auto &p : Base::plugins_)
         p->Apply(time);
     
-    SNESDestroy(&snes_);
-    InitPETScSolver();
+    Base::RenewJacobianIfPatternMayGrow(snes_);
     
     snesStep_ = 0;
     SNESSolve(snes_, PETSC_NULLPTR, displacement_);

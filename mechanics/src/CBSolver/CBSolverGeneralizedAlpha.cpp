@@ -560,6 +560,8 @@ CBStatus CBSolverGeneralizedAlpha::CalcNodalForcesJacobian(Vec unknowns, Mat jac
                                            massMatrix_);
     DCCtrl::debug << " done [" << MPI_Wtime() - t1 << " s]" << std::endl;
     
+    Base::ReserveBoundaryConditionsDiagonal(jacobian);
+    
     t1 = MPI_Wtime();
     DCCtrl::debug << "Assembling ...";
     MatAssemblyBegin(jacobian, MAT_FINAL_ASSEMBLY);
@@ -570,7 +572,7 @@ CBStatus CBSolverGeneralizedAlpha::CalcNodalForcesJacobian(Vec unknowns, Mat jac
     // which depend on the unknowns d_n+1 and p_n+1 with factor (1 - alphaF)
     MatScale(jacobian, 1 - alphaF_);
     
-    MatAXPY(jacobian, 1, boundaryConditionsNodalForcesJacobianDiagonalComponents_, DIFFERENT_NONZERO_PATTERN);
+    MatAXPY(jacobian, 1, boundaryConditionsNodalForcesJacobianDiagonalComponents_, SUBSET_NONZERO_PATTERN);
     MatSetLocalToGlobalMapping(jacobian, Base::nodesIndicesMapping_, Base::nodesIndicesMapping_);
     
     if (localDisplacedNodesSeq)
@@ -778,8 +780,7 @@ CBStatus CBSolverGeneralizedAlpha::SolverStep(PetscScalar time, bool forceJacobi
     if (updateJacobian_ || (time < prevTime_) || forceJacobianAndDampingRecalculation) {
         DCCtrl::debug << "Calculating new Jacobian ...";
         snesStep_ = 0;
-        SNESDestroy(&snes_);
-        InitPETScSolver();
+        Base::RefreshLaggedJacobian(snes_);
         DCCtrl::debug << "done" << std::endl;
         updateJacobian_ = false;
         newJacobian     = true;

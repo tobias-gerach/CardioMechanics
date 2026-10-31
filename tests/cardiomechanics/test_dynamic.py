@@ -196,3 +196,35 @@ def test_generalized_alpha_jacobian_fits_its_preallocation(genalpha_vtu_dir, gen
     than the rest of the build together, so PETSc's default for a preallocated matrix refuses it."""
     for vtu_dir in (genalpha_vtu_dir, genalpha_lumped_vtu_dir):
         assert_no_petsc_error((vtu_dir.parents[1] / "run.log").read_text())
+
+
+def _log_view_count(log_view, event):
+    """The number of calls of a PETSc event in a -log_view report, 0 if it never ran."""
+    for line in log_view.splitlines():
+        fields = line.split()
+        if fields and fields[0] == event:
+            return int(fields[1])
+    return 0
+
+
+@pytest.mark.mpi
+@pytest.mark.parametrize("settings", [SETTINGS, GENALPHA_SETTINGS], ids=["newmark", "genalpha"])
+def test_jacobian_refresh_reuses_the_symbolic_factorisation(binary, cm_env, tmp_path, settings):
+    """Without contact the nonzero pattern of the Jacobian is that of the mesh for the whole run,
+    so the direct solver orders and factorises it symbolically once and only refactorises it
+    numerically at every later refresh. The first 10 ms of the ellipsoid refresh the Jacobian
+    four times by themselves, as their Newton solves slow down."""
+    _require_mpi()
+    wd = _stage(tmp_path, settings)
+    staged = wd / settings.name
+    xml = staged.read_text()
+    stop = "<StopTime>0.2</StopTime>\n    <TimeStep>1e-3</TimeStep>"
+    assert stop in xml
+    staged.write_text(xml.replace(stop, "<StopTime>0.01</StopTime>\n    <TimeStep>1e-3</TimeStep>"))
+    env = dict(cm_env, PETSC_OPTIONS="-log_view :log_view.txt")
+    proc = _run(binary, env, wd, staged, np=2, timeout=600)
+    assert_no_petsc_error(proc.stdout + proc.stderr)
+    log_view = (wd / "log_view.txt").read_text()
+    numeric = _log_view_count(log_view, "MatLUFactorNum")
+    assert numeric > 1, f"the run refreshed the Jacobian {numeric} times, the test needs at least 2"
+    assert _log_view_count(log_view, "MatLUFactorSym") == 1

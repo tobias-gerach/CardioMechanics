@@ -185,6 +185,14 @@ protected:
     virtual void InitLoadedState();
     void         UpdateGhostNodesAndLinkToAdapter();
     void         CreateNodesJacobianAndLinkToAdapter();
+    /// Hands snes a new Jacobian matrix where the one it has cannot keep its nonzero pattern. Otherwise the solve
+    /// keeps the matrix, and the preconditioner repeats only the numerical factorisation of it.
+    void         RenewJacobianIfPatternMayGrow(SNES snes);
+    /// Makes snes compute one Jacobian and one preconditioner at its next solve, and lag both after that.
+    void         RefreshLaggedJacobian(SNES snes);
+    /// Inserts the nonzeros of the boundary-condition diagonal into jacobian as zeros, ahead of its final
+    /// assembly, so that the diagonal can be added to the assembled matrix without changing its pattern.
+    void         ReserveBoundaryConditionsDiagonal(Mat jacobian);
     /// Forgets what the solver carries from one step into the next: the pressure field and whatever a
     /// solver derives the next step's initial guess from.
     virtual void ResetStepHistory();

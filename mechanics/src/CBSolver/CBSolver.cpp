@@ -13,6 +13,7 @@
 
 #include "CBSolver.h"
 #include "CBSolverPluginFactory.h"
+#include "CBContactHandling.h"
 
 #include "CBFileManager.h"
 #include "CBElementSurfaceT6.h"
@@ -1858,6 +1859,62 @@ void CBSolver::CreateNodesJacobianAndLinkToAdapter() {
     adapter_->LinkNodalForcesJacobian(nodalForcesJacobian_);
 }
 
+void CBSolver::RenewJacobianIfPatternMayGrow(SNES snes) {
+    // The final assembly compresses away the preallocation the matrix does not use, so its pattern cannot grow
+    // afterwards. Contact couples whichever nodes its search pairs, so it needs the full preallocation at every
+    // Jacobian. A matrix that is not assembled yet still holds the entries of the set-up, which InitNodalForcesJacobian
+    // and InitPlugins put in, or has just been created by CreateNodesJacobianAndLinkToAdapter. A new matrix starts
+    // a new pattern, so the preconditioner set-up after it repeats the symbolic factorisation as well.
+    PetscBool assembled = PETSC_FALSE;
+    MatAssembled(nodalForcesJacobian_, &assembled);
+    bool hasContact = std::any_of(plugins_.begin(), plugins_.end(), [](const std::unique_ptr<CBSolverPlugin> &p) {
+        return dynamic_cast<CBContactHandling *>(p.get()) != nullptr;
+    });
+    if (assembled && !hasContact)
+        return;
+    CreateNodesJacobianAndLinkToAdapter();
+    // A null callback keeps the one the solver set.
+    SNESSetJacobian(snes, nodalForcesJacobian_, nodalForcesJacobian_, nullptr, nullptr);
+    // The solve hands the new matrix to the preconditioner only after the Jacobian callback, and AttachRigidBodyModes
+    // sets the preconditioner up inside it.
+    KSP ksp;
+    SNESGetKSP(snes, &ksp);
+    KSPSetOperators(ksp, nodalForcesJacobian_, nodalForcesJacobian_);
+}
+
+void CBSolver::RefreshLaggedJacobian(SNES snes) {
+    RenewJacobianIfPatternMayGrow(snes);
+    // -2 computes them at the next chance and never again until the lags are set anew; once used it reads -1. A
+    // positive lag comes from -mech_snes_lag_*, which InitLinearSolver applied over the -2 of the solver, and stays.
+    PetscInt lag;
+    SNESGetLagJacobian(snes, &lag);
+    if (lag < 0)
+        SNESSetLagJacobian(snes, -2);
+    SNESGetLagPreconditioner(snes, &lag);
+    if (lag < 0)
+        SNESSetLagPreconditioner(snes, -2);
+    // The lag of -2 releases the preconditioner only once the Jacobian callback has returned. AttachRigidBodyModes
+    // sets the preconditioner up inside the callback, which would otherwise keep the one of the last refresh.
+    KSP ksp;
+    SNESGetKSP(snes, &ksp);
+    KSPSetReusePreconditioner(ksp, PETSC_FALSE);
+}
+
+void CBSolver::ReserveBoundaryConditionsDiagonal(Mat jacobian) {
+    // The elements leave clamped components out, and without a mass matrix nothing else puts them in.
+    PetscInt from, to;
+    MatGetOwnershipRange(boundaryConditionsNodalForcesJacobianDiagonalComponents_, &from, &to);
+    std::vector<PetscScalar> zeros;
+    for (PetscInt row = from; row < to; row++) {
+        PetscInt           numCols;
+        const PetscInt    *cols;
+        MatGetRow(boundaryConditionsNodalForcesJacobianDiagonalComponents_, row, &numCols, &cols, nullptr);
+        zeros.assign(numCols, 0);
+        MatSetValues(jacobian, 1, &row, numCols, cols, zeros.data(), ADD_VALUES);
+        MatRestoreRow(boundaryConditionsNodalForcesJacobianDiagonalComponents_, row, &numCols, &cols, nullptr);
+    }
+}
+
 CBStatus CBSolver::PrepareSimulation() {
     status_ = CBStatus::PREPARING_SIMULATION;
     auto p = plugins_.begin();
@@ -1873,8 +1930,6 @@ CBStatus CBSolver::PrepareSimulation() {
     while (initializePlugins) {
         DCCtrl::verbose << "Initialization Step " << initStep << " [time step: " << timing_.GetTimeStep() <<"]\n";
         CBStatus rc = CBStatus::NOTHING_DONE;
-        
-        CreateNodesJacobianAndLinkToAdapter(); // Is this needed by the plugins? [lb451]
         
         while (p != plugins_.end()) {
             if ((*p)->GetStatus() == CBStatus::WAITING)
@@ -1964,8 +2019,6 @@ void CBSolver::Run() {
         
         bool repeat = true;
         while (repeat) { // this loop iterates until one timestep could be computed successfully
-            CreateNodesJacobianAndLinkToAdapter();
-            
             // the variable 'time' contains always the last successful (!) timestep
             // the variable 't' contains the next guessed time where the problem will be tried to be solved
             

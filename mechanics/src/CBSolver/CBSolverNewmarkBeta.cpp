@@ -597,27 +597,32 @@ CBStatus CBSolverNewmarkBeta::CalcNodalForcesJacobian(Vec displacement, Mat jaco
     }
     
     t1 = MPI_Wtime();
+    
+    DCCtrl::debug << "Damping matrix ... ";
+    
+    // Mass and damping couple clamped components, which the elements leave out, so they have to go in before the
+    // final assembly compresses away the free slots of the preallocation.
+    if ((globalRayleighAlpha_ != 0) || (globalRayleighBeta_ != 0)) {
+        // A += gamma/(dt*beta) * C
+        Base::adapter_->AddToDisplacementBlock(jacobian, gamma_ / (beta_*timing_.GetTimeStep()), dampingMatrix_);
+    }
+    
+    // A += 1/(dt^2*beta) * M
+    Base::adapter_->AddToDisplacementBlock(jacobian, 1 / (beta_*timing_.GetTimeStep()*timing_.GetTimeStep()),
+                                           massMatrix_);
+    
+    DCCtrl::debug << " done [" << MPI_Wtime() - t1 << " s]" << std::endl;
+    
+    Base::ReserveBoundaryConditionsDiagonal(jacobian);
+    
+    t1 = MPI_Wtime();
     DCCtrl::debug << "Assembling ...";
     MatAssemblyBegin(jacobian, MAT_FINAL_ASSEMBLY);
     MatAssemblyEnd(jacobian, MAT_FINAL_ASSEMBLY);
     DCCtrl::debug << " done [" << MPI_Wtime() - t1 << " s]" << std::endl;
     
-    t1 = MPI_Wtime();
-    
-    DCCtrl::debug << "Damping matrix ... ";
-    
-    if ((globalRayleighAlpha_ != 0) || (globalRayleighBeta_ != 0)) {
-        // A += gamma/(dt*beta) * C
-        MatAXPY(jacobian, gamma_ / (beta_*timing_.GetTimeStep()), dampingMatrix_, DIFFERENT_NONZERO_PATTERN);
-    }
-    
-    // A += 1/(dt^2*beta) * M
-    MatAXPY(jacobian, 1 / (beta_*timing_.GetTimeStep()*timing_.GetTimeStep()), massMatrix_, DIFFERENT_NONZERO_PATTERN);
-    
-    MatAXPY(jacobian, 1, boundaryConditionsNodalForcesJacobianDiagonalComponents_, DIFFERENT_NONZERO_PATTERN);
+    MatAXPY(jacobian, 1, boundaryConditionsNodalForcesJacobianDiagonalComponents_, SUBSET_NONZERO_PATTERN);
     MatSetLocalToGlobalMapping(jacobian, Base::nodesIndicesMapping_, Base::nodesIndicesMapping_);
-    
-    DCCtrl::debug << " done [" << MPI_Wtime() - t1 << " s]" << std::endl;
     
     if (localDisplacedNodesSeq)
         VecDestroy(&localDisplacedNodesSeq);
@@ -841,8 +846,7 @@ CBStatus CBSolverNewmarkBeta::SolverStep(PetscScalar time, bool forceJacobianAnd
     if (updateJacobian_ || (time < prevTime_) || forceJacobianAndDampingRecalculation) {
         DCCtrl::debug << "Calculating new Jacobian ...";
         snesStep_ = 0;
-        SNESDestroy(&snes_);
-        InitPETScSolver();
+        Base::RefreshLaggedJacobian(snes_);
         DCCtrl::debug << "done" << std::endl;
         updateJacobian_ = false;
         newJacobian     = true;

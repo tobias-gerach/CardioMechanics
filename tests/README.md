@@ -25,7 +25,10 @@ Coverage:
   volume has to relax with time constant `Beta`; checks that the
   `GeneralizedAlpha` Jacobian fits its preallocation under consistent and lumped
   mass; and, serially and not slow, that a missing or out-of-range `RhoInf` and
-  a damping `Type` other than `Rayleigh` are refused.
+  a damping `Type` other than `Rayleigh` are refused. At `mpirun -np 2` and not
+  slow (about 5 s each), the first 10 ms of the ellipsoid under both dynamic
+  solvers, run with `-log_view`, have to refresh their Jacobian more than once
+  and factorise it symbolically only once.
 - **CardioMechanics free vibration** — a cantilever ringing freely after a
   pressure pulse, T10 under `NewmarkBeta` and T10 and P2P1 under
   `GeneralizedAlpha` at five `RhoInf`: the period and logarithmic decrement of
