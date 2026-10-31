@@ -448,7 +448,10 @@ void CBCirculation::Apply(PetscScalar time) {
         } else {
             estPressure_ = preloadingPressure2_;
             pressure_[0] = estPressure_;
-            lastPreloadingStep2_ = true;
+            // Plugins that are still initialising (contact) move the geometry, so the initial cavity
+            // volumes are taken, and the coupling starts, only once the preparation pass is over.
+            if (Base::adapter_->GetSolver()->GetStatus() != CBStatus::PREPARING_SIMULATION)
+                lastPreloadingStep2_ = true;
             str1_ << "Preloading Phase 2: Last step";
         }
     }
