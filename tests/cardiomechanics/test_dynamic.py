@@ -207,6 +207,24 @@ def _log_view_count(log_view, event):
     return 0
 
 
+def _log_view_of_short_run(binary, cm_env, tmp_path, settings, stop_time, export_step=1e-2):
+    """The -log_view report of the first stop_time seconds of the ellipsoid on 2 ranks."""
+    _require_mpi()
+    wd = _stage(tmp_path, settings)
+    staged = wd / settings.name
+    xml = staged.read_text()
+    stop = "<StopTime>0.2</StopTime>\n    <TimeStep>1e-3</TimeStep>"
+    export = "<Prefix>Results/dynamic</Prefix>\n    <TimeStep>0.01</TimeStep>"
+    assert stop in xml and export in xml
+    xml = xml.replace(stop, f"<StopTime>{stop_time}</StopTime>\n    <TimeStep>1e-3</TimeStep>")
+    xml = xml.replace(export, f"<Prefix>Results/dynamic</Prefix>\n    <TimeStep>{export_step}</TimeStep>")
+    staged.write_text(xml)
+    env = dict(cm_env, PETSC_OPTIONS="-log_view :log_view.txt")
+    proc = _run(binary, env, wd, staged, np=2, timeout=600)
+    assert_no_petsc_error(proc.stdout + proc.stderr)
+    return (wd / "log_view.txt").read_text()
+
+
 @pytest.mark.mpi
 @pytest.mark.parametrize("settings", [SETTINGS, GENALPHA_SETTINGS], ids=["newmark", "genalpha"])
 def test_jacobian_refresh_reuses_the_symbolic_factorisation(binary, cm_env, tmp_path, settings):
@@ -214,17 +232,21 @@ def test_jacobian_refresh_reuses_the_symbolic_factorisation(binary, cm_env, tmp_
     so the direct solver orders and factorises it symbolically once and only refactorises it
     numerically at every later refresh. The first 10 ms of the ellipsoid refresh the Jacobian
     four times by themselves, as their Newton solves slow down."""
-    _require_mpi()
-    wd = _stage(tmp_path, settings)
-    staged = wd / settings.name
-    xml = staged.read_text()
-    stop = "<StopTime>0.2</StopTime>\n    <TimeStep>1e-3</TimeStep>"
-    assert stop in xml
-    staged.write_text(xml.replace(stop, "<StopTime>0.01</StopTime>\n    <TimeStep>1e-3</TimeStep>"))
-    env = dict(cm_env, PETSC_OPTIONS="-log_view :log_view.txt")
-    proc = _run(binary, env, wd, staged, np=2, timeout=600)
-    assert_no_petsc_error(proc.stdout + proc.stderr)
-    log_view = (wd / "log_view.txt").read_text()
+    log_view = _log_view_of_short_run(binary, cm_env, tmp_path, settings, stop_time=0.01)
     numeric = _log_view_count(log_view, "MatLUFactorNum")
     assert numeric > 1, f"the run refreshed the Jacobian {numeric} times, the test needs at least 2"
     assert _log_view_count(log_view, "MatLUFactorSym") == 1
+
+
+@pytest.mark.mpi
+def test_residual_assembly_reuses_its_off_process_pattern(binary, cm_env, tmp_path):
+    """Without contact the entries the residual sends to other ranks are fixed by the partition,
+    so its two vectors find their partners in a rendezvous at their first assembly only. The
+    rendezvous left are set-up and per step. The run exports its initial state only, so that the
+    output adds none."""
+    log_view = _log_view_of_short_run(binary, cm_env, tmp_path, GENALPHA_SETTINGS, stop_time=0.02,
+                                      export_step=1)
+    evaluations = _log_view_count(log_view, "SNESFunctionEval")
+    rendezvous = _log_view_count(log_view, "BuildTwoSided")
+    assert evaluations > 0
+    assert rendezvous < evaluations, f"{rendezvous} rendezvous for {evaluations} residual evaluations"

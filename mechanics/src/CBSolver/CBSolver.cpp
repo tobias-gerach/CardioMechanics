@@ -634,6 +634,13 @@ void CBSolver::InitPlugins() {
         it->Init();
         it->ApplyToNodalForcesJacobian();
     }
+    
+    // The residual is assembled at every evaluation. Contact adds to the nodal forces only, so the pressure
+    // residuals keep their pattern under contact too.
+    if (!HasContact())
+        ReuseOffProcessPattern(nodalForces_);
+    if (pressureResiduals_)
+        ReuseOffProcessPattern(pressureResiduals_);
 }
 
 Matrix3fVector CBSolver::GetDeformationTensors() {
@@ -1867,10 +1874,7 @@ void CBSolver::RenewJacobianIfPatternMayGrow(SNES snes) {
     // a new pattern, so the preconditioner set-up after it repeats the symbolic factorisation as well.
     PetscBool assembled = PETSC_FALSE;
     MatAssembled(nodalForcesJacobian_, &assembled);
-    bool hasContact = std::any_of(plugins_.begin(), plugins_.end(), [](const std::unique_ptr<CBSolverPlugin> &p) {
-        return dynamic_cast<CBContactHandling *>(p.get()) != nullptr;
-    });
-    if (assembled && !hasContact)
+    if (assembled && !HasContact())
         return;
     CreateNodesJacobianAndLinkToAdapter();
     // A null callback keeps the one the solver set.
@@ -1880,6 +1884,30 @@ void CBSolver::RenewJacobianIfPatternMayGrow(SNES snes) {
     KSP ksp;
     SNESGetKSP(snes, &ksp);
     KSPSetOperators(ksp, nodalForcesJacobian_, nodalForcesJacobian_);
+}
+
+bool CBSolver::HasContact() const {
+    return std::any_of(plugins_.begin(), plugins_.end(), [](const std::unique_ptr<CBSolverPlugin> &p) {
+        return dynamic_cast<CBContactHandling *>(p.get()) != nullptr;
+    });
+}
+
+void CBSolver::ReuseOffProcessPattern(Vec v) {
+    VecSetOption(v, VEC_SUBSET_OFF_PROC_ENTRIES, PETSC_TRUE);
+    ISLocalToGlobalMapping mapping;
+    VecGetLocalToGlobalMapping(v, &mapping);
+    PetscInt        size;
+    const PetscInt *indices;
+    ISLocalToGlobalMappingGetSize(mapping, &size);
+    ISLocalToGlobalMappingGetIndices(mapping, &indices);
+    PetscInt from, to;
+    VecGetOwnershipRange(v, &from, &to);
+    for (PetscInt i = 0; i < size; i++)
+        if (indices[i] < from || indices[i] >= to)
+            VecSetValue(v, indices[i], 0, ADD_VALUES);
+    ISLocalToGlobalMappingRestoreIndices(mapping, &indices);
+    VecAssemblyBegin(v);
+    VecAssemblyEnd(v);
 }
 
 void CBSolver::RefreshLaggedJacobian(SNES snes) {

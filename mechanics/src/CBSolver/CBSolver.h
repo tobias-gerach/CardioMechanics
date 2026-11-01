@@ -190,6 +190,15 @@ protected:
     void         RenewJacobianIfPatternMayGrow(SNES snes);
     /// Makes snes compute one Jacobian and one preconditioner at its next solve, and lag both after that.
     void         RefreshLaggedJacobian(SNES snes);
+    /// Whether a contact plugin is loaded. Contact pairs the nodes its search finds, on whichever ranks they live,
+    /// so it changes both the nonzero pattern of the Jacobian and the ranks an assembly sends to.
+    bool         HasContact() const;
+    /// Lets PETSc skip the rendezvous of every assembly of v after the next one. PETSc keeps the ranks that
+    /// assembly sends to and the number of entries for each, and a later assembly must stay within both. Zeros at
+    /// every ghost index of the local-to-global mapping of v make the next assembly send an entry for each index
+    /// any later one may set. That holds for the elements and for every plugin but contact, also for those that
+    /// start later, like a Robin boundary.
+    static void  ReuseOffProcessPattern(Vec v);
     /// Inserts the nonzeros of the boundary-condition diagonal into jacobian as zeros, ahead of its final
     /// assembly, so that the diagonal can be added to the assembled matrix without changing its pattern.
     void         ReserveBoundaryConditionsDiagonal(Mat jacobian);

@@ -297,6 +297,8 @@ void CBSolverGeneralizedAlpha::InitDampingMatrix() {
         
         if (globalRayleighBeta_ != 0) {
             MatDuplicate(Base::nodalForcesJacobian_, MAT_DO_NOT_COPY_VALUES, &elementsJacobian_);
+            // Only the elements add to it, so every assembly sends the entries of the first or fewer.
+            MatSetOption(elementsJacobian_, MAT_SUBSET_OFF_PROC_ENTRIES, PETSC_TRUE);
             AddDampingStiffness();
             
             if (globalRayleighAlpha_ != 0) {
@@ -319,6 +321,9 @@ void CBSolverGeneralizedAlpha::InitDampingMatrix() {
         // C now holds the nonzeros of every term it is built from, M and K_uu, and each update
         // refills them in place. A nonzero outside them would reallocate C, so it is an error.
         MatSetOption(dampingMatrix_, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_TRUE);
+        // The updates hold no off-process entries, so no assembly has to find the ranks to send to. Set after the
+        // copies into a new pattern above, which replace the matrix and its options.
+        MatSetOption(dampingMatrix_, MAT_SUBSET_OFF_PROC_ENTRIES, PETSC_TRUE);
     }
 }  // CBSolverGeneralizedAlpha::InitDampingMatrix
 
