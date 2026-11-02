@@ -215,6 +215,12 @@ protected:
     /// element sharing it, so on small meshes or small ranks they can exceed the columns a row has,
     /// which PETSc refuses. They are bounded here by the columns of the diagonal and off-diagonal blocks.
     static Mat   CreatePreallocatedMatrix(PetscInt numLocalRows, const PetscInt *nnz, PetscInt blockSize = 1);
+    /// PETSc log events of the Rayleigh damping update, shown by -log_view: the whole update, its element
+    /// loop, and the extraction of the displacement block. Registered at the first call.
+    struct DampingLogEvents {
+        PetscLogEvent update, elementLoop, extraction;
+    };
+    static const DampingLogEvents &DampingEvents();
     /// Creates the pressure field of mixed displacement/pressure elements and links it to the adapter.
     void         InitPressureVectors();
     /// Updates the ghost vertices of a pressure field and links it to the adapter.

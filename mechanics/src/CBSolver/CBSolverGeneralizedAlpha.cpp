@@ -248,19 +248,23 @@ void CBSolverGeneralizedAlpha::LinkIntermediateVelocity(Vec displacement) {
 }
 
 void CBSolverGeneralizedAlpha::AddDampingStiffness() {
+    PetscLogEventBegin(Base::DampingEvents().elementLoop, 0, 0, 0, 0);
     MatZeroEntries(elementsJacobian_);
     Base::adapter_->LinkNodalForcesJacobian(elementsJacobian_);
     Base::formulation_->CalcNodalForcesJacobian();
     MatAssemblyBegin(elementsJacobian_, MAT_FINAL_ASSEMBLY);
     MatAssemblyEnd(elementsJacobian_, MAT_FINAL_ASSEMBLY);
+    PetscLogEventEnd(Base::DampingEvents().elementLoop, 0, 0, 0, 0);
     
     // The displacement block, numbered by its position in the unknowns, which is the node layout.
     // The mesh fixes its pattern: the first extraction allocates the block, and the still empty C
     // with it, and every later one refills both in place.
     bool first = !displacementBlock_;
     IS   dofs  = Base::adapter_->GetDisplacementDofs();
+    PetscLogEventBegin(Base::DampingEvents().extraction, 0, 0, 0, 0);
     MatCreateSubMatrix(elementsJacobian_, dofs, dofs, first ? MAT_INITIAL_MATRIX : MAT_REUSE_MATRIX,
                        &displacementBlock_);
+    PetscLogEventEnd(Base::DampingEvents().extraction, 0, 0, 0, 0);
     MatAssemblyBegin(dampingMatrix_, MAT_FINAL_ASSEMBLY);
     MatAssemblyEnd(dampingMatrix_, MAT_FINAL_ASSEMBLY);
     MatAXPY(dampingMatrix_, 1, displacementBlock_, first ? DIFFERENT_NONZERO_PATTERN : SUBSET_NONZERO_PATTERN);
@@ -603,6 +607,7 @@ CBStatus CBSolverGeneralizedAlpha::CalcNodalForcesJacobian(Vec unknowns, Mat jac
 
 CBStatus CBSolverGeneralizedAlpha::CalcDampingMatrix() {
     if ((globalRayleighAlpha_ != 0) || (globalRayleighBeta_ != 0)) {
+        PetscLogEventBegin(Base::DampingEvents().update, 0, 0, 0, 0);
         CBStatus rc = CBStatus::FAILED;
         
         // Every term below fits the nonzeros InitDampingMatrix gave C, so C is filled in place.
@@ -627,6 +632,7 @@ CBStatus CBSolverGeneralizedAlpha::CalcDampingMatrix() {
         MatSetLocalToGlobalMapping(dampingMatrix_, NodesComponentsMapping(), NodesComponentsMapping());
         MatAssemblyBegin(dampingMatrix_, MAT_FINAL_ASSEMBLY);
         MatAssemblyEnd(dampingMatrix_, MAT_FINAL_ASSEMBLY);
+        PetscLogEventEnd(Base::DampingEvents().update, 0, 0, 0, 0);
         
         return rc;
     }

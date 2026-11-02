@@ -1886,6 +1886,19 @@ void CBSolver::RenewJacobianIfPatternMayGrow(SNES snes) {
     KSPSetOperators(ksp, nodalForcesJacobian_, nodalForcesJacobian_);
 }
 
+const CBSolver::DampingLogEvents &CBSolver::DampingEvents() {
+    static const DampingLogEvents events = [] {
+        DampingLogEvents e;
+        PetscClassId     classId;
+        PetscClassIdRegister("CBSolver", &classId);
+        PetscLogEventRegister("CBDampingUpdate", classId, &e.update);
+        PetscLogEventRegister("CBDampingElems", classId, &e.elementLoop);
+        PetscLogEventRegister("CBDampingSubMat", classId, &e.extraction);
+        return e;
+    }();
+    return events;
+}
+
 bool CBSolver::HasContact() const {
     return std::any_of(plugins_.begin(), plugins_.end(), [](const std::unique_ptr<CBSolverPlugin> &p) {
         return dynamic_cast<CBContactHandling *>(p.get()) != nullptr;

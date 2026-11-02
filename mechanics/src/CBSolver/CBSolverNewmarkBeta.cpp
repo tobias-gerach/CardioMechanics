@@ -647,18 +647,21 @@ CBStatus CBSolverNewmarkBeta::CalcNodalForcesJacobian(Vec displacement, Mat jaco
 
 CBStatus CBSolverNewmarkBeta::CalcDampingMatrix() {
     if ((globalRayleighAlpha_ != 0) || (globalRayleighBeta_ != 0)) {
+        PetscLogEventBegin(Base::DampingEvents().update, 0, 0, 0, 0);
         CBStatus rc = CBStatus::FAILED;
         
         // Every term below fits the nonzeros InitDampingMatrix gave C, so C is filled in place.
         if (globalRayleighBeta_ != 0) {
             // The elements add their stiffness to what the matrix holds, so C of the previous
             // state has to go first or it would carry over into this one.
+            PetscLogEventBegin(Base::DampingEvents().elementLoop, 0, 0, 0, 0);
             MatZeroEntries(dampingMatrix_);
             Base::adapter_->LinkNodalForcesJacobian(dampingMatrix_);
             rc = Base::formulation_->CalcNodalForcesJacobian();
             
             MatAssemblyBegin(dampingMatrix_, MAT_FINAL_ASSEMBLY);
             MatAssemblyEnd(dampingMatrix_, MAT_FINAL_ASSEMBLY);
+            PetscLogEventEnd(Base::DampingEvents().elementLoop, 0, 0, 0, 0);
             
             if (globalRayleighAlpha_ != 0) {
                 // C = rayleighAlpha * M + rayleighBeta * K
@@ -690,6 +693,7 @@ CBStatus CBSolverNewmarkBeta::CalcDampingMatrix() {
         MatSetLocalToGlobalMapping(dampingMatrix_, Base::nodesIndicesMapping_, Base::nodesIndicesMapping_);
         MatAssemblyBegin(dampingMatrix_, MAT_FINAL_ASSEMBLY);
         MatAssemblyEnd(dampingMatrix_, MAT_FINAL_ASSEMBLY);
+        PetscLogEventEnd(Base::DampingEvents().update, 0, 0, 0, 0);
         
         return rc;
     }
