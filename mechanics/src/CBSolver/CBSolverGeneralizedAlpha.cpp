@@ -248,6 +248,18 @@ void CBSolverGeneralizedAlpha::LinkIntermediateVelocity(Vec displacement) {
 }
 
 void CBSolverGeneralizedAlpha::AddDampingStiffness() {
+    if (!elementsJacobian_) {
+        // Without a pressure field the unknowns are the node components, numbered like the rows of C, so the
+        // element tangent is K_uu and the elements add it to C directly.
+        PetscLogEventBegin(Base::DampingEvents().elementLoop, 0, 0, 0, 0);
+        Base::adapter_->LinkNodalForcesJacobian(dampingMatrix_);
+        Base::formulation_->CalcNodalForcesJacobian();
+        MatAssemblyBegin(dampingMatrix_, MAT_FINAL_ASSEMBLY);
+        MatAssemblyEnd(dampingMatrix_, MAT_FINAL_ASSEMBLY);
+        PetscLogEventEnd(Base::DampingEvents().elementLoop, 0, 0, 0, 0);
+        return;
+    }
+    
     PetscLogEventBegin(Base::DampingEvents().elementLoop, 0, 0, 0, 0);
     MatZeroEntries(elementsJacobian_);
     Base::adapter_->LinkNodalForcesJacobian(elementsJacobian_);
@@ -265,8 +277,11 @@ void CBSolverGeneralizedAlpha::AddDampingStiffness() {
     MatCreateSubMatrix(elementsJacobian_, dofs, dofs, first ? MAT_INITIAL_MATRIX : MAT_REUSE_MATRIX,
                        &displacementBlock_);
     PetscLogEventEnd(Base::DampingEvents().extraction, 0, 0, 0, 0);
-    MatAssemblyBegin(dampingMatrix_, MAT_FINAL_ASSEMBLY);
-    MatAssemblyEnd(dampingMatrix_, MAT_FINAL_ASSEMBLY);
+    if (first) {
+        // A sum into a new pattern needs the empty C assembled. Later, C stays assembled from the last update.
+        MatAssemblyBegin(dampingMatrix_, MAT_FINAL_ASSEMBLY);
+        MatAssemblyEnd(dampingMatrix_, MAT_FINAL_ASSEMBLY);
+    }
     MatAXPY(dampingMatrix_, 1, displacementBlock_, first ? DIFFERENT_NONZERO_PATTERN : SUBSET_NONZERO_PATTERN);
 }
 
@@ -300,9 +315,11 @@ void CBSolverGeneralizedAlpha::InitDampingMatrix() {
         UpdateGhostNodesAndLinkToAdapter();
         
         if (globalRayleighBeta_ != 0) {
-            MatDuplicate(Base::nodalForcesJacobian_, MAT_DO_NOT_COPY_VALUES, &elementsJacobian_);
-            // Only the elements add to it, so every assembly sends the entries of the first or fewer.
-            MatSetOption(elementsJacobian_, MAT_SUBSET_OFF_PROC_ENTRIES, PETSC_TRUE);
+            if (model_->GetNumberOfPressureNodes() > 0) {
+                MatDuplicate(Base::nodalForcesJacobian_, MAT_DO_NOT_COPY_VALUES, &elementsJacobian_);
+                // Only the elements add to it, so every assembly sends the entries of the first or fewer.
+                MatSetOption(elementsJacobian_, MAT_SUBSET_OFF_PROC_ENTRIES, PETSC_TRUE);
+            }
             AddDampingStiffness();
             
             if (globalRayleighAlpha_ != 0) {
@@ -325,8 +342,9 @@ void CBSolverGeneralizedAlpha::InitDampingMatrix() {
         // C now holds the nonzeros of every term it is built from, M and K_uu, and each update
         // refills them in place. A nonzero outside them would reallocate C, so it is an error.
         MatSetOption(dampingMatrix_, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_TRUE);
-        // The updates hold no off-process entries, so no assembly has to find the ranks to send to. Set after the
-        // copies into a new pattern above, which replace the matrix and its options.
+        // Off-process entries come from the elements alone, when they add K_uu to C directly, and every update sends
+        // the same ones, so only the first update's assembly has to find the ranks to send to. Set after the copies
+        // into a new pattern above, which replace the matrix and its options.
         MatSetOption(dampingMatrix_, MAT_SUBSET_OFF_PROC_ENTRIES, PETSC_TRUE);
     }
 }  // CBSolverGeneralizedAlpha::InitDampingMatrix
@@ -629,9 +647,7 @@ CBStatus CBSolverGeneralizedAlpha::CalcDampingMatrix() {
             rc = CBStatus::SUCCESS;
         }
         
-        MatSetLocalToGlobalMapping(dampingMatrix_, NodesComponentsMapping(), NodesComponentsMapping());
-        MatAssemblyBegin(dampingMatrix_, MAT_FINAL_ASSEMBLY);
-        MatAssemblyEnd(dampingMatrix_, MAT_FINAL_ASSEMBLY);
+        // Scaling, a sum into C's own pattern and a copy within it leave C assembled.
         PetscLogEventEnd(Base::DampingEvents().update, 0, 0, 0, 0);
         
         return rc;

@@ -31,6 +31,9 @@ Coverage:
   and factorise it symbolically only once. The first 20 ms under
   `GeneralizedAlpha` (about 10 s) have to run fewer rendezvous (`BuildTwoSided`)
   than residual evaluations, as the residual reuses its off-process pattern.
+  The same 10 ms runs log the Rayleigh damping update at every step, and its
+  T4 elements, which have no pressure unknowns, add their tangent to the
+  damping matrix without extracting a displacement block.
 - **CardioMechanics free vibration** — a cantilever ringing freely after a
   pressure pulse, T10 under `NewmarkBeta` and T10 and P2P1 under
   `GeneralizedAlpha` at five `RhoInf`: the period and logarithmic decrement of

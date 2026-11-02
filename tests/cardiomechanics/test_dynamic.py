@@ -250,3 +250,16 @@ def test_residual_assembly_reuses_its_off_process_pattern(binary, cm_env, tmp_pa
     rendezvous = _log_view_count(log_view, "BuildTwoSided")
     assert evaluations > 0
     assert rendezvous < evaluations, f"{rendezvous} rendezvous for {evaluations} residual evaluations"
+
+
+@pytest.mark.mpi
+@pytest.mark.parametrize("settings", [SETTINGS, GENALPHA_SETTINGS], ids=["newmark", "genalpha"])
+def test_displacement_only_damping_update_extracts_no_block(binary, cm_env, tmp_path, settings):
+    """Rayleigh Beta rebuilds the damping matrix at every step from the element tangent. The
+    ellipsoid's T4 elements have no pressure unknowns, so the tangent is the displacement block
+    itself and goes straight into the damping matrix, with no block to extract."""
+    log_view = _log_view_of_short_run(binary, cm_env, tmp_path, settings, stop_time=0.01)
+    updates = _log_view_count(log_view, "CBDampingUpdate")
+    assert updates >= 10, f"{updates} damping updates in 10 steps"
+    assert _log_view_count(log_view, "CBDampingElems") >= updates
+    assert _log_view_count(log_view, "CBDampingSubMat") == 0

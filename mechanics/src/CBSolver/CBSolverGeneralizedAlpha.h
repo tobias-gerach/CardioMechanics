@@ -125,7 +125,7 @@ private:
     
     Mat         massMatrix_ = nullptr;
     Mat         dampingMatrix_ = nullptr;
-    Mat         elementsJacobian_ = 0; // unknown layout, the source of the damping stiffness K_uu
+    Mat         elementsJacobian_ = 0; // unknown layout, the source of K_uu; only with a pressure field
     Mat         displacementBlock_ = 0; // K_uu, kept so that each update refills its storage
     
     PetscScalar prevTime_ = INFINITY;
